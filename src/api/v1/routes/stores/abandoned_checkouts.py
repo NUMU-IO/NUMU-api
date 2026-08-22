@@ -82,6 +82,40 @@ def _to_response(c: AbandonedCheckout) -> AbandonedCheckoutResponse:
     )
 
 
+class AbandonedCheckoutSummaryResponse(BaseModel):
+    """Analytics strip on the hub's Abandoned carts page."""
+
+    open_count: int
+    open_value_cents: int
+    recovered_count: int
+    recovered_value_cents: int
+    reminders_sent: int
+    payback_pct: float
+    currency: str
+
+
+@router.get(
+    "/summary",
+    response_model=SuccessResponse[AbandonedCheckoutSummaryResponse],
+    summary="Abandoned vs recovered carts — counts, value, payback",
+    operation_id="get_abandoned_checkout_summary",
+)
+async def get_abandoned_checkout_summary(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    repo: Annotated[
+        AbandonedCheckoutRepository, Depends(get_abandoned_checkout_repository)
+    ],
+    date_from: datetime | None = Query(None),
+    date_to: datetime | None = Query(None),
+):
+    data = await repo.summary(store.id, date_from=date_from, date_to=date_to)
+    return SuccessResponse(
+        data=AbandonedCheckoutSummaryResponse(
+            **data, currency=getattr(store, "default_currency", None) or "EGP"
+        )
+    )
+
+
 @router.get(
     "/",
     response_model=SuccessResponse[AbandonedCheckoutListResponse],

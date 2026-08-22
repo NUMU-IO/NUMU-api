@@ -60,7 +60,10 @@ from src.application.dto.auth import (
     RefreshTokenDTO,
     RegisterDTO,
 )
-from src.application.services.lockout_service import AccountLockoutService
+from src.application.services.lockout_service import (
+    AccountLockoutService,
+    EmailActionThrottle,
+)
 from src.application.services.refresh_token_blacklist_service import (
     RefreshTokenBlacklistService,
 )
@@ -716,6 +719,18 @@ async def forgot_password(
     email_service: Annotated[ResendEmailService, Depends(get_email_service)],
 ):
     """Initiate password reset process."""
+    # Per-EMAIL budget (5 / hour): the per-IP limiter can't see the address,
+    # so one inbox could be flooded with reset mails from many IPs.
+    allowed, retry_after = await EmailActionThrottle(RedisCacheService()).hit(
+        "forgot_password", request.email, limit=5, window_seconds=3600
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many reset requests for this email. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     use_case = ForgotPasswordUseCase(
         user_repository=user_repo,
         token_service=token_service,

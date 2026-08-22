@@ -28,6 +28,7 @@ from src.api.dependencies import (
 from src.api.responses import SuccessResponse
 from src.application.services.notification_feed import (
     SETTINGS_KEY,
+    email_important_enabled,
     notification_channel,
     push_important_enabled,
     push_rich_details_enabled,
@@ -97,6 +98,8 @@ class NotificationPreferencesResponse(BaseModel):
     # Customer name / items / payment method in push bodies (like the
     # new-order email). Opt-out; default on.
     push_rich_details: bool
+    # Urgent alerts by email too (reaches phones without the installed PWA).
+    email_important: bool
 
 
 class NotificationPreferencesUpdate(BaseModel):
@@ -105,6 +108,7 @@ class NotificationPreferencesUpdate(BaseModel):
     push_new_order: bool | None = None
     push_important: bool | None = None
     push_rich_details: bool | None = None
+    email_important: bool | None = None
 
 
 def _to_response(m: MerchantNotificationModel) -> NotificationItemResponse:
@@ -305,6 +309,7 @@ def _prefs_from_settings(settings: dict | None) -> NotificationPreferencesRespon
         push_new_order=bool(push),
         push_important=push_important_enabled(s),
         push_rich_details=push_rich_details_enabled(s),
+        email_important=email_important_enabled(s),
     )
 
 
@@ -341,9 +346,12 @@ async def update_preferences(
         center = dict(settings.get(SETTINGS_KEY) or {})
         center["muted_categories"] = sorted(set(body.muted_categories))
         settings[SETTINGS_KEY] = center
-    if body.email_new_order is not None:
+    if body.email_new_order is not None or body.email_important is not None:
         email = dict(settings.get("email_notifications") or {})
-        email["new_order"] = body.email_new_order
+        if body.email_new_order is not None:
+            email["new_order"] = body.email_new_order
+        if body.email_important is not None:
+            email["important"] = body.email_important
         settings["email_notifications"] = email
     if (
         body.push_new_order is not None

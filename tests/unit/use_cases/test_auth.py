@@ -221,6 +221,9 @@ class TestRefreshTokenUseCase:
         self.mock_blacklist_service.mark_used = AsyncMock()
         self.mock_blacklist_service.get_rotation = AsyncMock(return_value=None)
         self.mock_blacklist_service.remember_rotation = AsyncMock()
+        self.mock_blacklist_service.is_family_revoked = AsyncMock(return_value=False)
+        self.mock_blacklist_service.revoke_family = AsyncMock()
+        self.mock_payload.family_id = "fam-1"
         self.mock_payload.tenant_id = None
         self.mock_payload.membership_id = None
         self.mock_payload.perm_version = 0
@@ -312,12 +315,28 @@ class TestRefreshTokenUseCase:
         self.mock_token_service.create_access_token.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_refresh_reuse_after_grace_is_rejected(self):
+    async def test_refresh_reuse_after_grace_is_rejected_and_revokes_family(self):
         self.mock_blacklist_service.is_used.return_value = True
         self.mock_blacklist_service.get_rotation.return_value = None
 
         with pytest.raises(InvalidTokenError):
             await self.use_case.execute(RefreshTokenDTO(refresh_token="t"))
+        self.mock_blacklist_service.revoke_family.assert_awaited_once()
+        assert self.mock_blacklist_service.revoke_family.call_args.args[0] == "fam-1"
+
+    @pytest.mark.asyncio
+    async def test_refresh_rejects_revoked_family_even_with_fresh_jti(self):
+        self.mock_blacklist_service.is_family_revoked.return_value = True
+
+        with pytest.raises(InvalidTokenError):
+            await self.use_case.execute(RefreshTokenDTO(refresh_token="t"))
+        self.mock_token_service.create_access_token.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_refresh_carries_family_id_into_new_refresh_token(self):
+        await self.use_case.execute(RefreshTokenDTO(refresh_token="t"))
+        kwargs = self.mock_token_service.create_refresh_token.call_args.kwargs
+        assert kwargs["family_id"] == "fam-1"
 
 
 class TestForgotPasswordUseCase:

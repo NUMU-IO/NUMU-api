@@ -120,3 +120,54 @@ async def prune_merchant_notifications(
 
     logger.info("notification_prune_complete", **stats)
     return stats
+
+
+HUB_URL = "https://merchant.numueg.app"
+
+
+@celery_app.task(
+    name="tasks.send_merchant_alert_email",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+)
+def send_merchant_alert_email_task(
+    self, *, to: str, title: str, body: str, link: str, is_ar: bool = True
+) -> dict[str, bool]:
+    """Urgent merchant alert (cancelled / payment failed / returned / proof
+    awaiting review / trust pause) by email — the channel that reaches
+    every phone regardless of push support."""
+    try:
+        return _run_async(_send_alert_email(to, title, body, link, is_ar))
+    except Exception as exc:
+        logger.warning("merchant_alert_email_failed", to=to, error=str(exc))
+        raise self.retry(exc=exc)
+
+
+async def _send_alert_email(
+    to: str, title: str, body: str, link: str, is_ar: bool
+) -> dict[str, bool]:
+    from html import escape
+
+    from src.core.interfaces.services.email_service import EmailMessage
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
+
+    url = f"{HUB_URL}{link}"
+    cta = "افتح لوحة التحكم" if is_ar else "Open the hub"
+    direction = "rtl" if is_ar else "ltr"
+    html = (
+        f'<div dir="{direction}" style="font-family:Arial,sans-serif;max-width:520px;'
+        f'margin:0 auto;padding:24px;color:#0c2d54">'
+        f'<h2 style="margin:0 0 8px">{escape(title)}</h2>'
+        f'<p style="margin:0 0 20px;color:#444">{escape(body)}</p>'
+        f'<a href="{escape(url)}" style="display:inline-block;padding:12px 24px;'
+        f"background:#0c2d54;color:#fff;text-decoration:none;border-radius:10px;"
+        f'font-weight:bold">{cta}</a>'
+        f'<p style="margin:24px 0 0;font-size:12px;color:#999">NUMU</p></div>'
+    )
+    await ResendEmailService().send_email(
+        EmailMessage(to=to, subject=title, html_content=html)
+    )
+    return {"sent": True}

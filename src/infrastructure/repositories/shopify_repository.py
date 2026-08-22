@@ -309,15 +309,24 @@ class RiskAssessmentRepository:
         return list(result.scalars().all())
 
     async def update_action(
-        self, assessment_id: UUID, action: str
+        self, assessment_id: UUID, action: str, *, store_id: UUID | None = None
     ) -> RiskAssessmentModel | None:
+        """Record an action on an assessment.
+
+        When ``store_id`` is given, the assessment must belong to that
+        store — an internal-key caller must never be able to act on
+        another store's row just by knowing its UUID.
+        """
         model = await self.get_by_id(assessment_id)
-        if model:
-            model.action_taken = action
-            model.action_taken_at = func.now()
-            model.action_taken_by = "shopify_app"
-            self.session.add(model)
-            await self.session.flush()
+        if model is None:
+            return None
+        if store_id is not None and str(model.store_id) != str(store_id):
+            return None
+        model.action_taken = action
+        model.action_taken_at = func.now()
+        model.action_taken_by = "shopify_app"
+        self.session.add(model)
+        await self.session.flush()
         return model
 
     async def count_high_risk(self, store_id: UUID, *, days: int = 30) -> int:

@@ -21,6 +21,7 @@ class TokenPayload:
         tenant_id: UUID | None = None,
         membership_id: UUID | None = None,
         perm_version: int = 0,
+        family_id: str | None = None,
     ) -> None:
         self.user_id = user_id
         self.email = email
@@ -32,6 +33,8 @@ class TokenPayload:
         self.tenant_id = tenant_id
         self.membership_id = membership_id
         self.perm_version = perm_version
+        # Refresh-token lineage (see RefreshTokenBlacklistService families).
+        self.family_id = family_id
 
 
 class CustomerTokenPayload:

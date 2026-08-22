@@ -123,6 +123,7 @@ class TokenService(ITokenService):
         tenant_id: UUID | None = None,
         membership_id: UUID | None = None,
         perm_version: int = 0,
+        family_id: str | None = None,
     ) -> str:
         """Create a refresh token for a user (includes jti for rotation tracking)."""
         expires_delta = timedelta(days=self.refresh_token_expire_days)
@@ -143,6 +144,9 @@ class TokenService(ITokenService):
             payload["membership_id"] = str(membership_id)
         if perm_version > 0:
             payload["perm_version"] = perm_version
+        # Token family: minted at login, carried across every rotation, so a
+        # stolen-and-replayed refresh token can revoke the whole lineage.
+        payload["family_id"] = family_id or secrets.token_hex(8)
         return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
     def create_reset_token(self, user: User) -> str:
@@ -179,6 +183,7 @@ class TokenService(ITokenService):
                 tenant_id=UUID(tenant_id_raw) if tenant_id_raw else None,
                 membership_id=UUID(membership_id_raw) if membership_id_raw else None,
                 perm_version=perm_version,
+                family_id=payload.get("family_id"),
             )
         except ExpiredSignatureError:
             raise TokenExpiredError()
