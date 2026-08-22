@@ -151,18 +151,18 @@ async def _send_step_async(flow_id: str, step_index: int) -> dict:
             return await _apply_terminal_action(session, flow_model, step_config)
 
         # Insert the step row — unique constraint on (flow_id, step_index)
-        # gives us the per-step idempotency.
+        # gives us the per-step idempotency. sent_at stays NULL until the
+        # WhatsApp send below actually succeeds.
         repo = RecoveryFlowRepository(session)
         scheduled_for = datetime.now(UTC)
         try:
-            await repo.insert_step(
+            step = await repo.insert_step(
                 RecoveryStep(
                     flow_id=flow_uuid,
                     step_index=step_index,
                     template_key=template_key,
                     channel="whatsapp",
                     scheduled_for=scheduled_for,
-                    sent_at=datetime.now(UTC),
                 ),
                 tenant_id=flow_model.tenant_id,
             )
@@ -176,23 +176,55 @@ async def _send_step_async(flow_id: str, step_index: int) -> dict:
             )
             return {"status": "already_sent"}
 
-        # TODO(spec-009): wire the actual WhatsApp messaging service here.
-        # For v1 of backend-021 we log the intended send; the production
-        # WhatsApp call lands as part of spec 009's implementation.
-        logger.info(
-            "recovery_send_step_dispatched",
-            flow_id=flow_id,
-            step_index=step_index,
-            template_key=template_key,
-            channel="whatsapp",
+        # Gather everything the send needs while the session is open, then
+        # commit BEFORE the network call: the buyer's payment URL must never
+        # reference a row a later rollback could erase.
+        send_ctx = await _prepare_send_context(session, flow_model)
+        await session.commit()
+
+    # ── Network phase (no DB session held) ─────────────────────────────
+    send_error: str | None = None
+    if send_ctx.get("error"):
+        send_error = send_ctx["error"]
+    else:
+        send_error = await _send_recovery_message(
+            send_ctx, template_key=template_key, flow_id=flow_id
         )
 
-        # Transition to the next pending state if there is one.
+    # ── Mark the step + advance the ladder ─────────────────────────────
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("SET search_path TO public"))
+        from sqlalchemy import update as sa_update
+
+        from src.infrastructure.database.models.tenant.recovery_flow import (
+            RecoveryStepModel,
+        )
+
+        if send_error is None:
+            await session.execute(
+                sa_update(RecoveryStepModel)
+                .where(RecoveryStepModel.id == step.id)
+                .values(sent_at=datetime.now(UTC))
+            )
+        else:
+            await session.execute(
+                sa_update(RecoveryStepModel)
+                .where(RecoveryStepModel.id == step.id)
+                .values(failed_reason=send_error[:255])
+            )
+            logger.warning(
+                "recovery_send_step_send_failed",
+                flow_id=flow_id,
+                step_index=step_index,
+                reason=send_error,
+            )
+
+        # Transition to the next pending state if there is one. The ladder
+        # advances even on a failed send — the step row carries the failure
+        # and the terminal fallback still fires on schedule.
         next_state_value = _STATE_AFTER_SEND_STEP.get(step_index)
         scheduled_next = False
         if next_state_value is not None:
-            from sqlalchemy import update as sa_update
-
             await session.execute(
                 sa_update(RecoveryFlowModel)
                 .where(RecoveryFlowModel.id == flow_uuid)
@@ -215,12 +247,142 @@ async def _send_step_async(flow_id: str, step_index: int) -> dict:
 
         await session.commit()
 
-        return {
-            "status": "sent",
-            "step_index": step_index,
-            "next_state": next_state_value,
-            "next_step_scheduled": scheduled_next,
-        }
+    return {
+        "status": "sent" if send_error is None else "send_failed",
+        "step_index": step_index,
+        "next_state": next_state_value,
+        "next_step_scheduled": scheduled_next,
+        **({"failed_reason": send_error} if send_error else {}),
+    }
+
+
+# Per-step promo line (one body variable in cod_recovery_offer_v1). Meta
+# rejects blank variables, so every entry is non-empty; step 1 falls back
+# to the service's DEFAULT_PROMO.
+_STEP_PROMOS: dict[str, dict[str, str]] = {
+    "recovery_step_2_reminder": {
+        "en": "Your order is still awaiting payment.",
+        "ar": "طلبك ما زال بانتظار الدفع.",
+    },
+    "recovery_step_3_deposit": {
+        "en": "Secure your order with a small online deposit.",
+        "ar": "يمكنك تأكيد طلبك بدفع مقدم بسيط أونلاين.",
+    },
+}
+
+
+async def _prepare_send_context(session, flow_model) -> dict:
+    """Resolve installation, order context and the payment link session.
+
+    Runs inside the phase-1 DB session. Returns a plain dict of scalars so
+    nothing touches the session after commit. On a missing prerequisite,
+    returns ``{"error": reason}`` — the step is marked failed but the
+    ladder still advances.
+    """
+    from sqlalchemy import select
+
+    from src.application.services.shopify_nudge_service import (
+        create_payment_link_session,
+    )
+    from src.infrastructure.database.models.tenant.risk_assessment import (
+        RiskAssessmentModel,
+    )
+    from src.infrastructure.database.models.tenant.shopify_installation import (
+        ShopifyInstallationModel,
+    )
+
+    install_row = await session.execute(
+        select(ShopifyInstallationModel).where(
+            ShopifyInstallationModel.store_id == flow_model.store_id
+        )
+    )
+    installation = install_row.scalar_one_or_none()
+    if installation is None:
+        return {"error": "no_installation"}
+
+    risk_row = await session.execute(
+        select(RiskAssessmentModel)
+        .where(
+            RiskAssessmentModel.store_id == flow_model.store_id,
+            RiskAssessmentModel.shopify_order_id == flow_model.shopify_order_id,
+        )
+        .order_by(RiskAssessmentModel.created_at.desc())
+        .limit(1)
+    )
+    assessment = risk_row.scalar_one_or_none()
+    if assessment is None:
+        return {"error": "no_risk_context"}
+
+    payment_session_id = flow_model.payment_link_session_id
+    if payment_session_id is None:
+        pls = await create_payment_link_session(
+            session,
+            store_id=flow_model.store_id,
+            shopify_order_id=flow_model.shopify_order_id,
+            amount_cents=assessment.total_cents,
+            currency=assessment.currency,
+        )
+        payment_session_id = pls.id
+        flow_model.payment_link_session_id = pls.id
+        session.add(flow_model)
+
+    return {
+        "shop_domain": installation.shopify_domain,
+        "access_token": installation.access_token_encrypted,
+        "shopify_order_id": flow_model.shopify_order_id,
+        "payment_session_id": str(payment_session_id),
+        "amount_cents": assessment.total_cents,
+        "currency": assessment.currency,
+        "order_number": assessment.order_number or "",
+        "customer_name": assessment.customer_name or "",
+    }
+
+
+async def _send_recovery_message(
+    ctx: dict, *, template_key: str, flow_id: str
+) -> str | None:
+    """Fetch the buyer's phone from Shopify and fire the WhatsApp offer.
+
+    Returns ``None`` on success, else a short failure reason for the
+    step row's ``failed_reason``.
+    """
+    from src.application.services.shopify_nudge_service import (
+        send_conversion_nudge,
+        store_display_name,
+    )
+    from src.infrastructure.external_services.shopify.admin_client import (
+        get_order_contact,
+    )
+
+    contact = await get_order_contact(
+        ctx["shop_domain"], ctx["access_token"], ctx["shopify_order_id"]
+    )
+    if not contact or not contact.get("phone"):
+        return "no_phone"
+
+    language = "ar"
+    promo = _STEP_PROMOS.get(template_key, {}).get(language)
+    result = await send_conversion_nudge(
+        phone=contact["phone"],
+        customer_name=ctx["customer_name"] or contact.get("customer_name") or "",
+        order_number=ctx["order_number"] or contact.get("order_number") or "",
+        store_name=store_display_name(ctx["shop_domain"], contact.get("shop_name")),
+        amount_cents=ctx["amount_cents"],
+        currency=ctx["currency"],
+        payment_session_id=ctx["payment_session_id"],
+        language=language,
+        promo=promo,
+    )
+    if result.sent:
+        logger.info(
+            "recovery_send_step_dispatched",
+            flow_id=flow_id,
+            template_key=template_key,
+            message_id=result.message_id,
+            channel="whatsapp",
+        )
+        return None
+    return result.error or "send_failed"
 
 
 async def _apply_terminal_action(session, flow_model, step_config) -> dict:

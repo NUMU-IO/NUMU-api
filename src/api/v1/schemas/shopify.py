@@ -88,7 +88,22 @@ class RiskOrderResponse(BaseModel):
 
 
 class RiskActionRequest(BaseModel):
-    action: str = Field(..., max_length=50)
+    # Canonical verb set — the dashboard, the admin-block extension proxy
+    # and the trust auto-approve counter (which counts "approve") all
+    # speak these three. Anything else is a 422, not a silent write.
+    action: Literal["approve", "whatsapp_confirm", "cancel"]
+
+
+class ResendVerificationRequest(BaseModel):
+    """POST /shopify/{store_id}/risk/orders/{shopify_order_id}/resend-verification."""
+
+    language: Literal["ar", "en"] | None = None
+
+
+class ResendVerificationResponse(BaseModel):
+    sent: bool
+    message_id: str | None = None
+    reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
