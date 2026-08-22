@@ -15,6 +15,9 @@ from src.infrastructure.database.models.tenant.abandoned_checkout import (
     AbandonedCheckoutModel,
 )
 
+# An order only "recovers" carts the shopper touched this recently.
+RECOVERY_ATTRIBUTION_DAYS = 30
+
 
 class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
     """SQLAlchemy implementation of the abandoned-checkout repository.
@@ -184,6 +187,57 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
         )
         return result.scalar() or 0
 
+    async def summary(
+        self,
+        store_id: UUID,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> dict:
+        """Analytics card: open vs recovered carts and their value.
+
+        ``reminders_sent`` counts carts that got at least one recovery
+        email or WhatsApp nudge (auto or manual).
+        """
+        base = select(AbandonedCheckoutModel).where(
+            AbandonedCheckoutModel.store_id == store_id
+        )
+        if date_from:
+            base = base.where(AbandonedCheckoutModel.created_at >= date_from)
+        if date_to:
+            base = base.where(AbandonedCheckoutModel.created_at <= date_to)
+        sub = self._tenant_filter(base).subquery()
+        recovered = sub.c.recovered_at.isnot(None)
+        reminded = or_(
+            sub.c.recovery_email_sent_at.isnot(None),
+            sub.c.extra_data["wa_auto_nudge_at"].astext.isnot(None),
+            sub.c.extra_data["wa_nudge_at"].astext.isnot(None),
+        )
+        query = select(
+            func.count().filter(~recovered).label("open_count"),
+            func.coalesce(func.sum(sub.c.total).filter(~recovered), 0).label(
+                "open_value"
+            ),
+            func.count().filter(recovered).label("recovered_count"),
+            func.coalesce(func.sum(sub.c.total).filter(recovered), 0).label(
+                "recovered_value"
+            ),
+            func.count().filter(reminded).label("reminders_sent"),
+        ).select_from(sub)
+        row = (await self.session.execute(query)).one()
+        open_value = int(row.open_value or 0)
+        recovered_value = int(row.recovered_value or 0)
+        total_value = open_value + recovered_value
+        return {
+            "open_count": int(row.open_count or 0),
+            "open_value_cents": open_value,
+            "recovered_count": int(row.recovered_count or 0),
+            "recovered_value_cents": recovered_value,
+            "reminders_sent": int(row.reminders_sent or 0),
+            "payback_pct": round(recovered_value * 100 / total_value, 1)
+            if total_value
+            else 0.0,
+        }
+
     async def list_by_store(
         self,
         store_id: UUID,
@@ -221,8 +275,14 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
         if date_to:
             base = base.where(AbandonedCheckoutModel.created_at <= date_to)
 
-        count_query = select(func.count()).select_from(base.subquery())
-        count_result = await self.session.execute(self._tenant_filter(count_query))
+        # Tenant filter goes on `base` BEFORE the subquery: appending it to
+        # the outer COUNT pulled abandoned_checkouts into the FROM list a
+        # second time (cartesian product), so `total` was inflated by the
+        # store's row count and the hub paginated into empty pages.
+        count_query = select(func.count()).select_from(
+            self._tenant_filter(base).subquery()
+        )
+        count_result = await self.session.execute(count_query)
         total = count_result.scalar() or 0
 
         items_query = (
@@ -309,6 +369,10 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
             if model is not None:
                 return self._to_entity(model)
 
+        # Callers may hand over `Email` / `PhoneNumber` value objects (the
+        # core Customer entity does) — asyncpg can't bind those.
+        email = getattr(email, "value", email)
+        phone = getattr(phone, "value", phone)
         if not session_fingerprint and not email and not phone:
             return None
 
@@ -319,9 +383,11 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
                 == session_fingerprint
             )
         if email:
-            clauses.append(AbandonedCheckoutModel.email == email)
+            clauses.append(
+                func.lower(AbandonedCheckoutModel.email) == str(email).strip().lower()
+            )
         if phone:
-            clauses.append(AbandonedCheckoutModel.phone == phone)
+            clauses.append(AbandonedCheckoutModel.phone == str(phone))
 
         query = (
             select(AbandonedCheckoutModel)
@@ -410,6 +476,11 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
             .where(
                 AbandonedCheckoutModel.store_id == store_id,
                 AbandonedCheckoutModel.recovered_at.is_(None),
+                # Only carts this order could plausibly have converted: one
+                # August order used to "recover" a shopper's July carts (7
+                # rows at once on prod), emptying the merchant's list.
+                AbandonedCheckoutModel.last_activity_at
+                >= (when or now) - timedelta(days=RECOVERY_ATTRIBUTION_DAYS),
                 or_(*clauses),
             )
             .values(**values)
