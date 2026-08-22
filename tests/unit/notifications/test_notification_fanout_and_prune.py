@@ -127,6 +127,8 @@ def test_push_copy_is_pii_free_and_bilingual():
         "store_id": uuid4(),
         "tenant_id": uuid4(),
         "important": True,
+        # Rich details OFF → lock-screen body is amount only.
+        "store_settings": {"push_notifications": {"rich_details": False}},
         "data": {
             "order_number": "ORD-9",
             "customer_name": "Yahia Sherif",
@@ -161,6 +163,40 @@ def test_push_copy_is_pii_free_and_bilingual():
         )
         is None
     )
+
+
+def test_push_copy_rich_details_reads_like_the_email():
+    res = feed_mod.EmitResult(
+        written=True,
+        store_id=uuid4(),
+        tenant_id=uuid4(),
+        important=True,
+        kind="order.cancelled",
+        language="en",
+        store_settings={},  # default → rich on
+        data={
+            "order_number": "ORD-9",
+            "customer_name": "Yahia Sherif",
+            "payment_method": "cod",
+            "total_cents": 13421,
+            "currency": "EGP",
+            "reason": "no stock",
+        },
+    )
+    title, body = feed_mod.push_copy(res)
+    assert title == "Order #ORD-9 cancelled"
+    assert body == "Yahia Sherif · Cash on delivery · EGP 134 · no stock"
+
+    body = feed_mod.rich_push_body(
+        customer_name="يحيى",
+        items_count=2,
+        payment_method="vodafone_cash",
+        amount="134 ج.م",
+        created_at=None,
+        store_settings=None,
+        is_ar=True,
+    )
+    assert body == "يحيى · 2 منتج · فودافون كاش · 134 ج.م"
 
 
 def test_sse_framing():

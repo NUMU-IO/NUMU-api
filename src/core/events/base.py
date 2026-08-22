@@ -36,6 +36,30 @@ class DomainEvent(BaseModel):
             object.__setattr__(self, "event_type", self.__class__.__name__)
 
 
+# Strong references to in-flight handler tasks. asyncio keeps only WEAK
+# references to tasks, so a fire-and-forget task with no other reference
+# can be garbage-collected mid-await — the handler silently never finishes.
+_inflight: set["asyncio.Task[None]"] = set()
+
+# How many handlers may run at once per process. Every DB-writing handler
+# opens its own session, so an event with 7 subscribers used to grab up to
+# 7 pool connections at once — on a 3+2 pool that starved the request path
+# ("QueuePool limit ... reached") and the late handlers died without ever
+# logging. Override with EVENT_HANDLER_CONCURRENCY.
+DEFAULT_HANDLER_CONCURRENCY = 3
+SLOW_HANDLER_SECONDS = 15.0
+
+
+def _handler_concurrency() -> int:
+    import os
+
+    raw = os.environ.get("EVENT_HANDLER_CONCURRENCY", "")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_HANDLER_CONCURRENCY
+
+
 def _schedule_immediately(
     bus: "EventBus", event: "DomainEvent", handlers: list[EventHandler]
 ) -> None:
@@ -46,10 +70,12 @@ def _schedule_immediately(
     (see ``infrastructure.events.deferred_dispatch``).
     """
     for handler in handlers:
-        asyncio.create_task(
+        task = asyncio.create_task(
             bus._safe_invoke(handler, event),
             name=f"event:{event.event_type}:{handler.__name__}",
         )
+        _inflight.add(task)
+        task.add_done_callback(_inflight.discard)
 
 
 class EventBus:
@@ -79,6 +105,8 @@ class EventBus:
         self.scheduler: Callable[[EventBus, DomainEvent, list[EventHandler]], None] = (
             _schedule_immediately
         )
+        # Created lazily on the running loop (the bus is built at import time).
+        self._semaphore: asyncio.Semaphore | None = None
 
     def subscribe(self, event_class: type[DomainEvent], handler: EventHandler) -> None:
         """Register a handler for an event type."""
@@ -110,9 +138,14 @@ class EventBus:
         )
 
     async def _safe_invoke(self, handler: EventHandler, event: DomainEvent) -> None:
-        """Invoke a handler with error isolation."""
+        """Invoke a handler with error isolation + bounded concurrency."""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(_handler_concurrency())
+        loop = asyncio.get_running_loop()
+        started = loop.time()
         try:
-            await handler(event)
+            async with self._semaphore:
+                await handler(event)
         except Exception as exc:
             logger.error(
                 "event_handler_failed",
@@ -120,4 +153,14 @@ class EventBus:
                 event_id=str(event.event_id),
                 handler=handler.__name__,
                 error=str(exc),
+                exc_info=True,
             )
+        finally:
+            elapsed = loop.time() - started
+            if elapsed > SLOW_HANDLER_SECONDS:
+                logger.warning(
+                    "event_handler_slow",
+                    event_type=event.event_type,
+                    handler=handler.__name__,
+                    seconds=round(elapsed, 1),
+                )

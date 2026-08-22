@@ -39,6 +39,7 @@ async def _deliver(
     body: str,
     url: str,
     tag: str,
+    important: bool = False,
 ) -> dict[str, int]:
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.external_services.notifications.web_push_service import (
@@ -68,7 +69,12 @@ async def _deliver(
                 continue
 
             payload = build_payload(
-                title=title, body=body, url=url, tag=tag, locale=device.locale
+                title=title,
+                body=body,
+                url=url,
+                tag=tag,
+                locale=device.locale,
+                important=important,
             )
             outcome = send_web_push(
                 PushSubscription(
@@ -110,6 +116,7 @@ def send_push_notification_task(
     url: str,
     tag: str,
     user_ids: list[str] | None = None,
+    important: bool = False,
 ) -> dict[str, int]:
     """Fan out one notification to a tenant's registered devices.
 
@@ -129,6 +136,7 @@ def send_push_notification_task(
                 body=body,
                 url=url,
                 tag=tag,
+                important=important,
             )
         )
         logger.info(
