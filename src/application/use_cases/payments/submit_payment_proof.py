@@ -608,6 +608,29 @@ class SubmitPaymentProofUseCase:
             proof_submissions_total.inc(
                 status="awaiting_review", store_id=str(order.store_id)
             )
+            # Merchant-facing: a proof is parked on their review queue. Feeds
+            # the hub bell (important) + urgent push. Commit-deferred via the
+            # bus scheduler; failure to enqueue must never fail the upload.
+            try:
+                from src.core.events.payment_events import PaymentProofSubmittedEvent
+                from src.infrastructure.events.setup import get_event_bus
+
+                get_event_bus().publish(
+                    PaymentProofSubmittedEvent(
+                        proof_id=proof.id,
+                        order_id=order.id,
+                        order_number=order.order_number,
+                        tenant_id=order.tenant_id,
+                        store_id=order.store_id,
+                        customer_id=order.customer_id,
+                        reference_code=intent.reference_code,
+                        amount_cents=int(order.total or 0),
+                        currency=order.currency or "EGP",
+                        payment_method=intent.method.value,
+                    )
+                )
+            except Exception:
+                log.exception("proof_submitted_event_publish_failed")
             log.info(
                 "instapay_proof_queued_for_review",
                 reference_code=intent.reference_code,
