@@ -44,6 +44,9 @@ from src.infrastructure.repositories.marketing_campaign_repository import (
 from src.infrastructure.repositories.marketplace_repository import (
     MarketplaceRepository,
 )
+from src.infrastructure.repositories.merchant_notification_repository import (
+    MerchantNotificationRepository,
+)
 from src.infrastructure.repositories.message_log_repository import MessageLogRepository
 from src.infrastructure.repositories.message_thread_repository import (
     MessageThreadRepositoryImpl,
@@ -129,6 +132,7 @@ __all__ = [
     "MarketingCampaignRepository",
     "MessageLogRepository",
     "OnboardingRepository",
+    "MerchantNotificationRepository",
     "OrderActivityRepository",
     "OrderRepository",
     "PageViewRepository",
