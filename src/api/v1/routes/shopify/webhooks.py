@@ -201,13 +201,17 @@ async def _handle_order_created(
     network_score, network_label = await _lookup_network_score(phone_hash, network_repo)
 
     # Write the "order" event to network reputation. Pass settings_repo
-    # so the consent flag (trust_network_enabled) is enforced.
+    # so the consent flag (trust_network_enabled) is enforced. The
+    # dedup_key makes Shopify webhook redeliveries idempotent — without
+    # it a replay double-counts into network_contribution_log AND the
+    # standalone Trust Network feed.
     await _write_network_event(
         phone_hash=phone_hash,
         store_id=store_id,
         event_type="order",
         network_repo=network_repo,
         settings_repo=settings_repo,
+        dedup_key=f"{store_id}:{order_id}:order",
     )
 
     # ── 2. Fast score (synchronous, <200ms) ─────────────────────────────────
@@ -297,7 +301,7 @@ async def _handle_order_created(
             action_taken = "held_for_review"
 
         if action_taken:
-            await risk_repo.update_action(model.id, action_taken)
+            await risk_repo.update_action(model.id, action_taken, store_id=store_id)
 
     # ── 6. Run automation rules (order.created trigger) ─────────────────────
     installation = await install_repo.get_by_store_id(store_id)
@@ -460,12 +464,17 @@ async def process_webhook(
             "refunds/create": "refund",
         }
         event_type = event_map[topic]
+        # payload["id"] is the order id for order-shaped payloads and the
+        # refund id for refunds/create — either way it's stable across
+        # Shopify redeliveries, which is what the dedup_key must be.
+        event_ref = str(body.payload.get("id", ""))
         await _write_network_event(
             phone_hash=phone_hash,
             store_id=store_id,
             event_type=event_type,
             network_repo=network_repo,
             settings_repo=settings_repo,
+            dedup_key=f"{store_id}:{event_ref}:{event_type}",
         )
         result = {"acknowledged": True, "topic": topic, "event_recorded": event_type}
     elif topic in ("orders/paid", "orders/partially_paid", "payment_failed"):

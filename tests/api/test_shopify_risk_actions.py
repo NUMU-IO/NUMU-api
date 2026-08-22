@@ -67,9 +67,13 @@ class FakeRiskRepo:
             out = [r for r in out if r.shopify_order_id == shopify_order_id]
         return out[offset : offset + limit]
 
-    async def update_action(self, assessment_id: UUID, action: str) -> _Row | None:
+    async def update_action(
+        self, assessment_id: UUID, action: str, *, store_id: UUID | None = None
+    ) -> _Row | None:
         for r in self.rows:
             if r.id == assessment_id:
+                if store_id is not None and str(r.store_id) != str(store_id):
+                    return None
                 r.action_taken = action
                 return r
         return None
@@ -162,6 +166,23 @@ class TestActionVerbWhitelist:
             headers={"X-Internal-Key": internal_key},
         )
         assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_cross_store_action_is_404(
+        self, client: AsyncClient, internal_key: str, fake_repo: FakeRiskRepo
+    ):
+        """A valid key + a known assessment UUID must not act across stores."""
+        owner_store = uuid4()
+        other_store = uuid4()
+        row = _Row(store_id=owner_store)
+        fake_repo.rows = [row]
+        resp = await client.post(
+            f"/api/v1/shopify/{other_store}/risk/orders/{row.id}/action",
+            json={"action": "approve"},
+            headers={"X-Internal-Key": internal_key},
+        )
+        assert resp.status_code == 404
+        assert row.action_taken is None
 
     @pytest.mark.asyncio
     async def test_approve_records_action(

@@ -284,6 +284,11 @@ class PaymentLinkPublicResponse(BaseModel):
 class CompletePaymentRequest(BaseModel):
     gateway_used: str = Field(..., max_length=50)
     gateway_transaction_id: str = Field(..., max_length=255)
+    # Proof for unauthenticated callers: the Paymob transaction-processed
+    # callback payload + its HMAC. Verified against the merchant's own
+    # hmac_secret; without it (or X-Internal-Key) completion is rejected.
+    paymob_payload: dict | None = None
+    paymob_hmac: str | None = Field(None, max_length=255)
 
 
 class CompletePaymentResponse(BaseModel):
