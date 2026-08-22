@@ -281,6 +281,67 @@ async def cancel_order(
         return False
 
 
+# ── Queries ──────────────────────────────────────────────────────────────────
+
+_ORDER_CONTACT_QUERY = """
+query orderContact($id: ID!) {
+  order(id: $id) {
+    name
+    phone
+    shippingAddress { phone firstName lastName }
+    customer { phone displayName }
+  }
+  shop { name }
+}
+"""
+
+
+async def get_order_contact(
+    shop_domain: str,
+    access_token: str,
+    shopify_order_id: str,
+) -> dict | None:
+    """Fetch the contact details needed to WhatsApp a buyer about an order.
+
+    The risk_assessments row keeps only a phone *hash* (privacy principle),
+    so any post-webhook send (manual dashboard action, Flow resend, recovery
+    ladder step) must resolve the raw phone from Shopify at send time.
+
+    Phone resolution order: order.phone → shippingAddress.phone →
+    customer.phone. Returns ``{"phone", "customer_name", "order_number",
+    "shop_name"}`` (values may be None), or None when the order does not
+    exist or the call fails.
+    """
+    try:
+        result = await _graphql(
+            shop_domain,
+            access_token,
+            _ORDER_CONTACT_QUERY,
+            {"id": order_gid(shopify_order_id)},
+        )
+    except Exception as exc:
+        logger.error("orderContact failed for %s: %s", shopify_order_id, exc)
+        return None
+
+    data = result.get("data") or {}
+    order = data.get("order")
+    if not order:
+        logger.warning("orderContact: order not found for %s", shopify_order_id)
+        return None
+
+    shipping = order.get("shippingAddress") or {}
+    customer = order.get("customer") or {}
+    shipping_name = " ".join(
+        part for part in (shipping.get("firstName"), shipping.get("lastName")) if part
+    ).strip()
+    return {
+        "phone": order.get("phone") or shipping.get("phone") or customer.get("phone"),
+        "customer_name": customer.get("displayName") or shipping_name or None,
+        "order_number": (order.get("name") or "").lstrip("#") or None,
+        "shop_name": (data.get("shop") or {}).get("name"),
+    }
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 

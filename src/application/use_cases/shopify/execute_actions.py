@@ -186,6 +186,7 @@ async def _dispatch_action(
                 customer_phone=customer_phone,
                 customer_name=customer_name,
                 order_number=order_number,
+                shop_domain=shop_domain,
             )
             logger.info(
                 "WhatsApp nudge enqueued for order %s (store %s)",
