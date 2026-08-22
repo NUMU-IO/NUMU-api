@@ -42,6 +42,11 @@ def patched_sessions(test_engine, monkeypatch):
 
     monkeypatch.setattr(feed_mod, "_publish_realtime", _noop_publish)
     monkeypatch.setattr(feed_mod, "_enqueue_push", lambda result: None)
+
+    async def _noop_email(result):
+        return None
+
+    monkeypatch.setattr(feed_mod, "_enqueue_email", _noop_email)
     return factory
 
 

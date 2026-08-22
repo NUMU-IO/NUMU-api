@@ -31,7 +31,7 @@ def factory(test_engine, monkeypatch):
 @pytest.fixture
 def captured(monkeypatch):
     """Swap the two side-effects for recorders."""
-    calls: dict[str, list] = {"realtime": [], "push": []}
+    calls: dict[str, list] = {"realtime": [], "push": [], "email": []}
 
     async def fake_publish(result):
         calls["realtime"].append(result)
@@ -41,6 +41,11 @@ def captured(monkeypatch):
 
     monkeypatch.setattr(feed_mod, "_publish_realtime", fake_publish)
     monkeypatch.setattr(feed_mod, "_enqueue_push", fake_push)
+
+    async def fake_email(result):
+        calls["email"].append(result)
+
+    monkeypatch.setattr(feed_mod, "_enqueue_email", fake_email)
     return calls
 
 
@@ -104,6 +109,7 @@ async def test_standalone_emit_fans_out_after_commit(test_session, factory, capt
     assert important.owner_id == store.owner_id
     assert [r.kind for r in captured["realtime"]] == ["order.new", "order.cancelled"]
     assert [r.kind for r in captured["push"]] == ["order.cancelled"]
+    assert [r.kind for r in captured["email"]] == ["order.cancelled"]
 
 
 @pytest.mark.asyncio

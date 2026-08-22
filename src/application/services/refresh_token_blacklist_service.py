@@ -28,11 +28,48 @@ class RefreshTokenBlacklistService:
         return f"refresh_jti_used:{jti}"
 
     async def is_used(self, jti: str) -> bool:
-        """Return True if this jti has already been consumed."""
+        """Return True if this jti has already been consumed.
+
+        Fail-open on a Redis outage (a hiccup must not log everyone out),
+        but LOUDLY: error-level, so the outage is an alert, not a secret.
+        """
         try:
             return await self._cache.exists(self._key(jti))
-        except Exception:
-            logger.debug("refresh_blacklist_check_failed", jti=jti)
+        except Exception as exc:
+            logger.error(
+                "refresh_blacklist_unavailable_fail_open",
+                jti=jti,
+                error=str(exc),
+            )
+            return False
+
+    # ── Token families ─────────────────────────────────────────────────
+    # Every login mints a refresh token with a fresh family_id that is
+    # carried across rotations. Reuse of a consumed jti AFTER the grace
+    # window means the token was copied; revoking the family kills the
+    # attacker's rotated copy AND the victim's, forcing one clean login.
+
+    @staticmethod
+    def _family_key(family_id: str) -> str:
+        return f"refresh_family_revoked:{family_id}"
+
+    async def revoke_family(self, family_id: str, ttl: int) -> None:
+        try:
+            await self._cache.set(self._family_key(family_id), "1", expire=max(ttl, 60))
+        except Exception as exc:
+            logger.error(
+                "refresh_family_revoke_failed", family_id=family_id, error=str(exc)
+            )
+
+    async def is_family_revoked(self, family_id: str) -> bool:
+        try:
+            return await self._cache.exists(self._family_key(family_id))
+        except Exception as exc:
+            logger.error(
+                "refresh_family_check_unavailable_fail_open",
+                family_id=family_id,
+                error=str(exc),
+            )
             return False
 
     async def mark_used(self, jti: str, token_exp: int) -> None:

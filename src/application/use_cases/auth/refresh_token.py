@@ -42,6 +42,15 @@ class RefreshTokenUseCase:
         # Detect token reuse — potential theft. Within the rotation grace
         # window a repeat presenter (a second hub tab that lost the race)
         # gets the SAME pair the winner got; only a later replay is theft.
+        family_id = getattr(payload, "family_id", None)
+        if family_id and await self.blacklist_service.is_family_revoked(family_id):
+            logger.warning(
+                "refresh_token_family_revoked",
+                user_id=str(payload.user_id),
+                family_id=family_id,
+            )
+            raise InvalidTokenError()
+
         if payload.jti and await self.blacklist_service.is_used(payload.jti):
             graced = await self.blacklist_service.get_rotation(payload.jti)
             if graced is not None:
@@ -51,11 +60,19 @@ class RefreshTokenUseCase:
                     jti=payload.jti,
                 )
                 return TokenDTO(access_token=graced[0], refresh_token=graced[1])
-            logger.warning(
+            # Replay AFTER the grace window: the token was copied. Revoke the
+            # whole lineage so the attacker's rotated copy dies too; the
+            # legitimate device re-logs in once. Security event, not noise.
+            logger.error(
                 "refresh_token_reuse_detected",
                 user_id=str(payload.user_id),
                 jti=payload.jti,
+                family_id=family_id,
             )
+            if family_id:
+                await self.blacklist_service.revoke_family(
+                    family_id, ttl=settings.refresh_token_expire_days * 86400
+                )
             raise InvalidTokenError()
 
         # Get user
@@ -77,7 +94,9 @@ class RefreshTokenUseCase:
             "perm_version": payload.perm_version or 0,
         }
         access_token = self.token_service.create_access_token(user, **claims)
-        refresh_token = self.token_service.create_refresh_token(user, **claims)
+        refresh_token = self.token_service.create_refresh_token(
+            user, **claims, family_id=family_id
+        )
 
         if payload.jti:
             await self.blacklist_service.remember_rotation(
