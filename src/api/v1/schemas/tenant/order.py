@@ -460,6 +460,24 @@ class OrderListItemResponse(BaseModel):
     customer_confirmed_at: str | None = Field(
         default=None, description="ISO 8601 timestamp of the customer's confirm tap"
     )
+    # Hub "Shipping" column — carrier/method label and tracking number.
+    # Null when the order has no shipment yet.
+    shipping_method: str | None = Field(
+        default=None, description="Shipping method / carrier label, if any"
+    )
+    tracking_number: str | None = Field(
+        default=None, description="Carrier tracking number, if any"
+    )
+
+
+class OrderStatusCountsResponse(BaseModel):
+    """Per-status order counts for the hub's list tab badges."""
+
+    by_status: dict[str, int] = Field(
+        default_factory=dict,
+        description="Order status value → count (zero-count statuses omitted)",
+    )
+    total: int = Field(0, description="Sum of all counted orders")
 
 
 # ============================================================================

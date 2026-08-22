@@ -89,20 +89,46 @@ async def _send_all() -> dict:
 
 
 async def _week_metrics(session, store_id, tz_name: str) -> dict:
-    """This-week + prior-week aggregates + top product (rollup-sourced)."""
+    """This-week + prior-week aggregates + top product.
+
+    Revenue/orders use the same rollup+live merge as the analytics KPI
+    cards and the digest preview endpoint, so the sent digest never says
+    "no sales" for a week whose orders the nightly rollup hasn't written yet.
+    """
+    from src.application.services.analytics_series import window_totals
     from src.core.utils.store_timezone import safe_zone
     from src.infrastructure.repositories.analytics_rollup_repository import (
         AnalyticsRollupRepository,
     )
+    from src.infrastructure.repositories.order_repository import OrderRepository
 
     rollup_repo = AnalyticsRollupRepository(session)
+    order_repo = OrderRepository(session)
     today = datetime.now(UTC).astimezone(safe_zone(tz_name)).date()
     week_start = today - timedelta(days=6)
     prev_end = week_start - timedelta(days=1)
     prev_start = prev_end - timedelta(days=6)
 
+    cur_revenue, cur_orders = await window_totals(
+        store_id=store_id,
+        tz_name=tz_name,
+        rollup_repo=rollup_repo,
+        order_repo=order_repo,
+        start_d=week_start,
+        end_d=today,
+        today_local=today,
+    )
+    prev_revenue, prev_orders = await window_totals(
+        store_id=store_id,
+        tz_name=tz_name,
+        rollup_repo=rollup_repo,
+        order_repo=order_repo,
+        start_d=prev_start,
+        end_d=prev_end,
+        today_local=today,
+    )
+    # new_customers has no live equivalent yet — still rollup-sourced.
     cur = await rollup_repo.get_aggregated(store_id, week_start, today)
-    prev = await rollup_repo.get_aggregated(store_id, prev_start, prev_end)
     rollups = await rollup_repo.get_range(store_id, week_start, today)
 
     prod: dict[str, tuple[str, int]] = {}
@@ -118,14 +144,14 @@ async def _week_metrics(session, store_id, tz_name: str) -> dict:
             )
     top = max(prod.values(), key=lambda x: x[1], default=None)
 
-    orders = int(cur["total_orders"])
-    revenue = int(cur["total_revenue_cents"])
+    orders = int(cur_orders)
+    revenue = int(cur_revenue)
     return {
         "revenue_cents": revenue,
-        "prev_revenue_cents": int(prev["total_revenue_cents"]),
+        "prev_revenue_cents": int(prev_revenue),
         "orders": orders,
-        "prev_orders": int(prev["total_orders"]),
-        "new_customers": int(cur.get("new_customers", 0) or 0),
+        "prev_orders": int(prev_orders),
+        "new_customers": int((cur or {}).get("new_customers", 0) or 0),
         "aov_cents": revenue // orders if orders > 0 else 0,
         "top_product_name": top[0] if top else None,
         "top_product_units": top[1] if top else 0,

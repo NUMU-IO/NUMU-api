@@ -37,6 +37,10 @@ router = APIRouter()
 
 class ReconciliationRunSummary(BaseModel):
     id: str
+    # Which rail this run covered (paymob / instapay / cod / …). A store with
+    # several gateways gets several runs per day; without this the hub
+    # rendered them as indistinguishable date rows.
+    gateway: str
     period_start: str
     period_end: str
     status: str
@@ -126,6 +130,7 @@ async def list_reconciliation_runs(
         data=[
             ReconciliationRunSummary(
                 id=str(r.id),
+                gateway=r.gateway,
                 period_start=r.period_start.isoformat(),
                 period_end=r.period_end.isoformat(),
                 status=r.status,

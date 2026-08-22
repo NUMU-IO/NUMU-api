@@ -262,6 +262,19 @@ async def test_empty_store_returns_insufficient_data(test_session):
     assert result["empty_state_message"]
     assert "30 days" in result["empty_state_message"]
     assert result["window_days"] == 30
+    # ...and a checklist of what is still missing, so the hub's empty state
+    # can say "0 / 5 shipments" instead of just "not enough data".
+    reqs = {r["key"]: r for r in result["requirements"]}
+    assert set(reqs) == {
+        "shipments",
+        "cod_shipments",
+        "settled_orders",
+        "usable_weight",
+    }
+    assert reqs["shipments"] == {"key": "shipments", "needed": 5, "have": 0}
+    assert reqs["cod_shipments"]["needed"] == 3
+    assert reqs["settled_orders"]["needed"] == 5
+    assert reqs["usable_weight"] == {"key": "usable_weight", "needed": 45, "have": 0}
 
 
 @pytest.mark.asyncio
