@@ -310,7 +310,15 @@ class Settings(BaseSettings):
     # expired access token forced the user to re-login mid-session.
     # 8h covers a full working day; refresh tokens still rotate at 7d.
     access_token_expire_minutes: int = 480
-    refresh_token_expire_days: int = 7
+    # 30 days: a merchant who opens the hub at least monthly never re-logs in.
+    # Refresh tokens rotate on every use (old jti blacklisted), so the long
+    # life is bounded by the rotation + reuse detection, not by the TTL.
+    refresh_token_expire_days: int = 30
+    # After a rotation, the OLD refresh jti may be presented again for this
+    # many seconds and receives the SAME new pair instead of a 401. Two hub
+    # tabs racing on an expired access token both succeed; a stolen token
+    # replayed later than this is still caught as reuse.
+    refresh_rotation_grace_seconds: int = 60
     # Admin "log in as merchant" sessions. The handed-off token is a Bearer in
     # the hub's sessionStorage (tab-isolated) and is NOT refreshable, so it must
     # last a full work session on its own rather than the short access TTL —
@@ -491,6 +499,12 @@ class Settings(BaseSettings):
     # the bypass entirely (the default). Rotate the token regularly and
     # never commit it; set via env in CI only.
     load_test_bypass_token: str = ""
+    # Shared secret our OWN servers (the Next.js storefront doing SSR on
+    # behalf of thousands of shoppers from one IP) send as
+    # `X-Internal-Service-Token`. A matching request is rate-limited under the
+    # visitor IP it forwards (`X-Forwarded-For`, first hop) instead of the
+    # server's IP, and counts as authenticated for tiering. Empty disables it.
+    internal_service_token: str = ""
     # Reverse proxies whose `X-Forwarded-For` / `X-Real-IP` we believe when
     # deciding which bucket a request is rate-limited under. Bare addresses or
     # CIDRs, as a JSON list in the environment:
