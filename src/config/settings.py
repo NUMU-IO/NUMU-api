@@ -692,6 +692,25 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Public base URL of the Shopify-app-hosted payment page (the app's
+    # /p/{session_id} route). WhatsApp COD-to-prepaid links are minted as
+    # "{base}/{session_id}". Falls back to "{shopify_app_url}/p" when unset.
+    shopify_payment_page_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "shopify_payment_page_url",
+            "SHOPIFY_PAYMENT_PAGE_URL",
+        ),
+    )
+
+    def shopify_payment_page_base(self) -> str:
+        """Resolved payment-page base URL, without a trailing slash."""
+        if self.shopify_payment_page_url:
+            return self.shopify_payment_page_url.rstrip("/")
+        if self.shopify_app_url:
+            return f"{self.shopify_app_url.rstrip('/')}/p"
+        return "https://shopify.numueg.app/p"
+
     # Secret salt for HMAC-SHA256 hashing of phone numbers in the
     # network_reputation table.  Must be a 256-bit (32-byte) hex string.
     # NEVER store in code or database — env-only.

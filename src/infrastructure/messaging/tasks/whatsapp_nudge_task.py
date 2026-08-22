@@ -2,14 +2,18 @@
 
 Creates a payment link session and sends a WhatsApp message with
 the payment URL to the customer.  Triggered by the ``whatsapp_confirm``
-automation action.
+automation action and the dashboard's manual "WhatsApp confirm" action.
+
+The heavy lifting lives in
+:mod:`src.application.services.shopify_nudge_service` so the synchronous
+``resend-verification`` endpoint and the recovery ladder share the exact
+same session-mint + template send.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import httpx
@@ -19,9 +23,6 @@ from src.infrastructure.messaging.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 _task_loop: asyncio.AbstractEventLoop | None = None
-
-_PAY_BASE_URL = "https://pay.numu.app"
-_DEFAULT_EXPIRY_HOURS = 24
 
 
 def _run_async(coro):
@@ -54,6 +55,9 @@ def send_whatsapp_nudge(
     customer_phone: str,
     customer_name: str,
     order_number: str,
+    shop_domain: str = "",
+    store_name: str = "",
+    language: str = "ar",
 ) -> dict:
     """Create a payment link session and send a WhatsApp nudge.
 
@@ -73,120 +77,74 @@ def send_whatsapp_nudge(
         Customer display name.
     order_number:
         Shopify order number for the message.
+    shop_domain:
+        ``*.myshopify.com`` domain — used to derive a display store name
+        when ``store_name`` is empty.
+    store_name:
+        Merchant-facing store name for the message copy.
+    language:
+        ``"ar"`` or ``"en"`` template language.
     """
 
     async def _run() -> dict:
         from sqlalchemy import text
 
+        from src.application.services.shopify_nudge_service import (
+            create_payment_link_session,
+            send_conversion_nudge,
+            store_display_name,
+        )
         from src.infrastructure.database.connection import AsyncSessionLocal
-        from src.infrastructure.database.models.tenant.payment_link_session import (
-            PaymentLinkSessionModel,
-        )
-        from src.infrastructure.database.models.tenant.shopify_app_settings import (
-            ShopifyAppSettingsModel,
-        )
 
         sid = UUID(store_id)
 
         async with AsyncSessionLocal() as session:
             await session.execute(text("SET search_path TO public"))
-
-            # 1. Create payment link session
-            from sqlalchemy import select
-
-            settings_row = await session.execute(
-                select(ShopifyAppSettingsModel).where(
-                    ShopifyAppSettingsModel.store_id == sid
-                )
-            )
-            settings = settings_row.scalar_one_or_none()
-
-            gateways = ["paymob"]
-            if settings and settings.paymob_connected:
-                gateways = ["paymob"]
-
-            pls = PaymentLinkSessionModel(
+            pls = await create_payment_link_session(
+                session,
                 store_id=sid,
                 shopify_order_id=shopify_order_id,
                 amount_cents=amount_cents,
                 currency=currency,
-                available_gateways=gateways,
-                expires_at=datetime.now(UTC) + timedelta(hours=_DEFAULT_EXPIRY_HOURS),
             )
-            session.add(pls)
-            await session.flush()
-
-            payment_url = f"{_PAY_BASE_URL}/{pls.id}"
             session_id = str(pls.id)
-
             await session.commit()
 
-        # 2. Send WhatsApp message
         if not customer_phone:
             logger.warning(
                 "No phone number for WhatsApp nudge: order=%s", shopify_order_id
             )
+            from src.application.services.shopify_nudge_service import (
+                payment_page_url,
+            )
+
             return {
                 "session_id": session_id,
-                "payment_url": payment_url,
+                "payment_url": payment_page_url(session_id),
                 "whatsapp_sent": False,
                 "reason": "no_phone",
             }
 
-        whatsapp_sent = False
-        try:
-            from src.core.interfaces.services.messaging_service import (
-                MessageContent,
-                MessageRecipient,
-                MessageType,
-            )
-            from src.infrastructure.external_services.whatsapp.messaging_service import (
-                WhatsAppMessagingService,
-            )
-
-            wa = WhatsAppMessagingService()
-            if not wa.enabled:
-                logger.info("WhatsApp disabled — nudge URL generated only")
-            else:
-                amount_display = f"{amount_cents / 100:,.2f} {currency}"
-                recipient = MessageRecipient(
-                    phone=customer_phone,
-                    name=customer_name or "Customer",
-                    language="ar",
-                )
-                content = MessageContent(
-                    type=MessageType.ORDER_CONFIRMATION,
-                    recipient=recipient,
-                    template_params={
-                        "customer_name": customer_name or "Customer",
-                        "order_number": order_number,
-                        "total": amount_display,
-                        "store_name": "NUMU",
-                        "payment_link": payment_url,
-                    },
-                )
-                result = await wa.send_message(content)
-                whatsapp_sent = result.success
-                if result.success:
-                    logger.info(
-                        "WhatsApp nudge sent for order %s: message_id=%s",
-                        shopify_order_id,
-                        result.message_id,
-                    )
-                else:
-                    logger.warning(
-                        "WhatsApp nudge failed for order %s: %s",
-                        shopify_order_id,
-                        result.error_message,
-                    )
-        except Exception as exc:
-            logger.error("WhatsApp nudge error for order %s: %s", shopify_order_id, exc)
-
-        return {
+        result = await send_conversion_nudge(
+            phone=customer_phone,
+            customer_name=customer_name,
+            order_number=order_number,
+            store_name=store_name or store_display_name(shop_domain),
+            amount_cents=amount_cents,
+            currency=currency,
+            payment_session_id=session_id,
+            language=language,
+        )
+        out: dict = {
             "session_id": session_id,
-            "payment_url": payment_url,
-            "whatsapp_sent": whatsapp_sent,
+            "payment_url": result.payment_url,
+            "whatsapp_sent": result.sent,
         }
+        if result.message_id:
+            out["message_id"] = result.message_id
+        if result.error:
+            out["reason"] = result.error
+        return out
 
     try:
         return _run_async(_run())

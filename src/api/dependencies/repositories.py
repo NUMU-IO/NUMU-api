@@ -15,6 +15,7 @@ from src.infrastructure.repositories import (
     CustomerRepository,
     FeedbackRepository,
     InvoiceRepository,
+    MerchantNotificationRepository,
     MessageLogRepository,
     OnboardingRepository,
     OrderActivityRepository,
@@ -257,6 +258,13 @@ def get_order_repository(
 ) -> OrderRepository:
     """Get order repository dependency."""
     return OrderRepository(session)
+
+
+def get_merchant_notification_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> MerchantNotificationRepository:
+    """Get merchant notification feed repository dependency."""
+    return MerchantNotificationRepository(session)
 
 
 def get_order_activity_repository(

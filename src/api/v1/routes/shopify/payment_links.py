@@ -44,7 +44,6 @@ router_internal = APIRouter(dependencies=[Depends(verify_internal_key)])
 router_public = APIRouter()
 
 _DEFAULT_EXPIRY_HOURS = 24
-_PAY_BASE_URL = "https://pay.numu.app"
 
 
 @router_internal.post(
@@ -83,7 +82,9 @@ async def create_payment_link(
         expires_at=datetime.now(UTC) + timedelta(hours=_DEFAULT_EXPIRY_HOURS),
     )
 
-    payment_url = f"{_PAY_BASE_URL}/{model.id}"
+    from src.application.services.shopify_nudge_service import payment_page_url
+
+    payment_url = payment_page_url(model.id)
 
     return SuccessResponse(
         data=PaymentLinkResponse(

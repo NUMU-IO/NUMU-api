@@ -134,6 +134,8 @@ celery_app.conf.update(
         # PWA Phase 2 — Web Push / Expo fan-out. Always async: a slow push
         # service must never be able to delay an order webhook.
         "src.infrastructure.messaging.tasks.push_tasks",
+        # Merchant notification feed — nightly retention prune.
+        "src.infrastructure.messaging.tasks.notification_center_tasks",
         # Subscription payments via InstaPay — intent expiry + dunning nudge.
         "src.infrastructure.messaging.tasks.subscription_payment_tasks",
         # backend-017 — daily Shopify-side verification overage relay.
@@ -263,6 +265,12 @@ celery_app.conf.beat_schedule = {
     "detect-abandoned-carts": {
         "task": "tasks.detect_abandoned_carts",
         "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    # Merchant notification feed retention — read rows > 90d, any > 180d.
+    # 03:45 UTC (05:45 Cairo), after the other nightly purges.
+    "prune-merchant-notifications": {
+        "task": "tasks.prune_merchant_notifications",
+        "schedule": crontab(hour=3, minute=45),
     },
     # Phase 8.6 — marketing campaign sweep. Promotes SCHEDULED→SENDING
     # for due campaigns + rescues orphaned SENDING (Send-Now invocations

@@ -76,6 +76,12 @@ from src.infrastructure.events.handlers.merchant_push_handler import (
 from src.infrastructure.events.handlers.meta_capi_status_event_handler import (
     handle_order_status_changed_for_meta_capi,
 )
+from src.infrastructure.events.handlers.notification_feed_handler import (
+    handle_kill_switch_notification,
+    handle_order_created_notification,
+    handle_order_paid_notification,
+    handle_order_status_notification,
+)
 from src.infrastructure.events.handlers.order_activity_handler import (
     handle_order_created_activity,
     handle_order_paid_activity,
@@ -185,6 +191,12 @@ def create_event_bus() -> EventBus:
     # Order lifecycle webhooks + merchant-visible activity stream
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)
     bus.subscribe(OrderCreatedEvent, handle_order_created_activity)
+    # Merchant notification feed (hub bell + Notifications page). Sibling
+    # of the order-activity timeline — store-wide, categorised, read-state.
+    bus.subscribe(OrderCreatedEvent, handle_order_created_notification)
+    bus.subscribe(OrderPaidEvent, handle_order_paid_notification)
+    bus.subscribe(OrderStatusChangedEvent, handle_order_status_notification)
+    bus.subscribe(TrustKillSwitchFiredEvent, handle_kill_switch_notification)
     # Email the store owner ("you got a new order") on every new order.
     # Opt-out per store via store.settings.email_notifications.new_order.
     bus.subscribe(OrderCreatedEvent, handle_merchant_order_notification)
