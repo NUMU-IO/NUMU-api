@@ -3092,7 +3092,21 @@ async def cart_track(
     if not request.line_items:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    candidate_email = optional_customer.email if optional_customer else request.email
+    # `optional_customer` is the core entity: its `.email` is an `Email`
+    # value object. Binding that into SQL (and assigning it to the
+    # `str | None` field on the AbandonedCheckout entity) raised
+    # "expected str, got Email" for EVERY OTP-verified shopper, the
+    # exception was swallowed below, and no cart row was ever written or
+    # enriched — the merchant's Abandoned checkouts page stayed empty.
+    # Same bug class PR #495 fixed on the order path, 200 lines up.
+    candidate_email = _vo_str(
+        optional_customer.email if optional_customer else request.email
+    )
+    candidate_phone = _vo_str(request.phone) or (
+        _vo_str(getattr(optional_customer, "phone", None))
+        if optional_customer
+        else None
+    )
 
     try:
         existing = await abandoned_repo.find_active_for_session(
@@ -3127,7 +3141,7 @@ async def cart_track(
         if existing:
             existing.line_items = line_items_payload
             existing.email = candidate_email or existing.email
-            existing.phone = request.phone or existing.phone
+            existing.phone = candidate_phone or existing.phone
             if request.shipping_address is not None:
                 existing.shipping_address = request.shipping_address
             existing.subtotal = request.subtotal
@@ -3157,7 +3171,7 @@ async def cart_track(
                 customer_id=optional_customer.id if optional_customer else None,
                 line_items=line_items_payload,
                 email=candidate_email,
-                phone=request.phone,
+                phone=candidate_phone,
                 shipping_address=request.shipping_address,
                 subtotal=request.subtotal,
                 shipping_cost=request.shipping_cost,
