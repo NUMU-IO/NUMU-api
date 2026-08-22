@@ -40,6 +40,10 @@ def _model_to_response(m) -> AppSettingsResponse:  # noqa: ANN001
         auto_cancel_threshold=m.auto_cancel_threshold,
         paymob_connected=m.paymob_connected,
         whatsapp_connected=m.whatsapp_connected,
+        trust_network_enabled=m.trust_network_enabled,
+        recovery_enabled=m.recovery_enabled,
+        auto_approve_on_trust_enabled=m.auto_approve_on_trust_enabled,
+        auto_approve_trust_threshold=m.auto_approve_trust_threshold,
     )
 
 
