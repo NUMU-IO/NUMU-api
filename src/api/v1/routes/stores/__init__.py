@@ -64,6 +64,7 @@ from src.api.v1.routes.stores import (
 )
 from src.api.v1.routes.stores import menus as menus_module
 from src.api.v1.routes.stores import metafields as metafields_module
+from src.api.v1.routes.stores import notifications as notifications_module
 from src.api.v1.routes.stores import onboarding as onboarding_module
 from src.api.v1.routes.stores import order_import as order_import_module
 from src.api.v1.routes.stores import orders as orders_module
@@ -132,6 +133,7 @@ router.include_router(
     abandoned_checkouts_module.router, tags=["Store Abandoned Checkouts"]
 )
 router.include_router(order_import_module.router, tags=["Store Order Import"])
+router.include_router(notifications_module.router, tags=["Store Notifications"])
 router.include_router(dashboard_module.router, tags=["Store Dashboard"])
 router.include_router(audit_module.router, tags=["Store MCP Audit"])
 # customer_import must be registered BEFORE customers: it owns the static

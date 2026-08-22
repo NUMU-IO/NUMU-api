@@ -2,6 +2,7 @@
 
 import json
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
@@ -27,7 +28,7 @@ async def inbox_websocket(
 
     try:
         payload = _verify_token(token)
-        if not payload or payload.get("store_id") != store_id:
+        if not payload or not await _user_may_access_store(payload, store_id):
             await websocket.close(code=4003, reason="Invalid token")
             return
     except Exception:
@@ -61,7 +62,13 @@ async def inbox_websocket(
 
 
 def _verify_token(token: str) -> dict[str, Any] | None:
-    """Verify JWT token for websocket auth."""
+    """Verify JWT token for websocket auth.
+
+    Access tokens are USER-scoped (no store claim), so store access is
+    checked separately against the DB in ``_user_may_access_store``.
+    The previous version compared a hard-coded ``store_id: None`` to the
+    path param, which closed every connection with 4003.
+    """
     from src.infrastructure.external_services.token_service import TokenService
 
     try:
@@ -72,10 +79,39 @@ def _verify_token(token: str) -> dict[str, Any] | None:
             "email": payload.email,
             "role": payload.role,
             "tenant_id": str(payload.tenant_id) if payload.tenant_id else None,
-            "store_id": None,
         }
     except Exception:
         return None
+
+
+async def _user_may_access_store(payload: dict[str, Any], store_id: str) -> bool:
+    """Owner of the store, or a member of its tenant, or a super admin."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.store import StoreModel
+
+    try:
+        sid = UUID(store_id)
+    except ValueError:
+        return False
+    role = str(payload.get("role") or "").lower()
+    if role in {"super_admin", "superadmin"}:
+        return True
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                select(StoreModel.owner_id, StoreModel.tenant_id).where(
+                    StoreModel.id == sid
+                )
+            )
+        ).first()
+    if row is None:
+        return False
+    owner_id, tenant_id = row
+    if str(owner_id) == payload.get("user_id"):
+        return True
+    return bool(payload.get("tenant_id")) and str(tenant_id) == payload.get("tenant_id")
 
 
 __all__ = ["router"]

@@ -63,6 +63,9 @@ from src.infrastructure.database.models.tenant.marketing_campaign import (
     MarketingCampaignModel,
 )
 from src.infrastructure.database.models.tenant.menu import MenuModel
+from src.infrastructure.database.models.tenant.merchant_notification import (
+    MerchantNotificationModel,
+)
 from src.infrastructure.database.models.tenant.merchant_signal import (
     MerchantSignalModel,
 )
@@ -192,6 +195,7 @@ __all__ = [
     "NetworkReputationModel",
     "InstapayIntentModel",
     "OrderModel",
+    "MerchantNotificationModel",
     "OrderActivityModel",
     "ArticleModel",
     "BlogModel",

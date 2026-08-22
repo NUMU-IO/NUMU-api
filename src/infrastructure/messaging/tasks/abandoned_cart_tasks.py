@@ -11,6 +11,9 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
+from src.application.services.notification_feed import (
+    emit_notification_standalone,
+)
 from src.config import settings
 from src.infrastructure.messaging.celery_app import celery_app
 
@@ -246,6 +249,29 @@ async def _sweep_anonymous_phone_checkouts(
                 if store is None or not store.subdomain:
                     stats["skipped"] += 1
                     continue
+
+                # Feed row for the hub bell — before the WhatsApp gate, so a
+                # merchant with nudges off still sees the abandoned cart.
+                # dedupe on the checkout row: one notification per cart.
+                await emit_notification_standalone(
+                    store_id=row.store_id,
+                    category="abandoned_carts",
+                    kind="cart.abandoned",
+                    data={
+                        "customer_name": None,
+                        "phone": str(row.phone),
+                        "items_count": sum(
+                            (li.get("quantity") or 0) for li in (row.line_items or [])
+                        ),
+                        "total_cents": int(row.total or 0),
+                        "currency": row.currency or "EGP",
+                        "checkout_id": str(row.id),
+                    },
+                    link="/orders/abandoned",
+                    entity_type="abandoned_checkout",
+                    entity_id=row.id,
+                    dedupe_key=f"cart.abandoned:anon:{row.id}",
+                )
                 store_settings = store.settings or {}
                 wa_notifs = store_settings.get("whatsapp_notifications", {}) or {}
                 # Same default-OFF marketing gate as the customer-cart pass.
@@ -425,6 +451,32 @@ async def _send_notification(
         customer_name = (
             f"{customer.first_name or ''} {customer.last_name or ''}".strip()
             or "عميلنا"
+        )
+
+        # Merchant notification feed (hub bell) — written regardless of
+        # whether a customer nudge goes out, because "a cart was abandoned"
+        # is merchant-actionable on its own. One row per customer per day.
+        from src.application.services.notification_feed import (
+            emit_notification_standalone,
+        )
+
+        await emit_notification_standalone(
+            store_id=UUID(store_id),
+            category="abandoned_carts",
+            kind="cart.abandoned",
+            data={
+                "customer_name": customer_name,
+                "customer_id": str(customer_id),
+                "items_count": cart_items_count,
+                "total_cents": int(cart_subtotal),
+                "currency": cart_currency,
+            },
+            link="/orders/abandoned",
+            entity_type="customer",
+            entity_id=UUID(customer_id),
+            dedupe_key=(
+                f"cart.abandoned:{customer_id}:{datetime.now(UTC).strftime('%Y%m%d')}"
+            ),
         )
         customer_phone = customer.phone
         customer_email = customer.email
