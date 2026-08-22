@@ -57,15 +57,21 @@ def build_payload(
     url: str,
     tag: str,
     locale: str | None = None,
+    important: bool = False,
 ) -> str:
     """Serialise the payload the service worker expects.
 
-    ─── NO CUSTOMER PII, EVER ──────────────────────────────────────────────
-    A push notification renders on a LOCK SCREEN, visible to anyone holding
-    the phone — and merchant phones get handed to staff, couriers and family.
-    So the contract is: order number and amount only. Never a customer name,
-    phone, email or address. The service worker deep-links to the order and
-    the merchant reads the details behind their own session.
+    ─── LOCK-SCREEN CONTRACT ──────────────────────────────────────────────
+    A push renders on a LOCK SCREEN, visible to anyone holding the phone.
+    The default body is order number + amount only. Customer details are
+    included ONLY when the merchant opted in via
+    ``store.settings.push_notifications.rich_details`` (the Notifications →
+    Preferences toggle spells out the trade-off). Never a phone, email or
+    address in either mode. The service worker deep-links to the order.
+
+    ``important`` makes the notification persistent (requireInteraction)
+    with a stronger vibration; the system default sound always plays —
+    web push cannot ship a custom sound on iOS or Android.
 
     ``url`` is a RELATIVE in-app path for the same reason a token would be
     unacceptable here: the payload is stored and displayed outside our control.
@@ -86,6 +92,7 @@ def build_payload(
             # The SW passes this straight to showNotification(); without it an
             # Arabic body renders left-to-right.
             "dir": "rtl" if is_ar else "ltr",
+            "important": important,
         },
         ensure_ascii=False,
     )

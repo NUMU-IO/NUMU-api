@@ -25,6 +25,13 @@ from src.infrastructure.database.models.tenant.store import StoreModel
 logger = get_logger(__name__)
 
 
+def _name_from_address(address: dict | None) -> str | None:
+    if not address:
+        return None
+    name = f"{address.get('first_name') or ''} {address.get('last_name') or ''}".strip()
+    return name or None
+
+
 def _format_amount(total_cents: int | None, currency: str | None, is_ar: bool) -> str:
     """Money for a lock screen: whole units, no decimals, localised suffix."""
     value = (total_cents or 0) / 100
@@ -90,12 +97,29 @@ async def handle_merchant_order_push(event: OrderCreatedEvent) -> None:
         amount = _format_amount(order.total, order.currency or event.currency, is_ar)
         number = order.order_number or str(order.id)[:8]
 
-        # ─── PAYLOAD: order number + amount ONLY ────────────────────────────
-        # This renders on a lock screen, which merchants hand to staff and
-        # couriers. No customer name, phone, email or address — ever. The
-        # merchant taps through and reads the details behind their own session.
+        # ─── PAYLOAD ─────────────────────────────────────────────────────────
+        # Default: order number + amount only (lock screens get handed to
+        # staff and couriers). With push_notifications.rich_details (toggle on
+        # Notifications → Preferences, default on) the body reads like the
+        # new-order email: customer · items · method · amount · time. Never
+        # phone, email or address in either mode.
         title = f"طلب جديد #{number}" if is_ar else f"New order #{number}"
         body = amount
+        if push_prefs.get("rich_details", True):
+            from src.application.services.notification_feed import rich_push_body
+
+            body = rich_push_body(
+                customer_name=_name_from_address(order.shipping_address),
+                items_count=sum(
+                    int((li or {}).get("quantity") or 0)
+                    for li in (order.line_items or [])
+                ),
+                payment_method=order.payment_method,
+                amount=amount,
+                created_at=order.created_at,
+                store_settings=store_settings,
+                is_ar=is_ar,
+            )
         url = f"/orders/{order.id}"
         # Collapses duplicates at the OS level, which is what makes a Celery
         # retry safe: it replaces the notification instead of stacking a second.

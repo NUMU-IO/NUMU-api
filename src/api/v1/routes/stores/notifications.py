@@ -30,6 +30,7 @@ from src.application.services.notification_feed import (
     SETTINGS_KEY,
     notification_channel,
     push_important_enabled,
+    push_rich_details_enabled,
 )
 from src.config import settings as app_settings
 from src.core.entities.store import Store
@@ -93,6 +94,9 @@ class NotificationPreferencesResponse(BaseModel):
     # Web-push for important feed rows (cancelled / payment failed /
     # returned / kill-switch). Opt-out; default on.
     push_important: bool
+    # Customer name / items / payment method in push bodies (like the
+    # new-order email). Opt-out; default on.
+    push_rich_details: bool
 
 
 class NotificationPreferencesUpdate(BaseModel):
@@ -100,6 +104,7 @@ class NotificationPreferencesUpdate(BaseModel):
     email_new_order: bool | None = None
     push_new_order: bool | None = None
     push_important: bool | None = None
+    push_rich_details: bool | None = None
 
 
 def _to_response(m: MerchantNotificationModel) -> NotificationItemResponse:
@@ -299,6 +304,7 @@ def _prefs_from_settings(settings: dict | None) -> NotificationPreferencesRespon
         email_new_order=bool(email),
         push_new_order=bool(push),
         push_important=push_important_enabled(s),
+        push_rich_details=push_rich_details_enabled(s),
     )
 
 
@@ -339,12 +345,18 @@ async def update_preferences(
         email = dict(settings.get("email_notifications") or {})
         email["new_order"] = body.email_new_order
         settings["email_notifications"] = email
-    if body.push_new_order is not None or body.push_important is not None:
+    if (
+        body.push_new_order is not None
+        or body.push_important is not None
+        or body.push_rich_details is not None
+    ):
         push = dict(settings.get("push_notifications") or {})
         if body.push_new_order is not None:
             push["new_order"] = body.push_new_order
         if body.push_important is not None:
             push["important"] = body.push_important
+        if body.push_rich_details is not None:
+            push["rich_details"] = body.push_rich_details
         settings["push_notifications"] = push
     store.settings = settings
     await store_repo.update(store)

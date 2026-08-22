@@ -234,12 +234,94 @@ def _format_amount(total_cents: Any, currency: Any, is_ar: bool) -> str:
     return f"{cur} {formatted}"
 
 
+def push_rich_details_enabled(store_settings: dict | None) -> bool:
+    """Customer name / items / method in push bodies. Opt-out; default on."""
+    push = (store_settings or {}).get("push_notifications") or {}
+    return bool(push.get("rich_details", True))
+
+
+PAYMENT_METHOD_LABELS = {
+    "cod": ("Cash on delivery", "الدفع عند الاستلام"),
+    "instapay": ("InstaPay", "إنستاباي"),
+    "vodafone_cash": ("Vodafone Cash", "فودافون كاش"),
+    "card": ("Card", "بطاقة"),
+    "paymob": ("Card (Paymob)", "بطاقة (Paymob)"),
+    "kashier": ("Card (Kashier)", "بطاقة (Kashier)"),
+    "fawry": ("Fawry", "فوري"),
+    "bank_transfer": ("Bank transfer", "تحويل بنكي"),
+}
+
+
+def rich_push_body(
+    *,
+    customer_name: str | None,
+    items_count: int | None,
+    payment_method: str | None,
+    amount: str,
+    created_at: Any,
+    store_settings: dict | None,
+    is_ar: bool,
+    extra: str | None = None,
+) -> str:
+    """Email-style lock-screen body: customer · items · method · amount · time.
+
+    Never phone / email / address. Parts that are empty are dropped.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from src.core.utils.store_timezone import resolve_store_timezone_name
+
+    parts: list[str] = []
+    if customer_name:
+        parts.append(customer_name)
+    if items_count:
+        parts.append(
+            f"{items_count} منتج"
+            if is_ar
+            else f"{items_count} item{'s' if items_count != 1 else ''}"
+        )
+    if payment_method:
+        label = PAYMENT_METHOD_LABELS.get(str(payment_method).lower())
+        parts.append(
+            (label[1] if is_ar else label[0]) if label else str(payment_method)
+        )
+    if amount:
+        parts.append(amount)
+    if extra:
+        parts.append(extra)
+    if isinstance(created_at, datetime):
+        try:
+            local = created_at.astimezone(
+                ZoneInfo(resolve_store_timezone_name(store_settings))
+            )
+            parts.append(local.strftime("%d-%m-%Y %I:%M %p"))
+        except Exception:  # noqa: BLE001 — a bad tz must not drop the push
+            pass
+    return " · ".join(parts)
+
+
 def push_copy(result: EmitResult) -> tuple[str, str] | None:
-    """Lock-screen title/body for important kinds. No customer PII."""
+    """Lock-screen title/body for important kinds.
+
+    Body is amount-only unless the store opted into rich details, in which
+    case it reads like the email (customer · method · amount · reason).
+    """
     is_ar = not result.language.lower().startswith("en")
     d = result.data or {}
     number = d.get("order_number") or ""
     amount = _format_amount(d.get("total_cents"), d.get("currency"), is_ar)
+    if push_rich_details_enabled(result.store_settings):
+        amount = rich_push_body(
+            customer_name=d.get("customer_name"),
+            items_count=d.get("items_count"),
+            payment_method=d.get("payment_method"),
+            amount=amount,
+            created_at=None,
+            store_settings=result.store_settings,
+            is_ar=is_ar,
+            extra=d.get("reason") or None,
+        )
     kind = result.kind
     if kind == "order.cancelled":
         title = f"تم إلغاء الطلب #{number}" if is_ar else f"Order #{number} cancelled"
@@ -290,6 +372,8 @@ def _enqueue_push(result: EmitResult) -> None:
             # than stacks the lock-screen notification.
             tag=result.dedupe_key or f"{result.kind}:{result.notification_id}",
             user_ids=[str(result.owner_id)] if result.owner_id else None,
+            # Persistent + stronger vibration in the service worker.
+            important=True,
         )
     except Exception as exc:  # noqa: BLE001 — never break the producer
         logger.warning(
