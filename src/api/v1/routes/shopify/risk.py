@@ -97,7 +97,7 @@ async def take_risk_action(
         ShopifyInstallationRepository, Depends(get_shopify_installation_repo)
     ],
 ):
-    model = await repo.update_action(order_id, request.action)
+    model = await repo.update_action(order_id, request.action, store_id=store_id)
     if not model:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

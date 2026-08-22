@@ -73,6 +73,8 @@ celery_app.conf.update(
         # backend-030 / US6 — 90-day dead-letter purge (daily at 03:00 UTC).
         "src.infrastructure.messaging.tasks.whatsapp_dead_letter_purge",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
+        # GDPR erasure propagation to the standalone Trust Network.
+        "src.infrastructure.messaging.tasks.trust_network_privacy_tasks",
         # Blog/articles CMS — scheduled-article publisher (every 60s).
         "src.infrastructure.messaging.tasks.blog_tasks",
         "src.infrastructure.messaging.tasks.abandoned_cart_tasks",
