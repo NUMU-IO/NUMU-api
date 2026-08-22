@@ -12,6 +12,7 @@ from src.core.events.order_events import (
 from src.core.events.payment_events import (
     PaymentProofApprovedEvent,
     PaymentProofRejectedEvent,
+    PaymentProofSubmittedEvent,
 )
 from src.core.events.product_events import (
     ProductCreatedEvent,
@@ -81,6 +82,7 @@ from src.infrastructure.events.handlers.notification_feed_handler import (
     handle_order_created_notification,
     handle_order_paid_notification,
     handle_order_status_notification,
+    handle_payment_proof_submitted_notification,
 )
 from src.infrastructure.events.handlers.order_activity_handler import (
     handle_order_created_activity,
@@ -197,6 +199,9 @@ def create_event_bus() -> EventBus:
     bus.subscribe(OrderPaidEvent, handle_order_paid_notification)
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_notification)
     bus.subscribe(TrustKillSwitchFiredEvent, handle_kill_switch_notification)
+    bus.subscribe(
+        PaymentProofSubmittedEvent, handle_payment_proof_submitted_notification
+    )
     # Email the store owner ("you got a new order") on every new order.
     # Opt-out per store via store.settings.email_notifications.new_order.
     bus.subscribe(OrderCreatedEvent, handle_merchant_order_notification)
