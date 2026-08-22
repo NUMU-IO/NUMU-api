@@ -56,6 +56,16 @@ def muted_categories(store_settings: dict | None) -> set[str]:
     return {c for c in muted if isinstance(c, str)}
 
 
+def email_important_enabled(store_settings: dict | None) -> bool:
+    """Email the owner for important rows. Opt-out; default on.
+
+    Web push only reaches iPhones as an installed PWA; email reaches every
+    phone today, so urgent alerts go out on both unless the merchant says no.
+    """
+    email = (store_settings or {}).get("email_notifications") or {}
+    return bool(email.get("important", True))
+
+
 def push_important_enabled(store_settings: dict | None) -> bool:
     """Absent key means enabled — opt-out, like the new-order push."""
     push = (store_settings or {}).get("push_notifications") or {}
@@ -185,6 +195,8 @@ async def fanout(result: EmitResult) -> None:
     await _publish_realtime(result)
     if result.important and push_important_enabled(result.store_settings):
         _enqueue_push(result)
+    if result.important and email_important_enabled(result.store_settings):
+        await _enqueue_email(result)
 
 
 async def _publish_realtime(result: EmitResult) -> None:
@@ -378,6 +390,45 @@ def _enqueue_push(result: EmitResult) -> None:
     except Exception as exc:  # noqa: BLE001 — never break the producer
         logger.warning(
             "notification_push_enqueue_failed",
+            store_id=str(result.store_id),
+            kind=result.kind,
+            error=str(exc),
+        )
+
+
+async def _enqueue_email(result: EmitResult) -> None:
+    """Urgent alert by email to the store owner (best-effort, via Celery)."""
+    if result.owner_id is None:
+        return
+    copy = push_copy(result)
+    if copy is None:
+        return
+    title, body = copy
+    try:
+        from src.infrastructure.database.models.public.user import UserModel
+
+        async with AsyncSessionLocal() as session:
+            email = (
+                await session.execute(
+                    select(UserModel.email).where(UserModel.id == result.owner_id)
+                )
+            ).scalar_one_or_none()
+        if not email:
+            return
+        from src.infrastructure.messaging.tasks.notification_center_tasks import (
+            send_merchant_alert_email_task,
+        )
+
+        send_merchant_alert_email_task.delay(
+            to=str(email),
+            title=title,
+            body=body,
+            link=result.link or "/notifications",
+            is_ar=not result.language.lower().startswith("en"),
+        )
+    except Exception as exc:  # noqa: BLE001 — never break the producer
+        logger.warning(
+            "notification_email_enqueue_failed",
             store_id=str(result.store_id),
             kind=result.kind,
             error=str(exc),
