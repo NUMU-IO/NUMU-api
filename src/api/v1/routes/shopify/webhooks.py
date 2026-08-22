@@ -588,6 +588,37 @@ async def process_webhook(
 
         await session.commit()
 
+        # Step 6: propagate the erasure to the standalone Trust Network
+        # (the privacy policy promises the network signal forgets).
+        # Queued with internal retries + a final alert, so the Shopify
+        # ACK never depends on TN availability.
+        network_erasure = "skipped_no_phone"
+        if phone_hash:
+            from src.application.services.trust_network_privacy import (
+                privacy_config,
+            )
+
+            if privacy_config()["enabled"]:
+                try:
+                    from src.infrastructure.messaging.tasks.trust_network_privacy_tasks import (  # noqa: E501
+                        erase_subject_from_trust_network,
+                    )
+
+                    erase_subject_from_trust_network.delay(
+                        phone_hash=phone_hash,
+                        reason=f"customers/redact:{store_id}",
+                    )
+                    network_erasure = "queued"
+                except Exception as exc:  # noqa: BLE001 — broker down
+                    logger.error(
+                        "trust_network_erasure_enqueue_failed for %s: %s",
+                        body.shop_domain,
+                        exc,
+                    )
+                    network_erasure = "enqueue_failed"
+            else:
+                network_erasure = "not_configured"
+
         logger.info(
             "GDPR customers/redact for %s (%s): risk=%d flows=%d otp=%d network=%s",
             body.shop_domain,
@@ -603,6 +634,7 @@ async def process_webhook(
             "recovery_flows_deleted": recovery_flows_deleted,
             "otp_codes_deleted": otp_codes_deleted,
             "network": network_result,
+            "network_erasure": network_erasure,
             "note": (
                 "no phone in payload — OTP/network signal preserved"
                 if not phone
@@ -676,8 +708,32 @@ async def process_webhook(
                 for r in rows
             ]
 
+        # Standalone Trust Network export — the cross-merchant signal is
+        # part of what we hold on the subject. Explicit status rather
+        # than pretending completeness when the TN is unreachable.
+        tn_export_status = "skipped_no_phone"
+        tn_export: dict | None = None
+        if phone_hash:
+            from src.application.services.trust_network_privacy import (
+                fetch_export,
+                privacy_config,
+            )
+
+            if privacy_config()["enabled"]:
+                tn_export = await fetch_export(phone_hash)
+                tn_export_status = "ok" if tn_export is not None else "unavailable"
+            else:
+                tn_export_status = "not_configured"
+        if tn_export is not None:
+            network_contributions.append({
+                "type": "trust_network_export",
+                "source": "standalone_trust_network",
+                "data": tn_export,
+            })
+
         result = {
             "customer_email": email,
+            "trust_network_export_status": tn_export_status,
             "data_held": [
                 {
                     "type": "risk_assessment",

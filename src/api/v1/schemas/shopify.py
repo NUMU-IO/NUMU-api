@@ -217,6 +217,10 @@ class AppSettingsResponse(BaseModel):
     auto_approve_threshold: int = 30
     auto_hold_threshold: int = 70
     auto_cancel_threshold: int = 90
+    trust_network_enabled: bool = True
+    recovery_enabled: bool = False
+    auto_approve_on_trust_enabled: bool = False
+    auto_approve_trust_threshold: int = 80
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -224,6 +228,13 @@ class UpdateSettingsRequest(BaseModel):
     auto_approve_threshold: int | None = None
     auto_hold_threshold: int | None = None
     auto_cancel_threshold: int | None = None
+    # Consent + feature toggles. These were silently DROPPED before
+    # (pydantic ignores undeclared fields), so the app's recovery/trust
+    # switches never persisted.
+    trust_network_enabled: bool | None = None
+    recovery_enabled: bool | None = None
+    auto_approve_on_trust_enabled: bool | None = None
+    auto_approve_trust_threshold: int | None = Field(None, ge=0, le=100)
 
 
 class ConnectPaymobRequest(BaseModel):
