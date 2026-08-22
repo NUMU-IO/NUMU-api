@@ -23,6 +23,7 @@ from src.core.events.order_events import (
     OrderPaidEvent,
     OrderStatusChangedEvent,
 )
+from src.core.events.payment_events import PaymentProofSubmittedEvent
 from src.core.events.risk_events import TrustKillSwitchFiredEvent
 from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
@@ -163,4 +164,30 @@ async def handle_kill_switch_notification(event: TrustKillSwitchFiredEvent) -> N
         link="/trust-network",
         important=True,
         dedupe_key=f"trust.kill_switch:{event.event_id}",
+    )
+
+
+async def handle_payment_proof_submitted_notification(
+    event: PaymentProofSubmittedEvent,
+) -> None:
+    """Manual-rail proof waiting on the merchant — important: money is parked."""
+    snap = await _order_snapshot(event.order_id)
+    await emit_notification_standalone(
+        store_id=event.store_id,
+        tenant_id=event.tenant_id,
+        category="payments",
+        kind="payment.proof_submitted",
+        data={
+            "order_number": event.order_number or snap.get("order_number"),
+            "customer_name": snap.get("customer_name"),
+            "total_cents": event.amount_cents or snap.get("total_cents"),
+            "currency": event.currency or snap.get("currency"),
+            "payment_method": event.payment_method,
+            "reference_code": event.reference_code,
+        },
+        link=f"/orders/{event.order_id}",
+        entity_type="order",
+        entity_id=event.order_id,
+        important=True,
+        dedupe_key=f"payment.proof_submitted:{event.proof_id}",
     )

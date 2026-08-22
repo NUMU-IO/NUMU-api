@@ -342,3 +342,40 @@ async def test_status_handler_maps_cancelled_to_important(
     ]
     assert rows[0].data["reason"] == "no stock"
     assert rows[1].data["tracking_number"] == "BX1"
+
+
+@pytest.mark.asyncio
+async def test_payment_proof_submitted_is_important(test_session, patched_sessions):
+    from src.core.events.payment_events import PaymentProofSubmittedEvent
+
+    store = await _seed_store(test_session)
+    order = await _seed_order(test_session, store)
+    await handler_mod.handle_payment_proof_submitted_notification(
+        PaymentProofSubmittedEvent(
+            proof_id=uuid4(),
+            order_id=order.id,
+            order_number=order.order_number,
+            tenant_id=store.tenant_id,
+            store_id=store.id,
+            customer_id=order.customer_id,
+            reference_code="REF-1",
+            amount_cents=72900,
+            currency="EGP",
+            payment_method="vodafone_cash",
+        )
+    )
+    async with patched_sessions() as s:
+        row = (
+            await s.execute(
+                select(MerchantNotificationModel).where(
+                    MerchantNotificationModel.store_id == store.id
+                )
+            )
+        ).scalar_one()
+    assert (row.category, row.kind, row.is_important) == (
+        "payments",
+        "payment.proof_submitted",
+        True,
+    )
+    assert row.data["customer_name"] == "Yahia Sherif"
+    assert row.data["payment_method"] == "vodafone_cash"

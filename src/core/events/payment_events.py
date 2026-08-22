@@ -69,3 +69,23 @@ class PaymentProofRejectedEvent(DomainEvent):
     # "vodafone_cash"). Defaulted so events replayed from before the
     # second rail existed still deserialize.
     payment_method: str = "instapay"
+
+
+class PaymentProofSubmittedEvent(DomainEvent):
+    """Emitted when a customer uploads a manual-rail proof that needs the
+    merchant's review (i.e. OCR did not auto-approve it).
+
+    Drives the merchant notification feed + an urgent web-push: money is
+    waiting on a human decision, and the order stays unpaid until then.
+    """
+
+    proof_id: UUID
+    order_id: UUID
+    order_number: str
+    tenant_id: UUID
+    store_id: UUID
+    customer_id: UUID | None = None
+    reference_code: str | None = None
+    amount_cents: int = 0
+    currency: str = "EGP"
+    payment_method: str = "instapay"

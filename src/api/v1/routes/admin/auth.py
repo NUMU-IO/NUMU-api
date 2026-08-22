@@ -167,6 +167,13 @@ async def admin_refresh(
             detail="Missing admin refresh token",
         )
     payload = token_service.verify_token(refresh_cookie)
+    # The merchant refresh checks this; the admin twin never did, so any
+    # valid JWT (an access token, a reset token) could mint an admin pair.
+    if payload.token_type != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin refresh token",
+        )
     user = await user_repo.get_by_id(payload.user_id)
     if not user or user.role != UserRole.SUPER_ADMIN:
         raise HTTPException(
