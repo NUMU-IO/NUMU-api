@@ -209,6 +209,11 @@ class OrderListItemDTO(BaseDTO):
     campaign_name: str | None = None
     customer_confirmation_status: str | None = None
     customer_confirmed_at: datetime | None = None
+    # Hub orders list "Shipping" column. Both were already on the entity;
+    # the list DTO just never carried them, so the column rendered a
+    # literal "—" for every row.
+    shipping_method: str | None = None
+    tracking_number: str | None = None
 
     @classmethod
     def from_entity(
@@ -236,6 +241,8 @@ class OrderListItemDTO(BaseDTO):
             campaign_name=campaign_name,
             customer_confirmation_status=entity.customer_confirmation_status,
             customer_confirmed_at=entity.customer_confirmed_at,
+            shipping_method=entity.shipping_method,
+            tracking_number=entity.tracking_number,
         )
 
 

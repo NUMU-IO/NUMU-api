@@ -605,6 +605,7 @@ class ProductRepository(IProductRepository):
         sku=None,
         price_min=None,
         price_max=None,
+        has_cost: bool | None = None,
     ):
         """Apply shared filter predicates to a product query."""
         query = self._tenant_filter(query)
@@ -627,6 +628,12 @@ class ProductRepository(IProductRepository):
             query = query.where(ProductModel.price_amount >= price_min)
         if price_max is not None:
             query = query.where(ProductModel.price_amount <= price_max)
+        # Profit-readiness filter: the hub's "N products missing cost" banner
+        # and `/products?cost=missing` deep link.
+        if has_cost is True:
+            query = query.where(ProductModel.cost_price.isnot(None))
+        elif has_cost is False:
+            query = query.where(ProductModel.cost_price.is_(None))
         if search:
             search_term = f"%{search}%"
             query = query.where(
@@ -669,6 +676,7 @@ class ProductRepository(IProductRepository):
         price_max: int | None = None,
         sort_by: str | None = None,
         sort_order: str = "asc",
+        has_cost: bool | None = None,
     ) -> list[Product]:
         """List products with multiple optional filters, price range, and sorting."""
         query = select(ProductModel)
@@ -682,6 +690,7 @@ class ProductRepository(IProductRepository):
             sku=sku,
             price_min=price_min,
             price_max=price_max,
+            has_cost=has_cost,
         )
         query = self._apply_sort(query, sort_by, sort_order)
         query = query.offset(skip).limit(limit)
@@ -698,6 +707,7 @@ class ProductRepository(IProductRepository):
         sku: str | None = None,
         price_min: int | None = None,
         price_max: int | None = None,
+        has_cost: bool | None = None,
     ) -> int:
         """Count products matching the given filters."""
         query = select(func.count(ProductModel.id))
@@ -711,6 +721,7 @@ class ProductRepository(IProductRepository):
             sku=sku,
             price_min=price_min,
             price_max=price_max,
+            has_cost=has_cost,
         )
         result = await self.session.execute(query)
         return result.scalar() or 0

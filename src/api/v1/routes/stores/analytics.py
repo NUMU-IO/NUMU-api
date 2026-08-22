@@ -31,6 +31,10 @@ from src.api.dependencies.repositories import (
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
+from src.application.services.analytics_series import (
+    daily_revenue_series,
+    local_window_instants,
+)
 from src.application.services.health_score_service import (
     HEALTH_SCORE_WINDOW_DAYS,
     build_empty_state_message,
@@ -150,19 +154,10 @@ class ConversionStatsResponse(BaseModel):
     cart_abandonment_rate: float
 
 
-def _local_window_instants(
-    start_d: date, end_d: date, tz_name: str
-) -> tuple[datetime, datetime]:
-    """Inclusive UTC instant bounds covering the local days ``[start_d, end_d]``.
-
-    ``local_day_bounds`` returns a half-open ``[start, end)``; the repo
-    queries here are inclusive on both ends, so the upper bound is pulled
-    back by a microsecond rather than letting an order stamped exactly at
-    the next local midnight leak into the window.
-    """
-    start_dt, _ = local_day_bounds(start_d, tz_name)
-    _, end_excl = local_day_bounds(end_d, tz_name)
-    return start_dt, end_excl - timedelta(microseconds=1)
+# Shared with the weekly-digest task via application.services.analytics_series;
+# kept under the old private names so the routes below (and the correctness
+# tests that import them) are unchanged.
+_local_window_instants = local_window_instants
 
 
 def _contiguous_runs(dates: list[date]) -> list[tuple[date, date]]:
@@ -204,48 +199,20 @@ async def _daily_revenue_series(
 ) -> dict[date, tuple[int, int]]:
     """``{local_date: (revenue_cents, order_count)}`` for a closed date range.
 
-    Rollup rows are used only for days that are already COMPLETE. Today —
-    and any future date inside the window — is always computed live, and
-    so is any day the nightly task never wrote.
-
-    Why today can never come from the rollup: the task runs once at
-    03:30 and writes a row for the day it runs in. Serving that row for
-    the rest of the day freezes the number at whatever had happened by
-    03:30. The previous code did not even have that problem to solve — it
-    skipped today entirely (``range(1, …)``), so consumers read a missing
-    row as a hard zero and every sales chart ended in a cliff.
-
-    Also repairs gaps: any date in the window with no rollup row falls
-    through to the same live query, so a beat outage degrades to "slightly
-    slower" instead of "silently zero". The live query is a single indexed
-    GROUP BY over the missing span only, not the whole window.
+    Rollup rows for completed days, live query for today / any gap. See
+    ``analytics_series.daily_revenue_series`` for the full rationale. This
+    wrapper resolves "today" with this module's clock so the correctness
+    tests can pin it.
     """
-    today_local = local_date(datetime.now(UTC), tz_name)
-    n = (end_d - start_d).days + 1
-    if n <= 0:
-        return {}
-    all_dates = [start_d + timedelta(days=i) for i in range(n)]
-
-    rollups = await rollup_repo.get_range(store_id, start_d, end_d)
-    by_date: dict[date, tuple[int, int]] = {
-        r.rollup_date: (r.total_revenue_cents or 0, r.total_orders or 0)
-        for r in rollups
-        if r.rollup_date < today_local
-    }
-
-    missing = [d for d in all_dates if d not in by_date]
-    if missing:
-        live_start, live_end = _local_window_instants(
-            min(missing), max(missing), tz_name
-        )
-        rows = await order_repo.get_daily_aggregates(
-            store_id, live_start, live_end, timezone=tz_name
-        )
-        live = {d: (rev, cnt) for d, rev, cnt in rows}
-        for d in missing:
-            by_date[d] = live.get(d, (0, 0))
-
-    return {d: by_date.get(d, (0, 0)) for d in all_dates}
+    return await daily_revenue_series(
+        store_id=store_id,
+        tz_name=tz_name,
+        rollup_repo=rollup_repo,
+        order_repo=order_repo,
+        start_d=start_d,
+        end_d=end_d,
+        today_local=local_date(datetime.now(UTC), tz_name),
+    )
 
 
 @router.get(
@@ -944,6 +911,9 @@ class HealthScoreResponse(BaseModel):
     shipments_analyzed: int
     window_days: int = HEALTH_SCORE_WINDOW_DAYS
     empty_state_message: str | None = None
+    # What is still missing before a grade can be published:
+    # [{key: shipments|cod_shipments|settled_orders|usable_weight, needed, have}]
+    requirements: list[dict[str, int | str]] = []
     calculated_at: str | None
 
 
@@ -3004,8 +2974,16 @@ async def _compute_weekly_digest(
     rollup_repo: AnalyticsRollupRepository,
     analytics_repo: AnalyticsRepository,
     lang: str,
+    order_repo: OrderRepository,
 ) -> DigestContent:
-    """Assemble this-week metrics (store-local) and build the digest."""
+    """Assemble this-week metrics (store-local) and build the digest.
+
+    Revenue and order counts come from the same rollup+live merge the KPI
+    cards use (``_daily_revenue_series``). Reading the rollup table alone
+    printed "No sales this week" under a Booked-sales tile showing real
+    money whenever the week's orders landed today (never rolled up) or on
+    a day the beat skipped.
+    """
     from src.application.services.analytics_digest_service import build_weekly_digest
 
     tz_name = resolve_store_timezone_name(store.settings)
@@ -3014,8 +2992,24 @@ async def _compute_weekly_digest(
     prev_end = week_start - timedelta(days=1)
     prev_start = prev_end - timedelta(days=6)
 
+    async def _totals(start_d: date, end_d: date) -> tuple[int, int]:
+        series = await _daily_revenue_series(
+            store_id=store.id,
+            tz_name=tz_name,
+            rollup_repo=rollup_repo,
+            order_repo=order_repo,
+            start_d=start_d,
+            end_d=end_d,
+        )
+        return (
+            sum(rev for rev, _ in series.values()),
+            sum(cnt for _, cnt in series.values()),
+        )
+
+    cur_revenue, cur_orders = await _totals(week_start, today)
+    prev_revenue, prev_orders = await _totals(prev_start, prev_end)
+    # new_customers has no live equivalent yet — still rollup-sourced.
     cur = await rollup_repo.get_aggregated(store.id, week_start, today)
-    prev = await rollup_repo.get_aggregated(store.id, prev_start, prev_end)
 
     # Top product across the week (rollup JSONB merge).
     rollups = await rollup_repo.get_range(store.id, week_start, today)
@@ -3032,8 +3026,8 @@ async def _compute_weekly_digest(
             )
     top = max(prod_units.values(), key=lambda x: x[1], default=None)
 
-    orders = int(cur["total_orders"])
-    revenue = int(cur["total_revenue_cents"])
+    orders = int(cur_orders)
+    revenue = int(cur_revenue)
     currency = store.default_currency.value if store.default_currency else "EGP"
 
     def _fmt(cents: int) -> str:
@@ -3041,10 +3035,10 @@ async def _compute_weekly_digest(
 
     metrics = {
         "revenue_cents": revenue,
-        "prev_revenue_cents": int(prev["total_revenue_cents"]),
+        "prev_revenue_cents": int(prev_revenue),
         "orders": orders,
-        "prev_orders": int(prev["total_orders"]),
-        "new_customers": int(cur.get("new_customers", 0) or 0),
+        "prev_orders": int(prev_orders),
+        "new_customers": int((cur or {}).get("new_customers", 0) or 0),
         "aov_cents": revenue // orders if orders > 0 else 0,
         "top_product_name": top[0] if top else None,
         "top_product_units": top[1] if top else 0,
@@ -3126,11 +3120,14 @@ async def get_digest_preview(
         AnalyticsRollupRepository, Depends(get_analytics_rollup_repository)
     ],
     analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     lang: Annotated[Literal["en", "ar"], Query()] = "en",
 ):
     """The exact recap the merchant would receive by email/WhatsApp — so
     they can see it before enabling scheduled sends."""
-    content = await _compute_weekly_digest(store, rollup_repo, analytics_repo, lang)
+    content = await _compute_weekly_digest(
+        store, rollup_repo, analytics_repo, lang, order_repo
+    )
     return SuccessResponse(data=content, message="Digest preview generated")
 
 

@@ -498,6 +498,51 @@ class OrderRepository(IOrderRepository):
         result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
 
+    async def count_by_status_for_store(
+        self,
+        store_id: UUID,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        search: str | None = None,
+        customer_id: UUID | None = None,
+        exclude_statuses: list[OrderStatus] | None = None,
+    ) -> dict[str, int]:
+        """``{status_value: count}`` for a store, one GROUP BY round-trip.
+
+        Powers the orders-list tab badges. Mirrors the filters the list
+        endpoint applies (date window, free-text search, customer) so a
+        badge always agrees with the rows the tab would show. Statuses
+        with zero orders are simply absent from the dict.
+        """
+        from sqlalchemy import or_
+
+        query = select(OrderModel.status, func.count(OrderModel.id)).where(
+            OrderModel.store_id == store_id
+        )
+        if customer_id:
+            query = query.where(OrderModel.customer_id == customer_id)
+        if exclude_statuses:
+            query = query.where(OrderModel.status.notin_(exclude_statuses))
+        if date_from:
+            query = query.where(OrderModel.created_at >= date_from)
+        if date_to:
+            query = query.where(OrderModel.created_at <= date_to)
+        if search:
+            term = f"%{search}%"
+            query = query.where(
+                or_(
+                    OrderModel.order_number.ilike(term),
+                    OrderModel.customer_notes.ilike(term),
+                )
+            )
+        query = query.group_by(OrderModel.status)
+        result = await self.session.execute(self._tenant_filter(query))
+        counts: dict[str, int] = {}
+        for status_value, n in result.all():
+            key = getattr(status_value, "value", status_value)
+            counts[str(key)] = int(n or 0)
+        return counts
+
     async def count_by_customer(self, customer_id: UUID) -> int:
         """Get total count of orders for a customer."""
         query = select(func.count(OrderModel.id)).where(

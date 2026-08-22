@@ -267,6 +267,8 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
             if order_dto.customer_confirmed_at
             else None
         ),
+        shipping_method=getattr(order_dto, "shipping_method", None),
+        tracking_number=getattr(order_dto, "tracking_number", None),
     )
 
 
@@ -816,6 +818,43 @@ async def resolve_autopilot_exception(
     return SuccessResponse(
         data=ResolveAutopilotExceptionResponse(resolved=True),
         message="Autopilot exception dismissed",
+    )
+
+
+# NOTE: static path — must stay above ``/{order_id}`` or FastAPI will try
+# to parse "counts" as an order UUID.
+@router.get(
+    "/counts",
+    summary="Per-status order counts (list tab badges)",
+    operation_id="get_order_status_counts",
+)
+async def get_order_status_counts(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    date_from: datetime | None = Query(None),
+    date_to: datetime | None = Query(None),
+    search: str | None = Query(None),
+    customer_id: str | None = Query(None),
+):
+    """Counts per order status, honouring the same date/search filters as
+    the list endpoint so each tab badge matches the rows that tab shows.
+    Drafts are excluded, as they are from the main list."""
+    from src.api.v1.schemas.tenant.order import OrderStatusCountsResponse
+    from src.core.entities.order import OrderStatus as _OS
+
+    by_status = await order_repo.count_by_status_for_store(
+        store_id=store.id,
+        date_from=date_from,
+        date_to=date_to,
+        search=search,
+        customer_id=UUID(customer_id) if customer_id else None,
+        exclude_statuses=[_OS.DRAFT],
+    )
+    return SuccessResponse(
+        data=OrderStatusCountsResponse(
+            by_status=by_status, total=sum(by_status.values())
+        ),
+        message="Order counts retrieved",
     )
 
 

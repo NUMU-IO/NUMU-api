@@ -476,6 +476,23 @@ async def calculate_store_health_score(
 
     insufficient_data = total_shipments == 0 and total_orders == 0 and total_cod == 0
 
+    # What the merchant still needs before a grade can be published. Shown
+    # as a checklist under "Not enough data yet" so the empty state says
+    # exactly what is missing instead of just that something is.
+    requirements = [
+        {
+            "key": "shipments",
+            "needed": MIN_SHIPMENTS_FOR_DELIVERY,
+            "have": int(total_shipments),
+        },
+        {"key": "cod_shipments", "needed": MIN_COD_SHIPMENTS, "have": int(total_cod)},
+        {
+            "key": "settled_orders",
+            "needed": MIN_ORDERS_FOR_COMPLETION,
+            "have": int(settled_orders),
+        },
+    ]
+
     # === Calculate sub-scores ===
     sub_scores = {
         "delivery_success": _rate_to_score(
@@ -552,6 +569,15 @@ async def calculate_store_health_score(
         "orders_analyzed": total_orders,
         "shipments_analyzed": total_shipments,
         "window_days": days,
+        "requirements": requirements
+        + [
+            {
+                # Expressed in percent so the UI can show "30 / 45".
+                "key": "usable_weight",
+                "needed": int(round(MIN_USABLE_WEIGHT * 100)),
+                "have": int(round(sum(usable.values()) * 100)),
+            }
+        ],
         "empty_state_message": (
             build_empty_state_message(
                 lang,
