@@ -29,9 +29,31 @@ router = APIRouter(prefix="/{store_id}/payments")
 # ── Response schemas ────────────────────────────────────────────────
 
 
+# Every gateway webhook and the InstaPay proof flow write ``status="success"``
+# on PaymentTransactionModel. This endpoint used to filter on the literal
+# ``"successful"`` — which no writer ever produced — so the transaction sum
+# was always 0 and the hero number silently fell back to ``SUM(orders.total)``.
+# Accept both spellings so any legacy rows still count.
+SUCCESS_STATUSES: tuple[str, ...] = ("success", "successful")
+PENDING_STATUSES: tuple[str, ...] = ("pending", "processing", "authorized", "initiated")
+COD_IN_TRANSIT_ORDER_STATUSES: tuple[str, ...] = ("confirmed", "processing", "shipped")
+
+
 class BalancesResponse(BaseModel):
     wallet_balance_cents: int
     store_balance_cents: int
+    # Sum of gateway transactions that are still settling. Previously the
+    # hub derived this from whichever 20 rows were on the current page.
+    pending_clearance_cents: int = 0
+    # COD orders that are confirmed/processing/shipped but not yet paid —
+    # cash the courier still owes the merchant.
+    cod_in_transit_cents: int = 0
+    cod_in_transit_count: int = 0
+    # Which source produced ``store_balance_cents``: "transactions" when
+    # there is at least one successful gateway transaction, else "orders"
+    # (sum of paid orders). The hub labels the number accordingly instead
+    # of presenting a silent fallback as a ledger balance.
+    store_balance_source: str = "transactions"
 
 
 class TransactionResponse(BaseModel):
@@ -72,19 +94,52 @@ async def get_balances(
     # Store balance = sum of successful payment transactions
     q = select(func.coalesce(func.sum(PaymentTransactionModel.amount_cents), 0)).where(
         PaymentTransactionModel.store_id == store_id,
-        PaymentTransactionModel.status == "successful",
+        PaymentTransactionModel.status.in_(SUCCESS_STATUSES),
     )
     result = await db.execute(q)
-    store_balance = result.scalar() or 0
+    store_balance = int(result.scalar() or 0)
+    store_balance_source = "transactions"
 
-    # Also count from paid orders if no payment transactions exist
+    # Stores that only ever took COD / manual payments have no gateway
+    # transactions at all; fall back to paid orders but say so.
     if store_balance == 0:
         q_orders = select(func.coalesce(func.sum(OrderModel.total), 0)).where(
             OrderModel.store_id == store_id,
             OrderModel.payment_status == "paid",
         )
         result_orders = await db.execute(q_orders)
-        store_balance = result_orders.scalar() or 0
+        store_balance = int(result_orders.scalar() or 0)
+        store_balance_source = "orders"
+
+    pending_clearance = int(
+        (
+            await db.execute(
+                select(
+                    func.coalesce(func.sum(PaymentTransactionModel.amount_cents), 0)
+                ).where(
+                    PaymentTransactionModel.store_id == store_id,
+                    PaymentTransactionModel.status.in_(PENDING_STATUSES),
+                )
+            )
+        ).scalar()
+        or 0
+    )
+
+    cod_row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(OrderModel.total), 0),
+                func.count(OrderModel.id),
+            ).where(
+                OrderModel.store_id == store_id,
+                OrderModel.payment_method == "cod",
+                OrderModel.payment_status != "paid",
+                OrderModel.status.in_(COD_IN_TRANSIT_ORDER_STATUSES),
+            )
+        )
+    ).one()
+    cod_in_transit_cents = int(cod_row[0] or 0)
+    cod_in_transit_count = int(cod_row[1] or 0)
 
     # Wallet = the tenant's prepaid platform wallet (shared across the
     # tenant's stores). Zero when no wallet row exists yet.
@@ -104,6 +159,10 @@ async def get_balances(
         data=BalancesResponse(
             wallet_balance_cents=wallet_balance,
             store_balance_cents=store_balance,
+            pending_clearance_cents=pending_clearance,
+            cod_in_transit_cents=cod_in_transit_cents,
+            cod_in_transit_count=cod_in_transit_count,
+            store_balance_source=store_balance_source,
         )
     )
 

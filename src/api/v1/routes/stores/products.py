@@ -552,6 +552,13 @@ async def list_products(
         None, description="Sort field: name, price, created_at, updated_at, quantity"
     ),
     sort_order: str = Query("asc", description="Sort direction: asc or desc"),
+    has_cost: bool | None = Query(
+        None,
+        description=(
+            "true → only products with a cost price set; "
+            "false → only products missing one (profit-readiness filter)"
+        ),
+    ),
 ):
     """List products for a store with optional filtering, search, and sorting."""
     # Validate sort parameters against whitelist
@@ -600,6 +607,7 @@ async def list_products(
         price_max=price_max,
         sort_by=sort_by,
         sort_order=sort_order,
+        has_cost=has_cost,
     )
     total = await product_repo.count_with_filters(
         store_id=store.id,
@@ -609,6 +617,7 @@ async def list_products(
         sku=sku,
         price_min=price_min,
         price_max=price_max,
+        has_cost=has_cost,
     )
 
     from dataclasses import dataclass
