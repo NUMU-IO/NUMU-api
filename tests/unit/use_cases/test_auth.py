@@ -17,7 +17,11 @@ from src.application.use_cases.auth.login import LoginUserUseCase
 from src.application.use_cases.auth.refresh_token import RefreshTokenUseCase
 from src.application.use_cases.auth.register import RegisterUserUseCase
 from src.core.entities.user import User, UserRole, UserStatus
-from src.core.exceptions import EntityNotFoundError, InvalidCredentialsError
+from src.core.exceptions import (
+    EntityNotFoundError,
+    InvalidCredentialsError,
+    InvalidTokenError,
+)
 from src.core.value_objects.email import Email
 
 
@@ -215,6 +219,11 @@ class TestRefreshTokenUseCase:
         self.mock_blacklist_service = MagicMock()
         self.mock_blacklist_service.is_used = AsyncMock(return_value=False)
         self.mock_blacklist_service.mark_used = AsyncMock()
+        self.mock_blacklist_service.get_rotation = AsyncMock(return_value=None)
+        self.mock_blacklist_service.remember_rotation = AsyncMock()
+        self.mock_payload.tenant_id = None
+        self.mock_payload.membership_id = None
+        self.mock_payload.perm_version = 0
 
         self.mock_token_service = MagicMock()
         self.mock_token_service.verify_token = MagicMock(return_value=self.mock_payload)
@@ -254,6 +263,61 @@ class TestRefreshTokenUseCase:
 
         with pytest.raises(EntityNotFoundError):
             await self.use_case.execute(dto)
+
+    @pytest.mark.asyncio
+    async def test_refresh_carries_claims_and_remembers_rotation(self):
+        """Tenant/membership claims survive rotation; the pair is cached
+        under the consumed jti for the grace window."""
+        from uuid import uuid4
+
+        tenant_id, membership_id = uuid4(), uuid4()
+        self.mock_payload.tenant_id = tenant_id
+        self.mock_payload.membership_id = membership_id
+        self.mock_payload.perm_version = 3
+
+        await self.use_case.execute(RefreshTokenDTO(refresh_token="t"))
+
+        for factory in (
+            self.mock_token_service.create_access_token,
+            self.mock_token_service.create_refresh_token,
+        ):
+            kwargs = factory.call_args.kwargs
+            assert kwargs["tenant_id"] == tenant_id
+            assert kwargs["membership_id"] == membership_id
+            assert kwargs["perm_version"] == 3
+        self.mock_blacklist_service.mark_used.assert_awaited_once_with(
+            "jti-123", 9999999999
+        )
+        self.mock_blacklist_service.remember_rotation.assert_awaited_once()
+        args = self.mock_blacklist_service.remember_rotation.call_args
+        assert args.args[:3] == ("jti-123", "new_access_token", "new_refresh_token")
+        assert args.kwargs["ttl"] > 0
+
+    @pytest.mark.asyncio
+    async def test_refresh_second_tab_inside_grace_gets_same_pair(self):
+        """A consumed jti presented again within the grace window is NOT
+        theft — it's the other tab. Same pair, no 401."""
+        self.mock_blacklist_service.is_used.return_value = True
+        self.mock_blacklist_service.get_rotation.return_value = (
+            "graced_access",
+            "graced_refresh",
+        )
+
+        result = await self.use_case.execute(RefreshTokenDTO(refresh_token="t"))
+
+        assert (result.access_token, result.refresh_token) == (
+            "graced_access",
+            "graced_refresh",
+        )
+        self.mock_token_service.create_access_token.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_refresh_reuse_after_grace_is_rejected(self):
+        self.mock_blacklist_service.is_used.return_value = True
+        self.mock_blacklist_service.get_rotation.return_value = None
+
+        with pytest.raises(InvalidTokenError):
+            await self.use_case.execute(RefreshTokenDTO(refresh_token="t"))
 
 
 class TestForgotPasswordUseCase:

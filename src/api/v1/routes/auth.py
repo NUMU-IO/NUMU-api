@@ -150,7 +150,10 @@ async def get_csrf_token(response: Response):
         samesite=settings.SAMESITE_COOKIES,
         domain=settings.COOKIE_DOMAIN,
         path="/",
-        max_age=86400,  # 24 hours
+        # Must outlive the session, not the day: at 24h it expired six days
+        # before the refresh token, and every mutation 403'd until the hub
+        # happened to re-fetch it.
+        max_age=settings.refresh_token_expire_days * 86400,
     )
     return SuccessResponse(
         data=CsrfTokenResponse(csrf_token=token),

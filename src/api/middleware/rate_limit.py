@@ -261,6 +261,37 @@ def _proxy_headers_trusted(peer_ip: str | None) -> bool:
     return any(addr in net for net in networks)
 
 
+def _is_internal_service(request: Request) -> bool:
+    """Request from one of OUR servers (shared-secret header).
+
+    Constant-time compare; an empty setting disables the mechanism.
+    """
+    secret = settings.internal_service_token
+    if not secret:
+        return False
+    presented = request.headers.get("x-internal-service-token")
+    if not presented:
+        return False
+    import hmac
+
+    return hmac.compare_digest(presented, secret)
+
+
+def _forwarded_visitor_ip(request: Request) -> str:
+    """The shopper behind an internal-service request (first XFF hop).
+
+    Falls back to a per-server bucket when the server forwarded nothing,
+    so the storefront is never collapsed onto a single anonymous bucket.
+    """
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    peer = request.client.host if request.client else "unknown"
+    return f"internal:{peer}"
+
+
 def _get_client_ip(request: Request) -> str:
     """Extract the IP this request is rate-limited under, respecting proxies.
 
@@ -595,7 +626,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # 30/IP/min absorbs a multi-tab refresh storm while still
             # capping replay abuse of a stolen refresh cookie.
             tier = "refresh"
-            limit = 30
+            # 120: an office / café NAT with several merchants, each with a
+            # few tabs, all refreshing when their 30-min access tokens
+            # expire around the same time. A 429 here used to read as
+            # "session expired" in the hub and log everyone out.
+            limit = 120
         elif _is_auth_endpoint(path):
             tier = "auth"
             limit = settings.rate_limit_auth_requests_per_minute
@@ -651,13 +686,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 "authorization" in request.headers
                 or "access_token" in request.cookies
                 or "customer_access_token" in request.cookies
+                or _is_internal_service(request)
             )
             if has_auth:
                 limit = settings.rate_limit_requests_per_minute
             else:
                 limit = settings.rate_limit_anon_requests_per_minute
 
-        client_ip = _get_client_ip(request)
+        # Our own servers (storefront SSR) carry the real shopper's IP; bucket
+        # under that so one server IP never looks like one abusive visitor.
+        client_ip = (
+            _forwarded_visitor_ip(request)
+            if _is_internal_service(request)
+            else _get_client_ip(request)
+        )
 
         # Load-test bypass — controlled by a server-side secret. The
         # request must carry `X-Load-Test-Token: <secret>` matching

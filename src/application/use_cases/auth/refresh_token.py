@@ -4,6 +4,7 @@ from src.application.dto.auth import RefreshTokenDTO, TokenDTO
 from src.application.services.refresh_token_blacklist_service import (
     RefreshTokenBlacklistService,
 )
+from src.config import settings
 from src.core.exceptions import EntityNotFoundError, InvalidTokenError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.token_service import ITokenService
@@ -38,8 +39,18 @@ class RefreshTokenUseCase:
         if payload.token_type != "refresh":
             raise InvalidTokenError()
 
-        # Detect token reuse — potential theft
+        # Detect token reuse — potential theft. Within the rotation grace
+        # window a repeat presenter (a second hub tab that lost the race)
+        # gets the SAME pair the winner got; only a later replay is theft.
         if payload.jti and await self.blacklist_service.is_used(payload.jti):
+            graced = await self.blacklist_service.get_rotation(payload.jti)
+            if graced is not None:
+                logger.info(
+                    "refresh_token_rotation_graced",
+                    user_id=str(payload.user_id),
+                    jti=payload.jti,
+                )
+                return TokenDTO(access_token=graced[0], refresh_token=graced[1])
             logger.warning(
                 "refresh_token_reuse_detected",
                 user_id=str(payload.user_id),
@@ -56,9 +67,25 @@ class RefreshTokenUseCase:
         if payload.jti:
             await self.blacklist_service.mark_used(payload.jti, payload.exp)
 
-        # Issue fresh token pair (new jti on the new refresh token)
-        access_token = self.token_service.create_access_token(user)
-        refresh_token = self.token_service.create_refresh_token(user)
+        # Issue fresh token pair (new jti on the new refresh token). Carry the
+        # tenant / membership / permission-version claims over — they used to
+        # be dropped here, so the first refresh silently downgraded a staff
+        # session to a claim-less one.
+        claims = {
+            "tenant_id": payload.tenant_id,
+            "membership_id": payload.membership_id,
+            "perm_version": payload.perm_version or 0,
+        }
+        access_token = self.token_service.create_access_token(user, **claims)
+        refresh_token = self.token_service.create_refresh_token(user, **claims)
+
+        if payload.jti:
+            await self.blacklist_service.remember_rotation(
+                payload.jti,
+                access_token,
+                refresh_token,
+                ttl=settings.refresh_rotation_grace_seconds,
+            )
 
         logger.info("refresh_token_rotated", user_id=str(user.id))
 
