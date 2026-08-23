@@ -24,6 +24,7 @@ from src.api.dependencies import (
     get_merchant_notification_repository,
     get_store_repository,
     verify_store_ownership,
+    verify_store_ownership_streaming,
 )
 from src.api.responses import SuccessResponse
 from src.application.services.notification_feed import (
@@ -229,7 +230,9 @@ def sse_frame(payload: dict) -> str:
     operation_id="stream_merchant_notifications",
 )
 async def stream_notifications(
-    store: Annotated[Store, Depends(verify_store_ownership)],
+    # Streaming variant: must not pin a pooled DB connection for the life
+    # of the SSE connection.
+    store: Annotated[Store, Depends(verify_store_ownership_streaming)],
 ):
     """Server-Sent Events.
 

@@ -9,6 +9,7 @@ from src.api.dependencies.auth import (
     require_roles,
     require_store_owner,
     verify_store_ownership,
+    verify_store_ownership_streaming,
 )
 from src.api.dependencies.database import get_db
 from src.api.dependencies.email_templates import (
@@ -84,6 +85,7 @@ __all__ = [
     "require_admin",
     "require_admin_2fa",
     "verify_store_ownership",
+    "verify_store_ownership_streaming",
     # Repositories
     "get_abandoned_checkout_repository",
     "get_category_repository",
