@@ -36,6 +36,7 @@ from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customer_import as customer_import_module
+from src.api.v1.routes.stores import customer_social as customer_social_module
 from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import customizer_undo as customizer_undo_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
@@ -142,6 +143,7 @@ router.include_router(audit_module.router, tags=["Store MCP Audit"])
 # (same ordering rule as payment_proofs vs orders above).
 router.include_router(customer_import_module.router, tags=["Store Customer Import"])
 router.include_router(customers_module.router, tags=["Store Customers"])
+router.include_router(customer_social_module.router, tags=["Customer Social"])
 router.include_router(access_tokens_module.router, tags=["Store Access Tokens"])
 router.include_router(invoices_module.router, tags=["Store Invoices"])
 router.include_router(gift_cards_module.router, tags=["Store Gift Cards"])
