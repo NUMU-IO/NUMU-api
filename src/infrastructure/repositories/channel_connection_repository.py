@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.channel_connection import (
@@ -183,13 +183,20 @@ class ChannelConnectionRepositoryImpl(ChannelConnectionRepository):
         channel: ChannelType,
         external_account_id: str,
     ) -> ChannelConnection | None:
+        # The same page / IG account can appear on more than one store
+        # (connected on B after being revoked on A). Webhooks must route to
+        # the ACTIVE connection — ordering by created_at alone once sent a
+        # store's DMs into another store's revoked connection and its inbox.
         result = await self.session.execute(
             select(ChannelConnectionModel)
             .where(
                 ChannelConnectionModel.channel == channel.value,
                 ChannelConnectionModel.external_account_id == external_account_id,
             )
-            .order_by(ChannelConnectionModel.created_at.desc())
+            .order_by(
+                case((ChannelConnectionModel.status == "active", 0), else_=1),
+                ChannelConnectionModel.created_at.desc(),
+            )
             .limit(1)
         )
         model = result.scalar_one_or_none()

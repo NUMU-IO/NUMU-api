@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.channel_connection import ChannelType
@@ -76,9 +77,24 @@ class MessageThreadRepositoryImpl(MessageThreadRepository):
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
-        self.session.add(model)
-        await self.session.flush()
-        return entity
+        # Meta redelivers webhooks and fans one message out to several
+        # entries; two ingests can race to create the same (connection,
+        # participant) thread. The unique constraint is the arbiter — on a
+        # duplicate, roll back just this insert (savepoint) and return the
+        # row that won.
+        try:
+            async with self.session.begin_nested():
+                self.session.add(model)
+                await self.session.flush()
+            return entity
+        except IntegrityError:
+            self.session.expunge(model)
+            existing = await self.get_by_connection_and_participant(
+                entity.channel_connection_id, entity.external_participant_id
+            )
+            if existing is None:
+                raise
+            return existing
 
     async def update(self, entity: MessageThread) -> MessageThread:
         result = await self.session.execute(
