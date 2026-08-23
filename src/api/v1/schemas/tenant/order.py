@@ -383,6 +383,10 @@ class OrderResponse(BaseModel):
         default=None,
         description="Cash actually collected after a partial acceptance; null = total",
     )
+    partial_acceptance: dict | None = Field(
+        default=None,
+        description="Returned-at-door lines {lines, returned_value_cents, collected_total_cents, reason, at}",
+    )
     currency: str = Field(description="ISO 4217 currency code")
     payment_method: str | None = Field(description="Payment method used")
     payment_id: str | None = Field(description="External payment transaction ID")

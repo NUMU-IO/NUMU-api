@@ -131,6 +131,8 @@ class OrderDTO(BaseDTO):
     customer_confirmed_at: datetime | None = None
     # Partial acceptance: cash actually collected; None = total.
     collected_total: int | None = None
+    # metadata.partial_acceptance snapshot (lines + values) for the hub.
+    partial_acceptance: dict | None = None
 
     @classmethod
     def from_entity(cls, entity: Order) -> "OrderDTO":
@@ -156,6 +158,7 @@ class OrderDTO(BaseDTO):
             discount_amount=entity.discount_amount,
             total=entity.total,
             collected_total=getattr(entity, "collected_total", None),
+            partial_acceptance=(entity.metadata or {}).get("partial_acceptance"),
             currency=entity.currency,
             payment_method=entity.payment_method,
             payment_id=entity.payment_id,

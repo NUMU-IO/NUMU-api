@@ -213,6 +213,7 @@ def _order_to_response(order_dto) -> OrderResponse:
         ],
         total=order_dto.total,
         collected_total=getattr(order_dto, "collected_total", None),
+        partial_acceptance=getattr(order_dto, "partial_acceptance", None),
         currency=order_dto.currency,
         payment_method=order_dto.payment_method,
         payment_id=order_dto.payment_id,
