@@ -12,7 +12,10 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from src.api.dependencies import verify_store_ownership
+from src.api.dependencies import (
+    verify_store_ownership,
+    verify_store_ownership_streaming,
+)
 from src.api.dependencies.repositories import get_analytics_repository
 from src.api.responses import SuccessResponse
 from src.core.entities.store import Store
@@ -162,7 +165,9 @@ async def get_realtime_geo(
     operation_id="get_realtime_stream",
 )
 async def get_realtime_stream(
-    store: Annotated[Store, Depends(verify_store_ownership)],
+    # Streaming variant: must not pin a pooled DB connection for the life
+    # of the SSE connection.
+    store: Annotated[Store, Depends(verify_store_ownership_streaming)],
 ):
     """Server-Sent Events stream pushing analytics every 5 seconds."""
 

@@ -497,5 +497,47 @@ async def get_current_store(
     return store
 
 
+async def verify_store_ownership_streaming(
+    store_id: UUID,
+    user_id: Annotated[UUID, Depends(require_store_owner)],
+) -> Store:
+    """Ownership check for SSE routes that does NOT hold a pooled connection.
+
+    FastAPI keeps ``yield`` dependencies alive until the response finishes,
+    and an SSE response never finishes — so a stream depending on
+    ``get_current_store`` pins its ``get_db`` session for the life of the
+    connection. Every open hub tab then permanently consumes one slot of a
+    pool sized 5 (+3 overflow), and the whole API starts timing out with
+    "QueuePool limit ... reached".
+
+    This opens its own session, verifies, and closes it before streaming
+    begins. Safe because stream handlers do no further database work; they
+    relay Redis. Do not use it on routes that query afterwards — they need
+    the request-scoped session and its RLS tenant context.
+    """
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories.store_repository import StoreRepository
+
+    async with AsyncSessionLocal() as session:
+        store = await StoreRepository(session).get_by_id(store_id)
+
+    if not store:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Store not found",
+        )
+    if store.owner_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this store",
+        )
+    if store.tenant_id:
+        try:
+            set_tenant_id(store.tenant_id)
+        except Exception:  # noqa: BLE001 — RLS wiring must never 500 a request
+            logger.warning("rls_tenant_context_set_failed", store_id=str(store_id))
+    return store
+
+
 # Alias — use in store-scoped routes for explicit ownership verification
 verify_store_ownership = get_current_store
