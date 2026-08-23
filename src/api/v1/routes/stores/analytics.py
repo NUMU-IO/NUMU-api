@@ -1553,10 +1553,15 @@ class ProductPerformanceItem(BaseModel):
     revenue_trend: list[int]  # 7 data points (daily revenue, last 7 days)
     # Zid/Shopify-style money columns. Discounts and tax are the order's
     # amounts allocated to this product pro-rata by line share of subtotal.
-    gross_sales: int = 0  # cents, == revenue
+    # VAT semantics: platform prices are VAT-INCLUSIVE (tax_resolver
+    # force_inclusive) — ``orders.tax_amount`` is the VAT portion already
+    # inside the price, never added on top. So gross = revenue − tax
+    # (excl. VAT), net = revenue − discounts (what customers paid), and
+    # gross − discounts + tax == net.
+    gross_sales: int = 0  # cents, excl. included VAT
     discounts: int = 0  # cents
-    tax: int = 0  # cents
-    net_sales: int = 0  # cents — gross − discounts + tax
+    tax: int = 0  # cents, VAT included in the price
+    net_sales: int = 0  # cents — revenue − discounts
     orders_count: int = 0  # distinct orders containing the product
     # Profit fields. All null if the product has no cost_price set.
     cost_price: int | None = None  # cents (current product cost)
@@ -1877,12 +1882,11 @@ async def get_product_performance(
                 quantity_sold=r["units_sold"],
                 current_stock=stock,
                 revenue_trend=trend,
-                gross_sales=r["revenue_cents"],
+                # VAT-inclusive pricing: tax is INSIDE revenue, never on top.
+                gross_sales=r["revenue_cents"] - r.get("tax_cents", 0),
                 discounts=r.get("discount_cents", 0),
                 tax=r.get("tax_cents", 0),
-                net_sales=r["revenue_cents"]
-                - r.get("discount_cents", 0)
-                + r.get("tax_cents", 0),
+                net_sales=r["revenue_cents"] - r.get("discount_cents", 0),
                 orders_count=r.get("orders", 0),
                 cost_price=cost_cents,
                 profit=profit_cents,
