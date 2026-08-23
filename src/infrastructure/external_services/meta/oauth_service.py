@@ -82,7 +82,10 @@ class MetaOAuthService:
                 "whatsapp_business_management",
             ])
 
-        return f"{base_url}?{urlencode(params)}"
+        # safe="," keeps the scope list comma-separated: Meta reads a
+        # percent-encoded comma as part of the permission name and rejects
+        # the whole dialog with "needs at least one supported permission".
+        return f"{base_url}?{urlencode(params, safe=',')}"
 
     def generate_state(self) -> str:
         """Generate a secure state parameter for OAuth."""
