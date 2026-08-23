@@ -86,15 +86,23 @@ async def handle_commission_charge_on_order_paid(event: OrderPaidEvent) -> None:
 
                 row = (
                     await session.execute(
-                        select(OrderModel.total, OrderModel.currency).where(
-                            OrderModel.id == event.order_id
-                        )
+                        select(
+                            OrderModel.total,
+                            OrderModel.collected_total,
+                            OrderModel.currency,
+                        ).where(OrderModel.id == event.order_id)
                     )
                 ).one_or_none()
                 if row is None:
                     log.warning("wallet_commission_order_not_found")
                     return
-                total_cents, order_currency = int(row.total), row.currency
+                # Commission on what the merchant actually collected.
+                total_cents = int(
+                    row.collected_total
+                    if row.collected_total is not None
+                    else row.total
+                )
+                order_currency = row.currency
 
                 egp_cents, fx_meta = await _to_egp_cents(
                     session, total_cents, order_currency
@@ -155,11 +163,25 @@ async def handle_commission_reversal_on_refund(
     """
     if event.new_status != "refunded":
         return
-
-    log = logger.bind(
-        order_id=str(event.order_id),
+    await reverse_commission_for_order(
+        order_id=event.order_id,
         order_number=event.order_number,
-        store_id=str(event.store_id),
+        store_id=event.store_id,
+        note=f"Commission reversal for refunded order {event.order_number}",
+    )
+
+
+async def reverse_commission_for_order(
+    *, order_id, order_number: str, store_id, note: str
+) -> None:
+    """Reverse the commission charged for ``order_id`` (idempotent).
+
+    Shared by the full-refund path and the un-mark-paid path.
+    """
+    log = logger.bind(
+        order_id=str(order_id),
+        order_number=order_number,
+        store_id=str(store_id),
     )
 
     from src.application.services.wallet_service import WalletService
@@ -174,7 +196,7 @@ async def handle_commission_reversal_on_refund(
                 commission = (
                     await session.execute(
                         select(WalletTransactionModel).where(
-                            WalletTransactionModel.order_id == event.order_id,
+                            WalletTransactionModel.order_id == order_id,
                             WalletTransactionModel.kind
                             == WalletTransactionKind.COMMISSION.value,
                         )
@@ -189,8 +211,8 @@ async def handle_commission_reversal_on_refund(
                     tenant_id=tenant_id,
                     kind=WalletTransactionKind.COMMISSION_REVERSAL,
                     amount_cents=abs(commission.amount_cents),
-                    order_id=event.order_id,
-                    note=f"Commission reversal for refunded order {event.order_number}",
+                    order_id=order_id,
+                    note=note,
                     meta={"reversed_transaction_id": str(commission.id)},
                 )
                 if tx is None:

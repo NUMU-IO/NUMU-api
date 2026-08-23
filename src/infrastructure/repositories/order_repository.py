@@ -151,6 +151,7 @@ class OrderRepository(IOrderRepository):
             tax_amount=model.tax_amount,
             discount_amount=model.discount_amount,
             total=model.total,
+            collected_total=model.collected_total,
             currency=model.currency,
             payment_method=model.payment_method,
             payment_id=model.payment_id,
@@ -211,6 +212,7 @@ class OrderRepository(IOrderRepository):
             tax_amount=entity.tax_amount,
             discount_amount=entity.discount_amount,
             total=entity.total,
+            collected_total=entity.collected_total,
             currency=entity.currency,
             payment_method=entity.payment_method,
             payment_id=entity.payment_id,
@@ -303,6 +305,7 @@ class OrderRepository(IOrderRepository):
             model.tax_amount = entity.tax_amount
             model.discount_amount = entity.discount_amount
             model.total = entity.total
+            model.collected_total = entity.collected_total
             model.currency = entity.currency
             model.coupon_code = entity.coupon_code
             model.coupon_id = entity.coupon_id
