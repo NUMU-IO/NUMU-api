@@ -1,6 +1,7 @@
 """Customer repository interface."""
 
 from abc import abstractmethod
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -11,6 +12,15 @@ from src.core.value_objects.email import Email
 
 class ICustomerRepository(BaseRepository[Customer]):
     """Customer repository interface."""
+
+    @abstractmethod
+    async def get_by_ids(self, entity_ids: Sequence[UUID]) -> list[Customer]:
+        """Fetch many customers in one round trip.
+
+        List endpoints that decorate rows with a customer name would
+        otherwise issue one query per distinct customer.
+        """
+        ...
 
     @abstractmethod
     async def get_by_store(

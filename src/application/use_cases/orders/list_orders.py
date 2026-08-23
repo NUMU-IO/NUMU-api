@@ -115,20 +115,20 @@ class ListOrdersUseCase:
                 exclude_statuses=exclude_statuses,
             )
 
-        # Get customer names for orders
-        customer_names: dict[UUID, str] = {}
-        customer_ids = {order.customer_id for order in orders}
-        for customer_id in customer_ids:
-            customer = await self.customer_repository.get_by_id(customer_id)
-            if customer:
-                customer_names[customer_id] = (
-                    f"{customer.first_name} {customer.last_name}"
-                )
+        # Customer names in ONE query. This was a per-customer lookup, so a
+        # 10-row page cost 10 sequential round trips — the single largest
+        # contributor to this endpoint's latency.
+        customer_ids = {order.customer_id for order in orders if order.customer_id}
+        customer_names: dict[UUID, str] = {
+            c.id: f"{c.first_name} {c.last_name}"
+            for c in await self.customer_repository.get_by_ids(list(customer_ids))
+        }
 
-        # Feature 001 — campaign names for attributed orders. Same N+1
-        # pattern as customers above (page size is small; most orders
-        # have no campaign_id which short-circuits the loop). Errors
-        # are swallowed — a missing campaign just means the badge
+        # Feature 001 — campaign names for attributed orders, also batched.
+        # Note this opens a SECOND pooled connection while the request
+        # already holds one; kept for now because the use case isn't given
+        # a campaign repository, but it is one query rather than N.
+        # Errors are swallowed — a missing campaign just means the badge
         # doesn't render, which is an acceptable degradation.
         campaign_names: dict[UUID, str] = {}
         campaign_ids = {
@@ -140,15 +140,16 @@ class ListOrdersUseCase:
                 MarketingCampaignRepository,
             )
 
-            async with AsyncSessionLocal() as session:
-                repo = MarketingCampaignRepository(session)
-                for cid in campaign_ids:
-                    try:
-                        c = await repo.get_by_id(cid)
-                    except Exception:
-                        continue
-                    if c and c.store_id == store_id:
-                        campaign_names[cid] = c.name
+            try:
+                async with AsyncSessionLocal() as session:
+                    campaigns = await MarketingCampaignRepository(session).get_by_ids(
+                        list(campaign_ids)
+                    )
+                campaign_names = {
+                    c.id: c.name for c in campaigns if c.store_id == store_id
+                }
+            except Exception:  # noqa: BLE001 — badge is cosmetic
+                campaign_names = {}
 
         # Convert to DTOs
         order_dtos = [

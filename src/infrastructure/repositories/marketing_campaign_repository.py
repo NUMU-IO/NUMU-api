@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -66,6 +67,24 @@ class MarketingCampaignRepository:
             )
         ).scalar_one_or_none()
         return _to_entity(row) if row else None
+
+    async def get_by_ids(self, campaign_ids: Sequence[UUID]) -> list[MarketingCampaign]:
+        """Fetch many campaigns in one round trip (see CustomerRepository)."""
+        ids = [i for i in dict.fromkeys(campaign_ids) if i is not None]
+        if not ids:
+            return []
+        rows = (
+            (
+                await self._session.execute(
+                    select(MarketingCampaignModel).where(
+                        MarketingCampaignModel.id.in_(ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [_to_entity(r) for r in rows]
 
     async def list_for_store(
         self,
