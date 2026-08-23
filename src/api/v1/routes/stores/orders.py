@@ -9,6 +9,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     get_current_user_id,
@@ -19,6 +20,7 @@ from src.api.dependencies import (
     get_store_repository,
     verify_store_ownership,
 )
+from src.api.dependencies.database import get_db
 from src.api.dependencies.plan import require_order_limit
 from src.api.dependencies.repositories import (
     get_funnel_event_repository,
@@ -210,6 +212,8 @@ def _order_to_response(order_dto) -> OrderResponse:
             for p in (order_dto.applied_promotions or [])
         ],
         total=order_dto.total,
+        collected_total=getattr(order_dto, "collected_total", None),
+        partial_acceptance=getattr(order_dto, "partial_acceptance", None),
         currency=order_dto.currency,
         payment_method=order_dto.payment_method,
         payment_id=order_dto.payment_id,
@@ -255,6 +259,7 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
         payment_status=order_dto.payment_status,
         fulfillment_status=order_dto.fulfillment_status,
         total=order_dto.total,
+        collected_total=getattr(order_dto, "collected_total", None),
         currency=order_dto.currency,
         item_count=order_dto.item_count,
         payment_method=order_dto.payment_method,
@@ -685,7 +690,7 @@ async def list_orders(
 # COD Autopilot exception queue (004-cod-autopilot, FR-021)
 # ============================================================================
 
-from pydantic import BaseModel  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
 
 class AutopilotExceptionItem(BaseModel):
@@ -1098,6 +1103,255 @@ async def mark_order_paid(
     return SuccessResponse(
         data=_order_to_response(OrderDTO.from_entity(updated)),
         message="Order marked as paid",
+    )
+
+
+class UnmarkPaidRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@router.post(
+    "/{order_id}/unmark-paid",
+    response_model=SuccessResponse[OrderResponse],
+    summary="Undo a manual mark-paid (payment back to pending)",
+    operation_id="unmark_order_paid",
+)
+async def unmark_order_paid(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    request: UnmarkPaidRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Reverse a payment that was recorded by hand (COD / manual rails).
+
+    Refused when real money moved: a successful gateway transaction or a
+    completed refund exists — those need a Refund, not an un-mark.
+    Reverses the wallet commission, cancels the ETA invoice and logs the
+    action (see ``OrderPaymentReversedEvent`` handlers).
+    """
+    from sqlalchemy import func, select
+
+    from src.core.entities.order import PaymentStatus
+    from src.core.events.order_events import OrderPaymentReversedEvent
+    from src.infrastructure.database.models.tenant.payment_transaction import (
+        PaymentTransactionModel,
+    )
+    from src.infrastructure.database.models.tenant.refund import RefundModel
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        from src.core.exceptions import EntityNotFoundError
+
+        raise EntityNotFoundError("Order", str(order_id))
+    if order.payment_status != PaymentStatus.PAID:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Order is not marked as paid",
+        )
+
+    gateway_paid = (
+        await db.execute(
+            select(func.count(PaymentTransactionModel.id)).where(
+                PaymentTransactionModel.order_id == order_id,
+                PaymentTransactionModel.status.in_(("success", "successful")),
+            )
+        )
+    ).scalar() or 0
+    if gateway_paid:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A gateway payment exists for this order. Issue a refund instead "
+                "of un-marking it."
+            ),
+        )
+    refunded = (
+        await db.execute(
+            select(func.count(RefundModel.id)).where(
+                RefundModel.order_id == order_id,
+                RefundModel.status.in_(("processed", "completed")),
+            )
+        )
+    ).scalar() or 0
+    if refunded:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This order has refunds; its payment can't be un-marked.",
+        )
+
+    amount = order.reverse_payment(reason=request.reason)
+    updated = await order_repo.update(order)
+
+    get_event_bus().publish(
+        OrderPaymentReversedEvent(
+            order_id=updated.id,
+            order_number=updated.order_number,
+            store_id=updated.store_id,
+            customer_id=updated.customer_id,
+            amount_cents=amount,
+            reason=request.reason,
+            actor_user_id=store.owner_id,
+        )
+    )
+    return SuccessResponse(
+        data=_order_to_response(OrderDTO.from_entity(updated)),
+        message="Payment reversed — order is unpaid again",
+    )
+
+
+class PartialAcceptanceLine(BaseModel):
+    order_line_index: int = Field(ge=0)
+    returned_quantity: int = Field(ge=1)
+
+
+class PartialAcceptanceRequest(BaseModel):
+    lines: list[PartialAcceptanceLine] = Field(min_length=1)
+    reason: str | None = Field(default=None, max_length=500)
+    restock: bool = True
+
+
+class PartialAcceptanceResponse(BaseModel):
+    order: OrderResponse
+    returned_value_cents: int
+    collected_total_cents: int
+    # Prepaid orders: the returned value must go back to the customer.
+    refund_due_cents: int
+    restocked_lines: int
+
+
+@router.post(
+    "/{order_id}/partial-acceptance",
+    response_model=SuccessResponse[PartialAcceptanceResponse],
+    summary="Customer kept part of the order at the door",
+    operation_id="record_partial_acceptance",
+)
+async def record_partial_acceptance(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    request: PartialAcceptanceRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    funnel_repo: Annotated[object, Depends(get_funnel_event_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Record a partial acceptance (e.g. 2 of 3 pieces kept, 1 returned).
+
+    The order ends DELIVERED (a delivery signal, not an RTO — the customer
+    did pay for what they kept); ``collected_total`` becomes the cash to
+    expect; the returned pieces are restocked line by line; COD orders
+    auto-mark paid for the collected amount, prepaid orders report the
+    refund due.
+    """
+    from src.application.services.stock_service import restock_lines
+    from src.core.entities.order import OrderStatus, PaymentStatus
+    from src.core.events.order_events import OrderPartiallyAcceptedEvent
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        from src.core.exceptions import EntityNotFoundError
+
+        raise EntityNotFoundError("Order", str(order_id))
+    if order.status not in (OrderStatus.SHIPPED, OrderStatus.DELIVERED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Partial acceptance applies to shipped or delivered orders",
+        )
+    if order.metadata.get("partial_acceptance"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A partial acceptance was already recorded for this order",
+        )
+
+    returned = {line.order_line_index: line.returned_quantity for line in request.lines}
+    try:
+        # Validate against the current order BEFORE any status change.
+        order.model_copy(deep=True).record_partial_acceptance(returned, request.reason)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    was_paid_before = order.payment_status == PaymentStatus.PAID
+    if order.status == OrderStatus.SHIPPED:
+        # Canonical path: shipments, notifications, trust "delivery" signal.
+        use_case = UpdateOrderStatusUseCase(
+            order_repository=order_repo,
+            store_repository=store_repo,
+            customer_repository=customer_repo,
+            event_bus=get_event_bus(),
+            network_repository=network_repo,
+            funnel_repository=funnel_repo,
+        )
+        await use_case.execute(
+            order_id=order_id,
+            dto=UpdateOrderStatusDTO(
+                status=OrderStatus.DELIVERED.value,
+                reason=request.reason or "partial acceptance",
+            ),
+            store_id=store.id,
+            user_id=store.owner_id,
+        )
+        order = await order_repo.get_by_id(order_id)
+
+    summary = order.record_partial_acceptance(returned, request.reason)
+
+    restocked = 0
+    if request.restock:
+        lines = [
+            {
+                "product_id": ln["product_id"],
+                "variant_id": ln["variant_id"],
+                "quantity": ln["returned_quantity"],
+                "selections": ln.get("selections"),
+            }
+            for ln in summary["lines"]
+        ]
+        try:
+            restocked = await restock_lines(db, tenant_id=store.tenant_id, lines=lines)
+            ledger = order.metadata.setdefault("stock_restocked_lines", [])
+            ledger.extend(
+                {
+                    **ln,
+                    "at": datetime.now(UTC).isoformat(),
+                    "source": "partial_acceptance",
+                }
+                for ln in lines
+            )
+        except Exception:  # noqa: BLE001 — stock must not block the record
+            logger.exception("partial_acceptance_restock_failed")
+
+    is_cod = (order.payment_method or "").lower() in ("cod", "cash_on_delivery", "cash")
+    refund_due = (
+        0 if is_cod else (summary["returned_value_cents"] if was_paid_before else 0)
+    )
+    updated = await order_repo.update(order)
+
+    get_event_bus().publish(
+        OrderPartiallyAcceptedEvent(
+            order_id=updated.id,
+            order_number=updated.order_number,
+            store_id=updated.store_id,
+            customer_id=updated.customer_id,
+            returned_value_cents=summary["returned_value_cents"],
+            collected_total_cents=summary["collected_total_cents"],
+            refund_due_cents=refund_due,
+            lines=summary["lines"],
+            reason=request.reason,
+            actor_user_id=store.owner_id,
+        )
+    )
+    return SuccessResponse(
+        data=PartialAcceptanceResponse(
+            order=_order_to_response(OrderDTO.from_entity(updated)),
+            returned_value_cents=summary["returned_value_cents"],
+            collected_total_cents=summary["collected_total_cents"],
+            refund_due_cents=refund_due,
+            restocked_lines=restocked,
+        ),
+        message="Partial acceptance recorded",
     )
 
 

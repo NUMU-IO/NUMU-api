@@ -213,6 +213,9 @@ class Order(BaseEntity):
     tax_amount: int = Field(default=0, ge=0)  # In cents
     discount_amount: int = Field(default=0, ge=0)  # In cents
     total: int = Field(default=0, ge=0)  # In cents
+    # Cash actually collected when the customer kept only part of the
+    # order at the door (partial acceptance). None => `total`.
+    collected_total: int | None = Field(default=None, ge=0)
     currency: str = "USD"
     payment_method: str | None = None
     payment_id: str | None = None
@@ -576,6 +579,90 @@ class Order(BaseEntity):
         self.paid_at = datetime.now(UTC)
         self.status = OrderStatus.PROCESSING
         self.touch()
+
+    @property
+    def collectible_total(self) -> int:
+        """What the merchant should actually receive for this order."""
+        return self.total if self.collected_total is None else self.collected_total
+
+    def reverse_payment(self, reason: str | None = None) -> int:
+        """Undo a manual mark-paid (wrong order, cancelled after marking, ...).
+
+        Payment-plane only: order status is untouched. Returns the amount
+        that had been recorded as collected so callers can reverse the
+        commission. Callers must first verify no real gateway money moved
+        (that is a Refund, not an un-mark).
+        """
+        if self.payment_status != PaymentStatus.PAID:
+            raise ValueError("Order is not marked as paid")
+        amount = self.collectible_total
+        history = self.metadata.setdefault("payment_history", [])
+        history.append({
+            "from": "paid",
+            "to": "pending",
+            "reason": reason,
+            "paid_at": self.paid_at.isoformat() if self.paid_at else None,
+            "payment_id": self.payment_id,
+            "at": datetime.now(UTC).isoformat(),
+        })
+        self.payment_status = PaymentStatus.PENDING
+        self.paid_at = None
+        self.payment_id = None
+        self.touch()
+        return amount
+
+    def record_partial_acceptance(
+        self, returned: dict[int, int], reason: str | None = None
+    ) -> dict:
+        """The customer kept part of the order; ``returned`` maps
+        0-based line index -> returned quantity.
+
+        Values use the line's EFFECTIVE unit price (total_price / quantity)
+        so discounts are respected. Shipping is still collected. Sets
+        ``collected_total`` and stamps ``metadata["partial_acceptance"]``.
+        """
+        if not returned:
+            raise ValueError("No returned lines")
+        lines_out: list[dict] = []
+        returned_value = 0
+        for index, qty in returned.items():
+            if index < 0 or index >= len(self.line_items):
+                raise ValueError(f"Unknown line index {index}")
+            line = self.line_items[index]
+            if qty < 1 or qty > line.quantity:
+                raise ValueError(
+                    f"Returned quantity {qty} out of range for line {index}"
+                )
+            effective_unit = (
+                round(line.total_price / line.quantity)
+                if line.quantity
+                else line.unit_price
+            )
+            value = effective_unit * qty
+            returned_value += value
+            lines_out.append({
+                "order_line_index": index,
+                "returned_quantity": qty,
+                "value_cents": value,
+                "product_id": str(line.product_id),
+                "variant_id": str(line.variant_id) if line.variant_id else None,
+                "selections": (line.properties or {}).get("selections"),
+            })
+        collected = max(self.total - returned_value, 0)
+        self.collected_total = collected
+        self.metadata["partial_acceptance"] = {
+            "lines": lines_out,
+            "returned_value_cents": returned_value,
+            "collected_total_cents": collected,
+            "reason": reason,
+            "at": datetime.now(UTC).isoformat(),
+        }
+        self.touch()
+        return {
+            "lines": lines_out,
+            "returned_value_cents": returned_value,
+            "collected_total_cents": collected,
+        }
 
     def mark_payment_failed(self, reason: str | None = None) -> None:
         """Mark payment as failed.

@@ -122,6 +122,7 @@ class ReconciliationService:
                 OrderModel.id,
                 OrderModel.order_number,
                 OrderModel.total,
+                OrderModel.collected_total,
                 OrderModel.payment_method,
                 OrderModel.payment_id,
                 OrderModel.paid_at,
@@ -165,7 +166,13 @@ class ReconciliationService:
 
         for order in paid_orders:
             # order.total is already stored in cents (Integer column)
-            order_cents = order.total or 0
+            # Partial acceptance: the courier collected less than the order
+            # total; expect what was actually collectible.
+            order_cents = (
+                order.collected_total
+                if order.collected_total is not None
+                else (order.total or 0)
+            )
             expected_cents += order_cents
 
             linked_txns = txn_by_order.get(order.id, [])

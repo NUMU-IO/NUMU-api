@@ -7,6 +7,8 @@ from src.core.events.base import EventBus
 from src.core.events.order_events import (
     OrderCreatedEvent,
     OrderPaidEvent,
+    OrderPartiallyAcceptedEvent,
+    OrderPaymentReversedEvent,
     OrderStatusChangedEvent,
 )
 from src.core.events.payment_events import (
@@ -91,6 +93,14 @@ from src.infrastructure.events.handlers.order_activity_handler import (
 )
 from src.infrastructure.events.handlers.otp_trust_handler import (
     handle_otp_verified_trust_signal,
+)
+from src.infrastructure.events.handlers.payment_reversal_handler import (
+    handle_partial_acceptance_activity,
+    handle_partial_acceptance_notification,
+    handle_payment_reversed_activity,
+    handle_payment_reversed_commission,
+    handle_payment_reversed_invoice,
+    handle_payment_reversed_notification,
 )
 from src.infrastructure.events.handlers.promotion_cache_invalidator import (
     PromotionCacheInvalidator,
@@ -232,6 +242,15 @@ def create_event_bus() -> EventBus:
     # healed by the daily wallet_reconciliation_task.
     bus.subscribe(OrderPaidEvent, handle_commission_charge_on_order_paid)
     bus.subscribe(OrderStatusChangedEvent, handle_commission_reversal_on_refund)
+    # Un-mark-paid: reverse what mark-paid did (commission, invoice,
+    # timeline, feed). Customer messages already sent are not recalled.
+    bus.subscribe(OrderPaymentReversedEvent, handle_payment_reversed_commission)
+    bus.subscribe(OrderPaymentReversedEvent, handle_payment_reversed_invoice)
+    bus.subscribe(OrderPaymentReversedEvent, handle_payment_reversed_activity)
+    bus.subscribe(OrderPaymentReversedEvent, handle_payment_reversed_notification)
+    # Partial acceptance (kept 2 of 3 pieces): timeline + feed.
+    bus.subscribe(OrderPartiallyAcceptedEvent, handle_partial_acceptance_activity)
+    bus.subscribe(OrderPartiallyAcceptedEvent, handle_partial_acceptance_notification)
 
     # InstaPay proof lifecycle — short customer confirmation / rejection
     # emails that fire independently of the invoice handler so they

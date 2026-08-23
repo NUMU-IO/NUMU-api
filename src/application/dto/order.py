@@ -129,6 +129,10 @@ class OrderDTO(BaseDTO):
     # "confirmed". Lets the merchant hub flag orders awaiting confirmation.
     customer_confirmation_status: str | None = None
     customer_confirmed_at: datetime | None = None
+    # Partial acceptance: cash actually collected; None = total.
+    collected_total: int | None = None
+    # metadata.partial_acceptance snapshot (lines + values) for the hub.
+    partial_acceptance: dict | None = None
 
     @classmethod
     def from_entity(cls, entity: Order) -> "OrderDTO":
@@ -153,6 +157,8 @@ class OrderDTO(BaseDTO):
             tax_amount=entity.tax_amount,
             discount_amount=entity.discount_amount,
             total=entity.total,
+            collected_total=getattr(entity, "collected_total", None),
+            partial_acceptance=(entity.metadata or {}).get("partial_acceptance"),
             currency=entity.currency,
             payment_method=entity.payment_method,
             payment_id=entity.payment_id,
@@ -214,6 +220,7 @@ class OrderListItemDTO(BaseDTO):
     # literal "—" for every row.
     shipping_method: str | None = None
     tracking_number: str | None = None
+    collected_total: int | None = None
 
     @classmethod
     def from_entity(
@@ -232,6 +239,7 @@ class OrderListItemDTO(BaseDTO):
             payment_status=entity.payment_status.value,
             fulfillment_status=entity.fulfillment_status.value,
             total=entity.total,
+            collected_total=getattr(entity, "collected_total", None),
             currency=entity.currency,
             item_count=entity.item_count,
             payment_method=entity.payment_method,
