@@ -20,6 +20,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     Date,
+    Float,
     Integer,
     Numeric,
     String,
@@ -1399,6 +1400,9 @@ class AnalyticsRepository:
         """
         line_items_cte = select(
             OrderModel.id.label("order_id"),
+            OrderModel.subtotal.label("order_subtotal"),
+            OrderModel.discount_amount.label("order_discount"),
+            OrderModel.tax_amount.label("order_tax"),
             func.jsonb_array_elements(OrderModel.line_items).label("li"),
         ).where(*self._store_window(store_id, date_from, date_to))
         line_items_cte = self._tenant_filter(line_items_cte).subquery()
@@ -1412,7 +1416,9 @@ class AnalyticsRepository:
         # supported on this expression``.
         li = cast(line_items_cte.c.li, JSONB)
         product_id_expr = li["product_id"].astext.label("product_id")
-        product_name_expr = li["name"].astext.label("product_name")
+        product_name_expr = func.coalesce(
+            li["product_name"].astext, li["name"].astext
+        ).label("product_name")
         quantity_expr = cast(func.coalesce(li["quantity"].astext, "0"), Integer).label(
             "quantity"
         )
@@ -1423,12 +1429,34 @@ class AnalyticsRepository:
             * cast(func.coalesce(li["quantity"].astext, "0"), Integer),
         ).label("revenue_cents")
 
+        # Discounts and tax live on the ORDER, not the line. Allocate each
+        # order's amounts to its lines pro-rata by the line's share of the
+        # order subtotal (Shopify does the same for per-product reports).
+        # Orders with a zero/NULL subtotal contribute nothing rather than
+        # dividing by zero.
+        line_share = case(
+            (
+                func.coalesce(line_items_cte.c.order_subtotal, 0) > 0,
+                cast(revenue_per_line, Float)
+                / cast(line_items_cte.c.order_subtotal, Float),
+            ),
+            else_=0.0,
+        )
+        discount_per_line = line_share * cast(
+            func.coalesce(line_items_cte.c.order_discount, 0), Float
+        )
+        tax_per_line = line_share * cast(
+            func.coalesce(line_items_cte.c.order_tax, 0), Float
+        )
+
         query = (
             select(
                 product_id_expr,
                 func.max(product_name_expr).label("product_name"),
                 func.sum(quantity_expr).label("units_sold"),
                 func.sum(revenue_per_line).label("revenue_cents"),
+                func.sum(discount_per_line).label("discount_cents"),
+                func.sum(tax_per_line).label("tax_cents"),
                 func.count(line_items_cte.c.order_id.distinct()).label("orders"),
             )
             .where(product_id_expr.isnot(None))
@@ -1443,6 +1471,8 @@ class AnalyticsRepository:
                 "product_name": row.product_name,
                 "units_sold": int(row.units_sold or 0),
                 "revenue_cents": int(row.revenue_cents or 0),
+                "discount_cents": int(round(row.discount_cents or 0)),
+                "tax_cents": int(round(row.tax_cents or 0)),
                 "orders": int(row.orders or 0),
             }
             for row in result.all()

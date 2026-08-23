@@ -1526,10 +1526,17 @@ class ProductPerformanceItem(BaseModel):
     name: str
     sku: str | None
     image_url: str | None = None
-    revenue: int  # cents
+    revenue: int  # cents — gross line sales (before discounts & tax)
     quantity_sold: int
     current_stock: int
     revenue_trend: list[int]  # 7 data points (daily revenue, last 7 days)
+    # Zid/Shopify-style money columns. Discounts and tax are the order's
+    # amounts allocated to this product pro-rata by line share of subtotal.
+    gross_sales: int = 0  # cents, == revenue
+    discounts: int = 0  # cents
+    tax: int = 0  # cents
+    net_sales: int = 0  # cents — gross − discounts + tax
+    orders_count: int = 0  # distinct orders containing the product
     # Profit fields. All null if the product has no cost_price set.
     cost_price: int | None = None  # cents (current product cost)
     profit: int | None = None  # cents
@@ -1849,6 +1856,13 @@ async def get_product_performance(
                 quantity_sold=r["units_sold"],
                 current_stock=stock,
                 revenue_trend=trend,
+                gross_sales=r["revenue_cents"],
+                discounts=r.get("discount_cents", 0),
+                tax=r.get("tax_cents", 0),
+                net_sales=r["revenue_cents"]
+                - r.get("discount_cents", 0)
+                + r.get("tax_cents", 0),
+                orders_count=r.get("orders", 0),
                 cost_price=cost_cents,
                 profit=profit_cents,
                 margin_percent=margin_pct,
