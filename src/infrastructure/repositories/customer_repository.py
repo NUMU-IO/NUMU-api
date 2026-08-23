@@ -1,5 +1,6 @@
 """Customer repository implementation."""
 
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -81,6 +82,21 @@ class CustomerRepository(ICustomerRepository):
         )
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
+
+    async def get_by_ids(self, entity_ids: Sequence[UUID]) -> list[Customer]:
+        """Fetch many customers in one round trip.
+
+        List endpoints that decorate rows with a customer name would
+        otherwise issue one query per distinct customer — the dominant cost
+        of the orders list at page sizes as small as 10.
+        """
+        ids = [i for i in dict.fromkeys(entity_ids) if i is not None]
+        if not ids:
+            return []
+        result = await self.session.execute(
+            select(CustomerModel).where(CustomerModel.id.in_(ids))
+        )
+        return [self._to_entity(m) for m in result.scalars().all()]
 
     async def get_all(self, skip: int = 0, limit: int = 100) -> list[Customer]:
         """Get all customers with pagination."""
