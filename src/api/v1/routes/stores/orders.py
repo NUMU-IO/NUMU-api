@@ -68,6 +68,18 @@ from src.infrastructure.repositories import (
     StoreRepository,
 )
 
+# Offline / merchant-confirmed rails. A "success" PaymentTransaction with one
+# of these gateways is a bookkeeping row, not a captured gateway payment.
+MANUAL_PAYMENT_GATEWAYS: tuple[str, ...] = (
+    "instapay",
+    "vodafone_cash",
+    "cod",
+    "cash",
+    "cash_on_delivery",
+    "bank_transfer",
+    "manual",
+)
+
 router = APIRouter(prefix="/{store_id}/orders")
 
 
@@ -1130,7 +1142,7 @@ async def unmark_order_paid(
     Reverses the wallet commission, cancels the ETA invoice and logs the
     action (see ``OrderPaymentReversedEvent`` handlers).
     """
-    from sqlalchemy import func, select
+    from sqlalchemy import func, select, update
 
     from src.core.entities.order import PaymentStatus
     from src.core.events.order_events import OrderPaymentReversedEvent
@@ -1150,11 +1162,20 @@ async def unmark_order_paid(
             detail="Order is not marked as paid",
         )
 
+    # Only a REAL gateway capture (Paymob/Kashier/Fawaterak/Moyasar…) needs a
+    # Refund. Manual/offline rails — InstaPay, Vodafone Cash, COD, cash, bank
+    # transfer — also write a "success" transaction when the merchant accepts
+    # the proof, but there is no gateway to refund through; un-marking IS the
+    # reversal for those, so they are excluded from the guard and flipped to
+    # "reversed" below so the ledger agrees with the order.
     gateway_paid = (
         await db.execute(
             select(func.count(PaymentTransactionModel.id)).where(
                 PaymentTransactionModel.order_id == order_id,
                 PaymentTransactionModel.status.in_(("success", "successful")),
+                func.lower(PaymentTransactionModel.gateway).notin_(
+                    MANUAL_PAYMENT_GATEWAYS
+                ),
             )
         )
     ).scalar() or 0
@@ -1182,6 +1203,17 @@ async def unmark_order_paid(
 
     amount = order.reverse_payment(reason=request.reason)
     updated = await order_repo.update(order)
+
+    # Manual-rail transactions recorded for this order are no longer valid.
+    await db.execute(
+        update(PaymentTransactionModel)
+        .where(
+            PaymentTransactionModel.order_id == order_id,
+            PaymentTransactionModel.status.in_(("success", "successful")),
+            func.lower(PaymentTransactionModel.gateway).in_(MANUAL_PAYMENT_GATEWAYS),
+        )
+        .values(status="reversed")
+    )
 
     get_event_bus().publish(
         OrderPaymentReversedEvent(
