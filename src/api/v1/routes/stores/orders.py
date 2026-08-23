@@ -25,6 +25,7 @@ from src.api.dependencies.plan import require_order_limit
 from src.api.dependencies.repositories import (
     get_funnel_event_repository,
     get_network_reputation_repository,
+    get_product_repository,
 )
 from src.application.services.cod_trust_service import (
     CodTrustDecision,
@@ -65,6 +66,7 @@ from src.infrastructure.repositories import (
     OnboardingRepository,
     OrderActivityRepository,
     OrderRepository,
+    ProductRepository,
     StoreRepository,
 )
 
@@ -886,6 +888,7 @@ async def get_order(
     store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     """Get order details by ID."""
     use_case = GetOrderUseCase(
@@ -899,8 +902,30 @@ async def get_order(
         user_id=store.owner_id,
     )
 
+    response = _order_to_response(result)
+
+    # Line items are an immutable snapshot with no image; decorate them with
+    # the product's CURRENT first image so the hub can show thumbnails.
+    # One bulk query; products deleted since the order simply get no image.
+    product_ids: list[UUID] = []
+    for li in response.line_items:
+        try:
+            product_ids.append(UUID(li.product_id))
+        except (ValueError, TypeError):
+            continue
+    if product_ids:
+        try:
+            products = await product_repo.get_by_ids(list(set(product_ids)))
+            image_by_id = {
+                str(p.id): (p.images[0] if p.images else None) for p in products
+            }
+            for li in response.line_items:
+                li.image_url = image_by_id.get(li.product_id)
+        except Exception:  # noqa: BLE001 — thumbnails are decoration, never fail the order
+            pass
+
     return SuccessResponse(
-        data=_order_to_response(result),
+        data=response,
         message="Order retrieved successfully",
     )
 

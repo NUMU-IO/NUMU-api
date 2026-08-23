@@ -276,6 +276,9 @@ class OrderLineItemResponse(BaseModel):
     quantity: int = Field(description="Quantity ordered")
     unit_price: int = Field(description="Unit price in cents")
     total_price: int = Field(description="Line total in cents (unit_price * quantity)")
+    # Resolved from the catalog at read time (GET /orders/{id}); the order
+    # snapshot itself never stored an image.
+    image_url: str | None = Field(default=None, description="Current product image")
 
 
 class OrderAddressResponse(BaseModel):
