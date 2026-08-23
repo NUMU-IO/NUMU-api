@@ -1064,6 +1064,12 @@ class OrdersByPaymentMethodItem(BaseModel):
     revenue: int  # cents
 
 
+class OrdersByShippingMethodItem(BaseModel):
+    method: str
+    count: int
+    percentage: float
+
+
 class FulfillmentTimeStats(BaseModel):
     avg_hours: float
     p50_hours: float
@@ -1084,6 +1090,7 @@ class OrdersByHourItem(BaseModel):
 class OrdersBreakdownResponse(BaseModel):
     by_status: list[OrdersByStatusItem]
     by_payment_method: list[OrdersByPaymentMethodItem]
+    by_shipping_method: list[OrdersByShippingMethodItem] = []
     fulfillment_time: FulfillmentTimeStats
     by_day_of_week: list[OrdersByDayOfWeekItem]
     by_hour_of_day: list[OrdersByHourItem]
@@ -1133,6 +1140,19 @@ async def get_orders_breakdown(
         )
     ]
 
+    ship_map = await analytics_repo.orders_by_shipping_method(
+        store.id, period_start, now
+    )
+    ship_total = sum(ship_map.values())
+    by_shipping_method = [
+        OrdersByShippingMethodItem(
+            method=m,
+            count=c,
+            percentage=round(c / ship_total * 100, 1) if ship_total > 0 else 0,
+        )
+        for m, c in sorted(ship_map.items(), key=lambda x: x[1], reverse=True)
+    ]
+
     f = await analytics_repo.fulfillment_time_stats(store.id, period_start, now)
     fulfillment_time = FulfillmentTimeStats(
         avg_hours=f["avg_hours"],
@@ -1178,6 +1198,7 @@ async def get_orders_breakdown(
         data=OrdersBreakdownResponse(
             by_status=by_status,
             by_payment_method=by_payment_method,
+            by_shipping_method=by_shipping_method,
             fulfillment_time=fulfillment_time,
             by_day_of_week=by_day_of_week,
             by_hour_of_day=by_hour_of_day,
