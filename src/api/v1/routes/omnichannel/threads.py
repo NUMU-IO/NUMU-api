@@ -10,8 +10,10 @@ from src.api.dependencies.repositories import (
     get_customer_repository,
     get_message_thread_repository,
 )
+from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
 from src.application.dto.omnichannel import LinkCustomerDTO
+from src.application.services.avatar_adoption import adopt_avatar
 from src.application.use_cases.omnichannel import (
     GetThreadUseCase,
     ListThreadsUseCase,
@@ -19,8 +21,11 @@ from src.application.use_cases.omnichannel import (
     ResolveThreadUseCase,
 )
 from src.core.exceptions import EntityNotFoundError
+from src.core.logging import get_logger
 from src.infrastructure.repositories import MessageThreadRepositoryImpl
 from src.infrastructure.repositories.customer_repository import CustomerRepository
+
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["Omnichannel"])
 
@@ -131,6 +136,7 @@ async def link_customer(
     db: AsyncSession = Depends(get_db),
     thread_repo: MessageThreadRepositoryImpl = Depends(get_message_thread_repository),
     customer_repo: CustomerRepository = Depends(get_customer_repository),
+    storage=Depends(get_storage_service),
 ) -> SuccessResponse:
     """Link this conversation to a customer record.
 
@@ -155,6 +161,25 @@ async def link_customer(
             customer.phone
         )
     await thread_repo.update(thread)
+
+    # First link wins the photo: a customer with no picture adopts this
+    # conversation's avatar automatically (re-hosted; best-effort — the
+    # link itself never fails because of it). The profile page can still
+    # override with another linked conversation's photo.
+    meta = customer.metadata if isinstance(customer.metadata, dict) else {}
+    if thread.participant_avatar_url and not meta.get("avatar_url"):
+        try:
+            await adopt_avatar(
+                customer=customer,
+                source_url=thread.participant_avatar_url,
+                thread_id=thread.id,
+                storage=storage,
+                customer_repo=customer_repo,
+            )
+        except Exception:  # noqa: BLE001 — cosmetic, never block the link
+            logger.warning(
+                "link_customer_avatar_adopt_failed", thread_id=str(thread.id)
+            )
 
     return SuccessResponse(data=None, message="Conversation linked to customer")
 

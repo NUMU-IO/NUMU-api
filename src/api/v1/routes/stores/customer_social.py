@@ -19,11 +19,9 @@ commerce:
   timeline.
 """
 
-from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID, uuid4
+from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -41,10 +39,10 @@ from src.api.dependencies.repositories import (
 )
 from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
+from src.application.services.avatar_adoption import adopt_avatar
 from src.application.use_cases.omnichannel import SendMessageUseCase
 from src.core.entities.order_activity import OrderActivity, OrderActivityKind
 from src.core.entities.store import Store
-from src.core.interfaces.services.storage_service import StorageBucket
 from src.core.logging import get_logger
 from src.infrastructure.database.models.public.omnichannel import MessageThreadModel
 from src.infrastructure.database.models.tenant.whatsapp_conversation import (
@@ -117,40 +115,6 @@ def _is_window_error(exc: Exception) -> bool:
         or "outside of allowed window" in text
         or "allowed window" in text
     )
-
-
-AVATAR_MAX_BYTES = 3 * 1024 * 1024
-AVATAR_TIMEOUT_S = 6.0
-
-
-async def _rehost_avatar(url: str, customer_id: UUID, storage) -> str | None:
-    """Download a (likely expiring) CDN avatar and pin it on our storage."""
-    try:
-        async with httpx.AsyncClient(
-            timeout=AVATAR_TIMEOUT_S, follow_redirects=True
-        ) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            content_type = resp.headers.get("content-type", "").split(";")[0].strip()
-            if not content_type.startswith("image/"):
-                return None
-            body = resp.content
-            if not body or len(body) > AVATAR_MAX_BYTES:
-                return None
-        ext = {"image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(
-            content_type, "jpg"
-        )
-        uploaded = await storage.upload_file(
-            file_content=body,
-            filename=f"customer-{customer_id}.{ext}",
-            content_type=content_type,
-            bucket=StorageBucket.AVATARS,
-            key=f"customers/{customer_id}/{uuid4().hex[:12]}.{ext}",
-        )
-        return uploaded.url
-    except Exception:  # noqa: BLE001 — re-hosting is best-effort
-        logger.warning("customer_avatar_rehost_failed", customer_id=str(customer_id))
-        return None
 
 
 def _thread_profile(t: MessageThreadModel) -> SocialProfileResponse:
@@ -286,18 +250,13 @@ async def set_customer_avatar(
             status_code=422, detail="This conversation has no profile picture"
         )
 
-    hosted = await _rehost_avatar(source_url, customer_id, storage)
-    final_url = hosted or source_url
-
-    meta = dict(customer.metadata or {})
-    meta["avatar_url"] = final_url
-    meta["avatar_source"] = {
-        "thread_id": str(request.thread_id),
-        "rehosted": hosted is not None,
-        "set_at": datetime.now(UTC).isoformat(),
-    }
-    customer.metadata = meta
-    await customer_repo.update(customer)
+    final_url = await adopt_avatar(
+        customer=customer,
+        source_url=source_url,
+        thread_id=request.thread_id,
+        storage=storage,
+        customer_repo=customer_repo,
+    )
 
     return SuccessResponse(
         data=SetAvatarResponse(avatar_url=final_url),
