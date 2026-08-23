@@ -67,13 +67,23 @@ class Settings(BaseSettings):
     db_app_user: str | None = None
     db_app_password: str | None = None
 
-    # Connection pool (total max = pool_size + max_overflow PER PROCESS)
-    # API + Celery + admin each have their own pool — keep under Postgres max_connections
-    # Bumped 2026-04-23 after /api/v1/stores/ started returning 500s under
-    # analytics + bundles burst load; old 5+10=15 cap exhausted while long
-    # range-aggregation queries held connections.
-    db_pool_size: int = 10  # Persistent connections maintained in pool
-    db_max_overflow: int = 20  # Extra connections allowed beyond pool_size
+    # Connection pool. The cap is PER PROCESS, so the real ceiling is
+    # (pool_size + max_overflow) x uvicorn workers, plus every Celery
+    # process, plus Supabase's own internals — all against one
+    # max_connections. Supavisor runs in SESSION mode, so each pooled
+    # connection pins a real Postgres backend for its lifetime.
+    #
+    # Budget measured on prod 2026-08-23: max_connections 60, minus 3
+    # superuser-reserved, minus ~6 held by Supabase itself (pg_cron,
+    # pg_net, postgres_exporter, PostgREST, Supavisor auth_query) = ~48
+    # usable. At 2 API workers: 2 x (8+7) = 30, plus Celery worker and
+    # beat at 2 x (3+3) = 12, leaves ~6 spare for migrations and psql.
+    #
+    # The previous defaults (10+20) predate the move to Supabase and would
+    # allow 60 connections from the API alone — the whole database — if the
+    # env overrides were ever missing.
+    db_pool_size: int = 8  # Persistent connections maintained in pool
+    db_max_overflow: int = 7  # Extra connections allowed beyond pool_size
     db_pool_timeout: int = 30  # Seconds to wait for a connection before error
     db_pool_recycle: int = 1800  # Recycle connections older than 30 minutes
     # Abort any query that runs longer than this (ms). Kills runaway analytics
@@ -93,8 +103,8 @@ class Settings(BaseSettings):
     # background jobs still get bandwidth without stealing from the API. Set
     # process_role=celery on the worker container (NUMU_PROCESS_ROLE env)
     # and the import in connection.py picks up these values.
-    celery_db_pool_size: int = 5
-    celery_db_max_overflow: int = 5
+    celery_db_pool_size: int = 3
+    celery_db_max_overflow: int = 3
     # Role identifier — read from NUMU_PROCESS_ROLE at startup. "api" uses
     # the db_* pool sizes above; "celery" uses celery_db_*. Anything else
     # (tests, scripts) falls back to the api sizes.
