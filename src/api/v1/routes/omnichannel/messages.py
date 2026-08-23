@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
@@ -17,6 +17,7 @@ from src.application.use_cases.omnichannel import (
     ListMessagesUseCase,
     SendMessageUseCase,
 )
+from src.infrastructure.external_services.meta.graph_client import MetaGraphAPIError
 from src.infrastructure.repositories import (
     ChannelConnectionRepositoryImpl,
     ChannelMessageRepositoryImpl,
@@ -77,14 +78,46 @@ async def send_message(
         message_thread_repository=thread_repo,
         channel_message_repository=message_repo,
     )
-    message = await use_case.execute(
-        thread_id=thread_id,
-        message=payload.text or "",
-        attachment_type=payload.attachment_type,
-        attachment_url=payload.attachment_url,
-        template_name=payload.template_name,
-        template_params=payload.template_params,
-    )
+
+    def _is_window_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "(#10)" in text or "allowed window" in text
+
+    try:
+        message = await use_case.execute(
+            thread_id=thread_id,
+            message=payload.text or "",
+            attachment_type=payload.attachment_type,
+            attachment_url=payload.attachment_url,
+            template_name=payload.template_name,
+            template_params=payload.template_params,
+        )
+    except MetaGraphAPIError as exc:
+        # Meta blocks standard sends >24h after the customer's last message.
+        # A merchant typing in the Inbox IS the human-agent case, so retry
+        # once with the HUMAN_AGENT tag (7-day window; needs the Human Agent
+        # permission approved on the Meta app). Attachments can't be tagged.
+        if not _is_window_error(exc) or payload.attachment_url:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Send failed: {exc}",
+            ) from exc
+        try:
+            message = await use_case.execute(
+                thread_id=thread_id,
+                message=payload.text or "",
+                message_tag="HUMAN_AGENT",
+            )
+        except MetaGraphAPIError as exc2:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Meta blocked this message: more than 24 hours passed since "
+                    "the customer's last message (and the app lacks the Human "
+                    "Agent permission for late replies). Ask the customer to "
+                    "message you first."
+                ),
+            ) from exc2
     return SuccessResponse(
         data=message,
         message="Message sent successfully",
