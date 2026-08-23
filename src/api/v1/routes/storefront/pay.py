@@ -100,18 +100,29 @@ class PayOrderView(BaseModel):
     currency: str
     total: int  # original order total (cents)
     amount_due: int  # what to pay now (== total in v1; discount deferred)
+    # Money breakdown so "amount due" is explainable on the page
+    # (items + shipping − discount; VAT is included in prices).
+    subtotal: int = 0
+    shipping_cost: int = 0
+    discount_amount: int = 0
     is_payable: bool
     not_payable_reason: str | None = None  # already_paid / closed / null
     recovery_promo: str | None = None  # display copy only (no monetary effect v1)
     line_items: list[PayLineItem]
     enabled_payment_methods: list[str]  # online only, COD excluded
+    # Manual transfer rails the store has configured (instapay /
+    # vodafone_cash) — the page renders transfer instructions + proof
+    # upload for these instead of a gateway redirect.
+    manual_methods: list[str] = []
     store_name: str
 
 
 class PayOrderRequest(BaseModel):
     """Which online method to pay the existing order with."""
 
-    payment_method: str  # paymob | paymob_card | paymob_wallet | kashier
+    payment_method: (
+        str  # paymob | paymob_card | paymob_wallet | kashier | instapay | vodafone_cash
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +138,20 @@ def _enabled_online_methods(store_settings: dict | None) -> list[str]:
         cfg = payment.get(provider, {}) or {}
         if cfg.get("enabled"):
             out.append(provider)
+    return out
+
+
+_MANUAL_PAY_METHODS = ("instapay", "vodafone_cash")
+
+
+def _enabled_manual_methods(store_settings: dict | None) -> list[str]:
+    """Manual transfer rails with usable credentials (destination set)."""
+    payment = (store_settings or {}).get("payment", {}) or {}
+    out: list[str] = []
+    for method in _MANUAL_PAY_METHODS:
+        cfg = payment.get(method, {}) or {}
+        if cfg.get("enabled"):
+            out.append(method)
     return out
 
 
@@ -210,11 +235,15 @@ async def get_pay_order_view(
             currency=order.currency,
             total=order.total,
             amount_due=order.total,  # v1: full total; discount is a follow-up
+            subtotal=order.subtotal,
+            shipping_cost=order.shipping_cost,
+            discount_amount=order.discount_amount,
             is_payable=is_payable,
             not_payable_reason=reason,
             recovery_promo=cod_trust.get("recovery_promo"),
             line_items=items,
             enabled_payment_methods=_enabled_online_methods(store.settings),
+            manual_methods=_enabled_manual_methods(store.settings),
             store_name=store.name,
         ),
         message="Pay view retrieved",
@@ -258,6 +287,24 @@ async def initiate_pay_order(
             )
 
     order, store = await _load_scoped_order(order_id, store_id, order_repo, store_repo)
+
+    # ── Manual transfer rails (InstaPay / Vodafone Cash) ───────────────
+    # No gateway session: create-or-reuse the order's ManualPaymentIntent
+    # (same machinery as checkout) and hand the page the transfer
+    # instructions. The customer then uploads a proof via the existing
+    # /orders/{order_id}/payment-proof endpoint using reference_code.
+    if request.payment_method in _MANUAL_PAY_METHODS:
+        is_payable, reason = _payable_state(order)
+        if not is_payable:
+            raise HTTPException(status_code=409, detail=reason or "not_payable")
+        if request.payment_method not in _enabled_manual_methods(store.settings):
+            raise HTTPException(
+                status_code=422, detail="Method not enabled for this store"
+            )
+        data = await _initiate_manual(order, store, request.payment_method, order_repo)
+        if pay_cache_key and _cache_service:
+            await _cache_service.set(pay_cache_key, json.dumps(data), ttl=3600)
+        return SuccessResponse(data=data, message="Transfer instructions ready")
 
     is_payable, reason = _payable_state(order)
     if not is_payable:
@@ -304,6 +351,101 @@ async def initiate_pay_order(
             logger.warning(f"pay_idempotency_cache_failed order={order_id} err={exc}")
 
     return result
+
+
+async def _initiate_manual(order, store, method_value: str, order_repo) -> dict:
+    """Create (or reuse) the order's manual-payment intent and return the
+    transfer instructions payload for the pay page."""
+    from sqlalchemy.exc import IntegrityError as _IntegrityError
+
+    from src.core.entities.instapay import ManualPaymentIntent, ManualPaymentMethod
+    from src.infrastructure.external_services.manual_transfer import (
+        ManualTransferPaymentService,
+        generate_reference_code,
+        get_merchant_manual_credentials,
+    )
+    from src.infrastructure.repositories.instapay_intent_repository import (
+        ManualPaymentIntentRepository,
+    )
+
+    manual_method = ManualPaymentMethod(method_value)
+    intent_repo = ManualPaymentIntentRepository(order_repo.session)
+
+    # One intent per order (UNIQUE order_id): checkout may already have made
+    # one, or a previous visit to this page did. Reuse it — its reference is
+    # what a half-finished transfer would carry.
+    existing = await intent_repo.get_by_order_id(order.id)
+    if existing is not None:
+        return {
+            "type": "manual",
+            "method": existing.method.value
+            if hasattr(existing.method, "value")
+            else str(existing.method),
+            "destination": existing.display_destination,
+            "display_phone": existing.display_phone,
+            "reference_code": existing.reference_code,
+            "amount_cents": existing.amount_cents,
+            "qr_payload": existing.qr_payload,
+        }
+
+    credentials = await get_merchant_manual_credentials(store.settings, manual_method)
+    manual_service = ManualTransferPaymentService(
+        destination=credentials["destination"],
+        method=manual_method,
+        display_name=credentials.get("display_name"),
+        fallback_phone=credentials.get("fallback_phone"),
+        qr_image_url=credentials.get("qr_image_url"),
+        qr_link_url=credentials.get("qr_link_url"),
+    )
+
+    intent_entity = None
+    for _ in range(5):
+        candidate = generate_reference_code(manual_method.reference_prefix)
+        qr_payload, expires_at = manual_service.build_intent_payload(
+            amount_cents=order.total,
+            reference_code=candidate,
+            note=f"Order {order.order_number}",
+        )
+        entity = ManualPaymentIntent.new(
+            tenant_id=order.tenant_id,
+            store_id=order.store_id,
+            order_id=order.id,
+            reference_code=candidate,
+            method=manual_method,
+            display_destination=credentials["destination"],
+            display_phone=credentials.get("fallback_phone"),
+            amount_cents=order.total,
+            expires_at=expires_at,
+            qr_payload=qr_payload,
+        )
+        try:
+            async with order_repo.session.begin_nested():
+                await intent_repo.create(entity)
+            intent_entity = entity
+            break
+        except _IntegrityError:
+            continue
+    if intent_entity is None:
+        # Lost every race — someone else created the intent; return theirs.
+        existing = await intent_repo.get_by_order_id(order.id)
+        if existing is None:
+            raise HTTPException(
+                status_code=500, detail="Could not prepare transfer instructions"
+            )
+        intent_entity = existing
+
+    await _stamp_recovery_initiated(order, order_repo, str(intent_entity.id))
+    await order_repo.session.commit()
+
+    return {
+        "type": "manual",
+        "method": method_value,
+        "destination": intent_entity.display_destination,
+        "display_phone": intent_entity.display_phone,
+        "reference_code": intent_entity.reference_code,
+        "amount_cents": intent_entity.amount_cents,
+        "qr_payload": intent_entity.qr_payload,
+    }
 
 
 async def _stamp_recovery_initiated(order, order_repo, payment_id: str) -> None:
