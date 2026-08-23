@@ -524,7 +524,12 @@ async def calculate_preview(
     repo: Annotated[ShippingZoneRepository, Depends(get_shipping_zone_repository)],
 ):
     """Same shape as storefront /shipping/options — shares the resolver."""
-    resolver = ShippingResolver(repo, currency=store.currency or "EGP")
+    # Store carries `default_currency` (enum) — `store.currency` raised
+    # AttributeError and 500'd every merchant calculate call.
+    currency = getattr(store.default_currency, "value", None) or str(
+        store.default_currency or "EGP"
+    )
+    resolver = ShippingResolver(repo, currency=currency)
     # Accept any form: ISO code, legacy Bosta code, governorate name,
     # or common city alias — the merchant calculator gets the same
     # lenient parsing as the storefront.
