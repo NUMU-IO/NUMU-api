@@ -60,6 +60,7 @@ def _customer_response(
         is_verified=customer.is_verified,
         location=(meta.get("location") if isinstance(meta, dict) else None)
         or getattr(customer, "location", None),
+        avatar_url=meta.get("avatar_url") if isinstance(meta, dict) else None,
         total_orders=total_orders,
         total_spent=total_spent,
         default_address_id=customer.default_address_id,

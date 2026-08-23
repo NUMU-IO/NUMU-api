@@ -406,6 +406,9 @@ class CustomerResponse(BaseModel):
     location: str | None = Field(
         None, description="Merchant-captured city / governorate (from metadata)"
     )
+    avatar_url: str | None = Field(
+        None, description="Customer photo (adopted from a linked conversation)"
+    )
     total_orders: int = Field(0, description="Lifetime order count")
     total_spent: int = Field(0, description="Lifetime spend in cents")
     default_address_id: str | None = Field(None, description="Default address UUID")
