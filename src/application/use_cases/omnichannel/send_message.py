@@ -53,6 +53,7 @@ class SendMessageUseCase:
         attachment_url: str | None = None,
         template_name: str | None = None,
         template_params: dict | None = None,
+        message_tag: str | None = None,
     ) -> ChannelMessage:
         """Send a message to a thread.
 
@@ -63,6 +64,9 @@ class SendMessageUseCase:
             attachment_url: URL of attachment
             template_name: WhatsApp template name
             template_params: Template parameters
+            message_tag: Meta MESSAGE_TAG for text sends outside the 24h
+                window — Messenger accepts e.g. POST_PURCHASE_UPDATE,
+                Instagram only HUMAN_AGENT. Ignored for WhatsApp.
 
         Returns:
             Created message entity
@@ -90,11 +94,21 @@ class SendMessageUseCase:
             )
         elif connection.channel == ChannelType.FACEBOOK:
             provider_response = await self._send_messenger(
-                connection, thread, message, attachment_type, attachment_url
+                connection,
+                thread,
+                message,
+                attachment_type,
+                attachment_url,
+                tag=message_tag,
             )
         elif connection.channel == ChannelType.INSTAGRAM:
             provider_response = await self._send_instagram(
-                connection, thread, message, attachment_type, attachment_url
+                connection,
+                thread,
+                message,
+                attachment_type,
+                attachment_url,
+                tag=message_tag,
             )
         else:
             raise ValidationError(f"Unknown channel: {connection.channel}")
@@ -207,6 +221,7 @@ class SendMessageUseCase:
         message: str,
         attachment_type: str | None,
         attachment_url: str | None,
+        tag: str | None = None,
     ) -> dict | None:
         from src.infrastructure.external_services.secrets import SecretsManager
 
@@ -234,6 +249,7 @@ class SendMessageUseCase:
                 return await client.send_text(
                     recipient_id=thread.external_participant_id,
                     text=message,
+                    tag=tag,
                 )
         finally:
             await client.close()
@@ -245,6 +261,7 @@ class SendMessageUseCase:
         message: str,
         attachment_type: str | None,
         attachment_url: str | None,
+        tag: str | None = None,
     ) -> dict | None:
         from src.infrastructure.external_services.secrets import SecretsManager
 
@@ -276,6 +293,7 @@ class SendMessageUseCase:
                 return await client.send_text(
                     recipient_igid=thread.external_participant_id,
                     text=message,
+                    tag=tag,
                 )
         finally:
             await client.close()

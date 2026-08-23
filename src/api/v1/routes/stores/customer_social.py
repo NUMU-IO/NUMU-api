@@ -50,6 +50,7 @@ from src.infrastructure.database.models.public.omnichannel import MessageThreadM
 from src.infrastructure.database.models.tenant.whatsapp_conversation import (
     WhatsAppConversationModel,
 )
+from src.infrastructure.external_services.meta.graph_client import MetaGraphAPIError
 from src.infrastructure.repositories import (
     ChannelConnectionRepositoryImpl,
     ChannelMessageRepositoryImpl,
@@ -106,6 +107,17 @@ class SendPaymentLinkResponse(BaseModel):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _is_window_error(exc: Exception) -> bool:
+    """Graph error #10 — "message is sent outside of allowed window"."""
+    text = str(exc).lower()
+    return (
+        "(#10)" in text
+        or "outside of allowed window" in text
+        or "allowed window" in text
+    )
+
 
 AVATAR_MAX_BYTES = 3 * 1024 * 1024
 AVATAR_TIMEOUT_S = 6.0
@@ -375,7 +387,44 @@ async def send_order_payment_link(
         message_thread_repository=thread_repo,
         channel_message_repository=message_repo,
     )
-    sent = await use_case.execute(thread_id=thread.id, message=text)
+    # Meta only allows standard messages within 24h of the customer's last
+    # message. A payment request for their own order is exactly what the
+    # MESSAGE_TAG escape hatch is for, so on a window rejection we retry
+    # tagged: Messenger → POST_PURCHASE_UPDATE (order/payment updates),
+    # Instagram → HUMAN_AGENT (its only tag; 7-day window, needs the Human
+    # Agent permission approved on the Meta app). If Meta still refuses,
+    # the merchant gets an actionable 409 — not a blank 500.
+    window_tag = {
+        "facebook": "POST_PURCHASE_UPDATE",
+        "instagram": "HUMAN_AGENT",
+    }.get(thread.channel)
+    try:
+        sent = await use_case.execute(thread_id=thread.id, message=text)
+    except MetaGraphAPIError as exc:
+        if window_tag is None or not _is_window_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"{thread.channel} send failed: {exc}",
+            ) from exc
+        logger.info(
+            "payment_link_window_retry",
+            thread_id=str(thread.id),
+            channel=thread.channel,
+            tag=window_tag,
+        )
+        try:
+            sent = await use_case.execute(
+                thread_id=thread.id, message=text, message_tag=window_tag
+            )
+        except MetaGraphAPIError as exc2:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Meta blocked the send: more than 24 hours passed since the "
+                    "customer's last message on this channel. Ask them to send "
+                    "any message first, or use another linked channel."
+                ),
+            ) from exc2
 
     channel_label = {
         "facebook": "Messenger",
