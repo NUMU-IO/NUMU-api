@@ -19,11 +19,9 @@ commerce:
   timeline.
 """
 
-from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID, uuid4
+from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -41,15 +39,16 @@ from src.api.dependencies.repositories import (
 )
 from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
+from src.application.services.avatar_adoption import adopt_avatar
 from src.application.use_cases.omnichannel import SendMessageUseCase
 from src.core.entities.order_activity import OrderActivity, OrderActivityKind
 from src.core.entities.store import Store
-from src.core.interfaces.services.storage_service import StorageBucket
 from src.core.logging import get_logger
 from src.infrastructure.database.models.public.omnichannel import MessageThreadModel
 from src.infrastructure.database.models.tenant.whatsapp_conversation import (
     WhatsAppConversationModel,
 )
+from src.infrastructure.external_services.meta.graph_client import MetaGraphAPIError
 from src.infrastructure.repositories import (
     ChannelConnectionRepositoryImpl,
     ChannelMessageRepositoryImpl,
@@ -107,38 +106,15 @@ class SendPaymentLinkResponse(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
-AVATAR_MAX_BYTES = 3 * 1024 * 1024
-AVATAR_TIMEOUT_S = 6.0
 
-
-async def _rehost_avatar(url: str, customer_id: UUID, storage) -> str | None:
-    """Download a (likely expiring) CDN avatar and pin it on our storage."""
-    try:
-        async with httpx.AsyncClient(
-            timeout=AVATAR_TIMEOUT_S, follow_redirects=True
-        ) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            content_type = resp.headers.get("content-type", "").split(";")[0].strip()
-            if not content_type.startswith("image/"):
-                return None
-            body = resp.content
-            if not body or len(body) > AVATAR_MAX_BYTES:
-                return None
-        ext = {"image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(
-            content_type, "jpg"
-        )
-        uploaded = await storage.upload_file(
-            file_content=body,
-            filename=f"customer-{customer_id}.{ext}",
-            content_type=content_type,
-            bucket=StorageBucket.AVATARS,
-            key=f"customers/{customer_id}/{uuid4().hex[:12]}.{ext}",
-        )
-        return uploaded.url
-    except Exception:  # noqa: BLE001 — re-hosting is best-effort
-        logger.warning("customer_avatar_rehost_failed", customer_id=str(customer_id))
-        return None
+def _is_window_error(exc: Exception) -> bool:
+    """Graph error #10 — "message is sent outside of allowed window"."""
+    text = str(exc).lower()
+    return (
+        "(#10)" in text
+        or "outside of allowed window" in text
+        or "allowed window" in text
+    )
 
 
 def _thread_profile(t: MessageThreadModel) -> SocialProfileResponse:
@@ -274,18 +250,13 @@ async def set_customer_avatar(
             status_code=422, detail="This conversation has no profile picture"
         )
 
-    hosted = await _rehost_avatar(source_url, customer_id, storage)
-    final_url = hosted or source_url
-
-    meta = dict(customer.metadata or {})
-    meta["avatar_url"] = final_url
-    meta["avatar_source"] = {
-        "thread_id": str(request.thread_id),
-        "rehosted": hosted is not None,
-        "set_at": datetime.now(UTC).isoformat(),
-    }
-    customer.metadata = meta
-    await customer_repo.update(customer)
+    final_url = await adopt_avatar(
+        customer=customer,
+        source_url=source_url,
+        thread_id=request.thread_id,
+        storage=storage,
+        customer_repo=customer_repo,
+    )
 
     return SuccessResponse(
         data=SetAvatarResponse(avatar_url=final_url),
@@ -375,7 +346,44 @@ async def send_order_payment_link(
         message_thread_repository=thread_repo,
         channel_message_repository=message_repo,
     )
-    sent = await use_case.execute(thread_id=thread.id, message=text)
+    # Meta only allows standard messages within 24h of the customer's last
+    # message. A payment request for their own order is exactly what the
+    # MESSAGE_TAG escape hatch is for, so on a window rejection we retry
+    # tagged: Messenger → POST_PURCHASE_UPDATE (order/payment updates),
+    # Instagram → HUMAN_AGENT (its only tag; 7-day window, needs the Human
+    # Agent permission approved on the Meta app). If Meta still refuses,
+    # the merchant gets an actionable 409 — not a blank 500.
+    window_tag = {
+        "facebook": "POST_PURCHASE_UPDATE",
+        "instagram": "HUMAN_AGENT",
+    }.get(thread.channel)
+    try:
+        sent = await use_case.execute(thread_id=thread.id, message=text)
+    except MetaGraphAPIError as exc:
+        if window_tag is None or not _is_window_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"{thread.channel} send failed: {exc}",
+            ) from exc
+        logger.info(
+            "payment_link_window_retry",
+            thread_id=str(thread.id),
+            channel=thread.channel,
+            tag=window_tag,
+        )
+        try:
+            sent = await use_case.execute(
+                thread_id=thread.id, message=text, message_tag=window_tag
+            )
+        except MetaGraphAPIError as exc2:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Meta blocked the send: more than 24 hours passed since the "
+                    "customer's last message on this channel. Ask them to send "
+                    "any message first, or use another linked channel."
+                ),
+            ) from exc2
 
     channel_label = {
         "facebook": "Messenger",

@@ -31,8 +31,14 @@ class InstagramClient:
         self,
         recipient_igid: str,
         text: str,
+        tag: str | None = None,
     ) -> dict[str, Any]:
-        """Send a text message to an Instagram user."""
+        """Send a text message to an Instagram user.
+
+        Instagram supports only the HUMAN_AGENT tag (7-day window, needs the
+        Human Agent permission approved on the Meta app) — pass it to reach
+        a user whose last message is older than 24 hours.
+        """
         endpoint = f"{self.page_id}/messages"
         data = {
             # Meta rejects the legacy "igid" key: the IG Messaging API takes
@@ -40,6 +46,9 @@ class InstagramClient:
             "recipient": {"id": recipient_igid},
             "message": {"text": text},
         }
+        if tag:
+            data["messaging_type"] = "MESSAGE_TAG"
+            data["tag"] = tag
 
         logger.info(
             "instagram_send_text", recipient_id=recipient_igid, text_length=len(text)

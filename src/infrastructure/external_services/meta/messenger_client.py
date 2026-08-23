@@ -22,14 +22,22 @@ class MessengerClient:
         self,
         recipient_id: str,
         text: str,
+        tag: str | None = None,
     ) -> dict[str, Any]:
-        """Send a text message to a user."""
+        """Send a text message to a user.
+
+        ``tag`` switches to MESSAGE_TAG delivery (e.g. POST_PURCHASE_UPDATE
+        for order/payment updates), which Meta allows outside the standard
+        24-hour messaging window for the tag's approved use cases.
+        """
         endpoint = f"{self.page_id}/messages"
         data = {
-            "messaging_type": "RESPONSE",
+            "messaging_type": "MESSAGE_TAG" if tag else "RESPONSE",
             "recipient": {"id": recipient_id},
             "message": {"text": text},
         }
+        if tag:
+            data["tag"] = tag
 
         logger.info(
             "messenger_send_text", recipient_id=recipient_id, text_length=len(text)
