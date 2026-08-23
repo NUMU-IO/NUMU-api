@@ -208,6 +208,27 @@ class AnalyticsRepository:
             for row in result.all()
         }
 
+    async def orders_by_shipping_method(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> dict[str, int]:
+        """{shipping_method: order count}. NULL/blank → "unknown"."""
+        query = (
+            select(
+                OrderModel.shipping_method,
+                func.count(OrderModel.id).label("count"),
+            )
+            .where(*self._store_window(store_id, date_from, date_to))
+            .group_by(OrderModel.shipping_method)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return {
+            ((row[0] or "").strip() or "unknown"): int(row.count)
+            for row in result.all()
+        }
+
     async def orders_by_day_of_week(
         self,
         store_id: UUID,
