@@ -379,6 +379,10 @@ class OrderResponse(BaseModel):
         description="Automatic / free-shipping promotions applied at checkout",
     )
     total: int = Field(description="Grand total in cents")
+    collected_total: int | None = Field(
+        default=None,
+        description="Cash actually collected after a partial acceptance; null = total",
+    )
     currency: str = Field(description="ISO 4217 currency code")
     payment_method: str | None = Field(description="Payment method used")
     payment_id: str | None = Field(description="External payment transaction ID")
@@ -436,6 +440,10 @@ class OrderListItemResponse(BaseModel):
     payment_status: str = Field(description="Payment status")
     fulfillment_status: str = Field(description="Fulfillment status")
     total: int = Field(description="Grand total in cents")
+    collected_total: int | None = Field(
+        default=None,
+        description="Cash actually collected after a partial acceptance; null = total",
+    )
     currency: str = Field(description="Currency code")
     item_count: int = Field(description="Total items")
     payment_method: str | None = Field(description="Payment method")

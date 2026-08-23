@@ -77,7 +77,11 @@ class CreateRefundUseCase:
         already_refunded = await self.refund_repository.get_total_refunded_for_order(
             dto.order_id
         )
-        refundable_amount = order.total - already_refunded
+        # After a partial acceptance only the collected amount is refundable.
+        collectible = (
+            order.collected_total if order.collected_total is not None else order.total
+        )
+        refundable_amount = collectible - already_refunded
 
         if refundable_amount <= 0:
             log.warning("refund_create_failed", reason="fully_refunded")

@@ -83,6 +83,8 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     tax_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     discount_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Partial acceptance: cash actually collected at the door. NULL => total.
+    collected_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # ORM-side fallback only — checkout always sets this explicitly from
     # store.default_currency. Aligned to "EGP" to match every other
     # currency column (was "USD", an outlier that could mislabel an

@@ -161,7 +161,9 @@ async def _create_shipment_for_order(
         "cod",
         "cash_on_delivery",
     ):
-        cod_amount = order.total
+        cod_amount = (
+            order.collected_total if order.collected_total is not None else order.total
+        )
 
     rate_id = f"{carrier}_{shipping_method}"
     label = await shipping_service.create_shipment(
