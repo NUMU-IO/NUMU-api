@@ -51,9 +51,6 @@ from src.application.dto.order import (
 )
 from src.application.services.attribution_sanitizer import sanitize_utm
 from src.application.services.campaign_resolver import resolve_campaign_id
-from src.application.services.click_id_attribution import (
-    effective_utm_source_medium,
-)
 from src.application.services.cod_trust_service import (
     CodTrustDecision,
     LocationSignals,
@@ -70,6 +67,9 @@ from src.application.services.shipping_resolver import (
 from src.application.services.tax_resolver import (
     TaxLineInput,
     tax_resolver_for_country,
+)
+from src.application.services.traffic_source import (
+    effective_utm_source_medium,
 )
 from src.config import settings
 from src.core.checkout_fields import (
@@ -1746,11 +1746,16 @@ async def checkout(
     _first = request.attribution.first_touch if request.attribution else None
     _eff_utm_source = sanitize_utm(_last.utm_source if _last else request.utm_source)
     _eff_utm_medium = sanitize_utm(_last.utm_medium if _last else request.utm_medium)
-    # Untagged ad clicks: derive the platform from the click id on the last
-    # touch (ttclid → tiktok, fbclid → facebook, gclid → google) so the order
-    # names the same source the funnel rows and abandoned checkout already do.
+    # Untagged visits: derive the platform from the click id on the last
+    # touch, the buyer's in-app browser, or the touch's referrer, so the
+    # order names the same source the funnel rows and the abandoned
+    # checkout already do. No explicit `referrer=` — this request's own
+    # Referer is the store's checkout page, so only the touch's is useful.
     _eff_utm_source, _eff_utm_medium = effective_utm_source_medium(
-        _last, _eff_utm_source, _eff_utm_medium
+        _last,
+        _eff_utm_source,
+        _eff_utm_medium,
+        user_agent=client_user_agent,
     )
     _eff_utm_campaign = sanitize_utm(
         _last.utm_campaign if _last else request.utm_campaign
@@ -3062,6 +3067,7 @@ class CartTrackRequest(BaseModel):
     operation_id="cart_track",
 )
 async def cart_track(
+    http_request: Request,
     store_id: Annotated[UUID, Path(description="Store ID")],
     request: CartTrackRequest,
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
@@ -3091,6 +3097,20 @@ async def cart_track(
     # Skip empty carts — nothing to recover.
     if not request.line_items:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # The storefront only sends utm_* when the shopper arrived on a tagged
+    # link or an ad click. Everything else lands here bare and would show
+    # as "Direct" on the Abandoned Checkouts page — including every TikTok
+    # visit, whose webview sends no referrer at all and is identifiable
+    # only by its User-Agent. Same chain as the order, so a recovered cart
+    # and the order it becomes never disagree about where it came from.
+    eff_utm_source, eff_utm_medium = effective_utm_source_medium(
+        None,
+        request.utm_source,
+        request.utm_medium,
+        referrer=http_request.headers.get("referer"),
+        user_agent=http_request.headers.get("user-agent"),
+    )
 
     # `optional_customer` is the core entity: its `.email` is an `Email`
     # value object. Binding that into SQL (and assigning it to the
@@ -3152,10 +3172,10 @@ async def cart_track(
             existing.currency = request.currency
             if request.coupon_code is not None:
                 existing.coupon_code = request.coupon_code
-            if request.utm_source is not None:
-                existing.utm_source = request.utm_source
-            if request.utm_medium is not None:
-                existing.utm_medium = request.utm_medium
+            if eff_utm_source is not None:
+                existing.utm_source = eff_utm_source
+            if eff_utm_medium is not None:
+                existing.utm_medium = eff_utm_medium
             if request.utm_campaign is not None:
                 existing.utm_campaign = request.utm_campaign
             existing.last_activity_at = now
@@ -3180,8 +3200,8 @@ async def cart_track(
                 total=request.total,
                 currency=request.currency,
                 coupon_code=request.coupon_code,
-                utm_source=request.utm_source,
-                utm_medium=request.utm_medium,
+                utm_source=eff_utm_source,
+                utm_medium=eff_utm_medium,
                 utm_campaign=request.utm_campaign,
                 last_activity_at=now,
                 extra_data=extra,
