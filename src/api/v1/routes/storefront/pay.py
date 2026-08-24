@@ -303,7 +303,12 @@ async def initiate_pay_order(
             )
         data = await _initiate_manual(order, store, request.payment_method, order_repo)
         if pay_cache_key and _cache_service:
-            await _cache_service.set(pay_cache_key, json.dumps(data), ttl=3600)
+            try:
+                await _cache_service.set(
+                    pay_cache_key, json.dumps(data), expire=PAY_IDEMPOTENCY_TTL_SECONDS
+                )
+            except Exception:  # noqa: BLE001 — idempotency cache is best-effort
+                logger.warning("pay_manual_idempotency_cache_failed")
         return SuccessResponse(data=data, message="Transfer instructions ready")
 
     is_payable, reason = _payable_state(order)
