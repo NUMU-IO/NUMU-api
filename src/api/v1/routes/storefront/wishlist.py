@@ -26,7 +26,7 @@ from src.api.dependencies.repositories import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.storefront._cart_owner import CartOwner, get_cart_owner
-from src.core.entities.product import ProductStatus
+from src.core.entities.product import PURCHASABLE_STATUSES
 from src.infrastructure.repositories import ProductRepository, StoreRepository
 
 router = APIRouter()
@@ -169,7 +169,7 @@ async def add_to_wishlist(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found in this store.",
         )
-    if product.status != ProductStatus.ACTIVE:
+    if product.status not in PURCHASABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Product is not available.",

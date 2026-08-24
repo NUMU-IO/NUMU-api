@@ -790,7 +790,7 @@ async def reorder_customer_order(
         _get_or_create_cart,
     )
     from src.core.entities.cart import CartItem
-    from src.core.entities.product import ProductStatus
+    from src.core.entities.product import PURCHASABLE_STATUSES
 
     order = await order_repo.get_by_id(order_id)
     if not order or order.customer_id != current_customer.id:
@@ -828,7 +828,7 @@ async def reorder_customer_order(
             )
             continue
 
-        if product.status != ProductStatus.ACTIVE:
+        if product.status not in PURCHASABLE_STATUSES:
             skipped.append(
                 ReorderSkippedItem(
                     product_id=str(line.product_id),
@@ -842,7 +842,7 @@ async def reorder_customer_order(
 
         # Resolve variant when the original line carried one
         # (Phase 8.1). Missing or different-product variant = skip.
-        unit_price_cents = product.price.cents
+        unit_price_cents = product.effective_price().cents
         variant_sku = product.sku
         variant_image = product.images[0] if product.images else None
         if line.variant_id:

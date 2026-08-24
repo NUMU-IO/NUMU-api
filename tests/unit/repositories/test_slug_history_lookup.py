@@ -50,6 +50,15 @@ class TestProductFindByPreviousSlug:
         model.price_currency = "EGP"
         model.compare_at_price = None
         model.cost_price = None
+        # Commerce columns. Spelled out like every other field here — the
+        # mock stands in for a real row, and a MagicMock left to auto-create
+        # `sale_price` makes the repository try to build Money from a mock.
+        model.sale_price = None
+        model.sale_starts_at = None
+        model.sale_ends_at = None
+        model.requires_shipping = True
+        model.tax_exempt = False
+        model.related_product_ids = None
         model.quantity = 10
         model.low_stock_threshold = 5
         model.weight = None

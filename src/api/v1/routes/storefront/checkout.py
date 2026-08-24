@@ -80,7 +80,7 @@ from src.core.checkout_fields import (
 )
 from src.core.entities.abandoned_checkout import AbandonedCheckout
 from src.core.entities.customer import Customer
-from src.core.entities.product import ProductStatus
+from src.core.entities.product import PURCHASABLE_STATUSES
 from src.core.exceptions import EntityNotFoundError
 from src.core.value_objects.geography import resolve_governorate
 from src.core.value_objects.phone import PhoneNumber
@@ -1091,6 +1091,14 @@ async def checkout(
 
     # Build line items with server-side price resolution
     line_items: list[CreateOrderLineItemDTO] = []
+    # Products whose lines are zero-rated. Collected here rather than put on
+    # the line DTO because tax is resolved further down from `line_items`,
+    # which carries no product flags — and a checkout can hold the same
+    # product on several lines.
+    tax_exempt_product_ids: set[UUID] = set()
+    # True once any line needs delivering. An order of only digital goods
+    # must not be charged shipping, however the merchant's rates are set up.
+    order_requires_shipping = False
     # Remember per-line inventory mode so the atomic-deduct step below
     # can target the right code path (variant combo vs product-level)
     # without re-resolving the product.
@@ -1125,7 +1133,7 @@ async def checkout(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {product.name} does not belong to this store",
             )
-        if product.status != ProductStatus.ACTIVE:
+        if product.status not in PURCHASABLE_STATUSES:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product {product.name} is not available",
@@ -1230,13 +1238,19 @@ async def checkout(
             if display_options
             else None
         )
+        if product.tax_exempt:
+            tax_exempt_product_ids.add(product.id)
+        if product.requires_shipping:
+            order_requires_shipping = True
         line_items.append(
             CreateOrderLineItemDTO(
                 product_id=product.id,
                 product_name=product.name,
                 sku=product.sku,
                 quantity=item.quantity,
-                unit_price=product.price.cents,
+                # The authoritative charge. A sale that is open right now
+                # must be what the customer is billed, not the list price.
+                unit_price=product.effective_price().cents,
                 variant_id=item.variant_id,
                 variant_name=variant_name,
                 # Persist the raw selection dict so the merchant order-detail
@@ -1694,6 +1708,18 @@ async def checkout(
         resolved_rate_id = resolution.rate_id
         resolved_label = resolution.label
 
+    # Nothing in the basket ships, so nothing is charged for shipping. This
+    # runs AFTER rate resolution rather than skipping it, so the resolved
+    # zone/rate snapshot is still recorded and the merchant can see what
+    # would have applied had the order contained a physical item.
+    if not order_requires_shipping and shipping_cost_cents > 0:
+        logger.info(
+            "shipping_waived_digital_only store=%s waived_cents=%s",
+            str(store_id),
+            shipping_cost_cents,
+        )
+        shipping_cost_cents = 0
+
     # Free shipping granted by a FREE_SHIPPING coupon or an offers-v2
     # promotion zeroes the resolved shipping cost. We keep the resolved
     # zone/rate snapshot (so the merchant still sees which rate was chosen)
@@ -1720,7 +1746,11 @@ async def checkout(
     tax_resolution = tax_resolver.resolve(
         store_settings=store.settings,
         line_items=[
-            TaxLineInput(unit_price_cents=li.unit_price, quantity=li.quantity)
+            TaxLineInput(
+                unit_price_cents=li.unit_price,
+                quantity=li.quantity,
+                taxable=li.product_id not in tax_exempt_product_ids,
+            )
             for li in line_items
         ],
         discount_amount_cents=discount_amount,

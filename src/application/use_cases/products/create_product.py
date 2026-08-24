@@ -294,6 +294,15 @@ class CreateProductUseCase:
             seo_description=dto.seo_description,
             template_suffix=dto.template_suffix,
             meta_catalog_id=getattr(dto, "meta_catalog_id", None),
+            weight=dto.weight,
+            requires_shipping=dto.requires_shipping,
+            tax_exempt=dto.tax_exempt,
+            sale_price=Money(amount=dto.sale_price, currency=currency)
+            if dto.sale_price is not None
+            else None,
+            sale_starts_at=dto.sale_starts_at,
+            sale_ends_at=dto.sale_ends_at,
+            related_product_ids=dto.related_product_ids or [],
         )
 
         # Save product

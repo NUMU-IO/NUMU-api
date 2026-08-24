@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -256,6 +257,45 @@ class CreateProductRequest(BaseModel):
     def _normalize_attributes(cls, v: dict) -> dict:
         return _validate_label(_validate_size_chart(v))
 
+    # ── Commerce controls ───────────────────────────────────────────────
+    weight: Decimal | None = Field(None, ge=0, description="Shipping weight in kg")
+    requires_shipping: bool | None = Field(
+        None,
+        description=(
+            "False for digital goods — checkout then collects no address "
+            "and charges no shipping. Omit to leave unchanged."
+        ),
+    )
+    tax_exempt: bool | None = Field(
+        None,
+        description=(
+            "True for zero-rated goods — the line is excluded from the "
+            "taxable base. Omit to leave unchanged."
+        ),
+    )
+    sale_price: Decimal | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Scheduled sale price. Send the sale fields together: with a "
+            "price to start or change a sale, without one to end it."
+        ),
+    )
+    sale_starts_at: datetime | None = Field(
+        None, description="Sale window opens. Null = already open."
+    )
+    sale_ends_at: datetime | None = Field(
+        None, description="Sale window closes. Null = runs until removed."
+    )
+    related_product_ids: list[UUID] | None = Field(
+        None,
+        max_length=24,
+        description=(
+            "Curated similar products, replacing the automatic list. "
+            "Send [] to fall back to automatic; omit to leave unchanged."
+        ),
+    )
+
 
 class ProductOptionInput(BaseModel):
     """One option axis on the create/update payload."""
@@ -399,6 +439,45 @@ class UpdateProductRequest(BaseModel):
         if v is None:
             return None
         return _validate_label(_validate_size_chart(v))
+
+    # ── Commerce controls ───────────────────────────────────────────────
+    weight: Decimal | None = Field(None, ge=0, description="Shipping weight in kg")
+    requires_shipping: bool | None = Field(
+        None,
+        description=(
+            "False for digital goods — checkout then collects no address "
+            "and charges no shipping. Omit to leave unchanged."
+        ),
+    )
+    tax_exempt: bool | None = Field(
+        None,
+        description=(
+            "True for zero-rated goods — the line is excluded from the "
+            "taxable base. Omit to leave unchanged."
+        ),
+    )
+    sale_price: Decimal | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Scheduled sale price. Send the sale fields together: with a "
+            "price to start or change a sale, without one to end it."
+        ),
+    )
+    sale_starts_at: datetime | None = Field(
+        None, description="Sale window opens. Null = already open."
+    )
+    sale_ends_at: datetime | None = Field(
+        None, description="Sale window closes. Null = runs until removed."
+    )
+    related_product_ids: list[UUID] | None = Field(
+        None,
+        max_length=24,
+        description=(
+            "Curated similar products, replacing the automatic list. "
+            "Send [] to fall back to automatic; omit to leave unchanged."
+        ),
+    )
 
 
 class ProductResponse(BaseModel):
