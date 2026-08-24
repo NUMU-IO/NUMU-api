@@ -293,6 +293,31 @@ class MetaOAuthService:
         logger.warning("meta_subscribe_failed", page_id=page_id, error=error)
         return False
 
+    async def unsubscribe_page_from_webhook(
+        self,
+        page_id: str,
+        page_access_token: str,
+    ) -> bool:
+        """Detach our app from a Page's webhooks.
+
+        Disconnecting used to only flip the row to ``revoked`` and leave the
+        Page subscribed, so Meta kept delivering events for it forever. The
+        webhook lookup then had nowhere correct to route them. Unsubscribing
+        stops the delivery at the source; the status flip alone is not enough.
+        """
+        url = f"https://graph.facebook.com/{self.api_version}/{page_id}/subscribed_apps"
+        params = {"access_token": page_access_token}
+
+        logger.info("meta_unsubscribe_page_webhook", page_id=page_id)
+
+        response = await self._client.delete(url, params=params)
+        if response.status_code == 200:
+            return True
+        logger.warning(
+            "meta_unsubscribe_failed", page_id=page_id, error=response.text[:500]
+        )
+        return False
+
     async def subscribe_waba_to_webhook(
         self,
         waba_id: str,
