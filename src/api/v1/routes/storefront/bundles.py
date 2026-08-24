@@ -101,7 +101,7 @@ def _product_response(product) -> BundledProductResponse:
         price_currency = product.price_currency
         compare_at = product.compare_at_price
     else:
-        price_cents = product.price.cents
+        price_cents = product.effective_price().cents
         price_currency = product.price.currency.value
         compare_at = (
             product.compare_at_price.cents if product.compare_at_price else None
@@ -212,7 +212,7 @@ async def get_product_bundles(
     # (`price.cents`), not the DB column name `price_amount` that the
     # SQLAlchemy ProductModel has. Using the wrong one raised
     # AttributeError: 'Product' object has no attribute 'price_amount'.
-    primary_price = product.price.cents
+    primary_price = product.effective_price().cents
     total_original = primary_price + sum(item.product.price for item in widget_items)
     total_discounted = primary_price + sum(
         item.discounted_price for item in widget_items

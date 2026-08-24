@@ -138,7 +138,7 @@ async def get_upsell_offers(
         if product.quantity <= 0:
             continue
 
-        original_price = product.price.cents
+        original_price = product.effective_price().cents
 
         # Calculate discounted price
         if rule.discount_type == "percentage":
@@ -238,7 +238,7 @@ async def accept_upsell_offer(
         raise HTTPException(status_code=410, detail="Product out of stock")
 
     # Calculate discounted price
-    original_price = product.price.cents
+    original_price = product.effective_price().cents
     if rule.discount_type == "percentage":
         discount_amount = (original_price * rule.discount_value) // 100
         discounted_price = original_price - discount_amount

@@ -44,6 +44,7 @@ from src.api.dependencies import (
 )
 from src.api.dependencies.database import get_db
 from src.api.dependencies.feature_flags import _read_feature_flags
+from src.api.dependencies.promotion_preview import maybe_preview_for_store
 from src.api.dependencies.repositories import (
     get_menu_repository,
     get_page_repository,
@@ -70,11 +71,13 @@ from src.application.dto.customer import (
     CustomerLoginDTO,
     CustomerRegisterDTO,
 )
+from src.application.dto.product import ProductDTO
 from src.application.use_cases.customers import (
     LoginCustomerUseCase,
     RegisterCustomerUseCase,
 )
 from src.application.use_cases.products import ListProductsUseCase
+from src.core.entities.product import PURCHASABLE_STATUSES
 from src.core.entities.store import StoreStatus
 from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.cache import (
@@ -1302,6 +1305,7 @@ async def get_product_by_slug(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     product_cache: Annotated[ProductCacheService, Depends(get_product_cache_service)],
     session: Annotated[AsyncSession, Depends(get_db)],
+    is_preview: Annotated[bool, Depends(maybe_preview_for_store)] = False,
 ):
     """Get a product by slug or UUID (public).
 
@@ -1349,6 +1353,21 @@ async def get_product_by_slug(
         product = await product_repo.find_by_previous_slug(store_id, product_slug)
 
     if not product:
+        raise EntityNotFoundError("Product", product_slug, identifier_name="slug")
+
+    # Status gate. This route had none, so every DRAFT and ARCHIVED product
+    # was publicly readable by anyone who guessed its slug — and it also
+    # made "hidden" and "unlisted" indistinguishable, which is the whole
+    # difference the merchant is choosing between.
+    #
+    #   ACTIVE    listed and reachable
+    #   UNLISTED  not listed, reachable by link  <- why the gate allows it
+    #   DRAFT     reachable only with a preview token
+    #   ARCHIVED  gone
+    #
+    # A valid merchant preview token still sees everything, so previewing
+    # an unpublished product from the hub keeps working.
+    if product.status not in PURCHASABLE_STATUSES and not is_preview:
         raise EntityNotFoundError("Product", product_slug, identifier_name="slug")
 
     # Phase 8.1 — fetch variants for the PDP. Empty array possible
@@ -1619,6 +1638,36 @@ async def notify_back_in_stock(
     )
 
 
+def _related_item(product: ProductDTO) -> dict:
+    """Serialise one related-product card.
+
+    Shared by the curated and automatic paths — they used to be separate,
+    and a theme reading a field present in only one of them would break
+    the moment a merchant curated a list.
+    """
+    return {
+        "id": str(product.id),
+        "store_id": str(product.store_id),
+        "name": product.name,
+        "slug": product.slug,
+        "description": product.description,
+        "short_description": product.short_description,
+        "price": str(product.price),
+        "price_currency": product.price_currency,
+        "compare_at_price": str(product.compare_at_price)
+        if product.compare_at_price
+        else None,
+        "sku": product.sku,
+        "quantity": product.quantity,
+        "is_in_stock": product.is_in_stock,
+        "is_on_sale": product.is_on_sale,
+        "category_id": str(product.category_id) if product.category_id else None,
+        "images": product.images,
+        "image_alts": _image_alts(product),
+        "tags": product.tags,
+    }
+
+
 @router.get(
     "/products/{product_id}/related",
     summary="Related products (same category, excluding self)",
@@ -1655,6 +1704,36 @@ async def get_related_products(
     if not source or source.store_id != store_id:
         raise EntityNotFoundError("Product", str(product_id))
 
+    # A curated list beats the automatic one outright — that is the point
+    # of curating. Order is the merchant's, so the results are returned in
+    # the order they arranged rather than whatever the fetch returns.
+    if source.related_product_ids:
+        curated = []
+        for pid in source.related_product_ids[:limit]:
+            candidate = await product_repo.get_by_id(pid)
+            # Re-check store and status on read: a curated id can outlive
+            # the product being unpublished, deleted, or (in a bad import)
+            # point at another tenant's product entirely.
+            if (
+                candidate
+                and candidate.store_id == store_id
+                and candidate.id != source.id
+                and candidate.status in PURCHASABLE_STATUSES
+            ):
+                curated.append(candidate)
+        if curated:
+            return SuccessResponse(
+                data={
+                    "items": [
+                        _related_item(ProductDTO.from_entity(p)) for p in curated
+                    ],
+                    "total": len(curated),
+                },
+                message="Related products retrieved",
+            )
+        # Every curated pick has since become unavailable — fall through to
+        # the automatic list rather than showing the customer nothing.
+
     # No category → no recommendation surface. Empty list rather than
     # 400 so the SDK hook can render unconditionally and skip.
     if not source.category_id:
@@ -1676,29 +1755,7 @@ async def get_related_products(
     )
     siblings = [p for p in fetched.items if p.id != product_id][:limit]
 
-    items: list[dict] = []
-    for product in siblings:
-        items.append({
-            "id": str(product.id),
-            "store_id": str(product.store_id),
-            "name": product.name,
-            "slug": product.slug,
-            "description": product.description,
-            "short_description": product.short_description,
-            "price": str(product.price),
-            "price_currency": product.price_currency,
-            "compare_at_price": str(product.compare_at_price)
-            if product.compare_at_price
-            else None,
-            "sku": product.sku,
-            "quantity": product.quantity,
-            "is_in_stock": product.is_in_stock,
-            "is_on_sale": product.is_on_sale,
-            "category_id": str(product.category_id) if product.category_id else None,
-            "images": product.images,
-            "image_alts": _image_alts(product),
-            "tags": product.tags,
-        })
+    items = [_related_item(p) for p in siblings]
 
     return SuccessResponse(
         data={"items": items, "total": len(items)},

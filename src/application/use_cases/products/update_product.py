@@ -116,6 +116,41 @@ class UpdateProductUseCase:
         if getattr(dto, "meta_catalog_id", None) is not None:
             product.meta_catalog_id = dto.meta_catalog_id or None
 
+        # `weight` is nullable and clearable — same provided-flag treatment
+        # as `template_suffix`, so a merchant can remove a weight they set
+        # by mistake rather than being stuck with it forever.
+        if dto.weight_provided:
+            product.weight = dto.weight
+
+        # Tri-state bools: None means the caller did not send the key.
+        if dto.requires_shipping is not None:
+            product.requires_shipping = dto.requires_shipping
+        if dto.tax_exempt is not None:
+            product.tax_exempt = dto.tax_exempt
+
+        # The sale is set or removed as ONE unit. Sending the group with no
+        # price ends the sale outright rather than leaving a dangling window
+        # that would quietly reactivate if a price were set later.
+        if dto.sale_provided:
+            if dto.sale_price is None:
+                product.sale_price = None
+                product.sale_starts_at = None
+                product.sale_ends_at = None
+            else:
+                product.sale_price = Money(
+                    amount=dto.sale_price, currency=product.price.currency
+                )
+                product.sale_starts_at = dto.sale_starts_at
+                product.sale_ends_at = dto.sale_ends_at
+
+        # [] clears back to the automatic list; None leaves it alone.
+        if dto.related_product_ids is not None:
+            # A product recommending itself is a loop the storefront would
+            # render as a card linking to the page you are already on.
+            product.related_product_ids = [
+                pid for pid in dto.related_product_ids if pid != product.id
+            ]
+
         # Save product
         updated_product = await self.product_repository.update(product)
 

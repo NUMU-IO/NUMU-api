@@ -55,6 +55,20 @@ class ProductRepository(IProductRepository):
             cost_price=Money.from_cents(model.cost_price, currency)
             if model.cost_price
             else None,
+            sale_price=Money.from_cents(model.sale_price, currency)
+            if model.sale_price is not None
+            else None,
+            sale_starts_at=model.sale_starts_at,
+            sale_ends_at=model.sale_ends_at,
+            # Columns added after rows existed, so an un-migrated or
+            # partially-migrated row reads as the pre-existing behaviour.
+            requires_shipping=(
+                True if model.requires_shipping is None else model.requires_shipping
+            ),
+            tax_exempt=bool(model.tax_exempt),
+            related_product_ids=[
+                UUID(str(pid)) for pid in (model.related_product_ids or [])
+            ],
             quantity=model.quantity,
             low_stock_threshold=model.low_stock_threshold,
             weight=model.weight,
@@ -96,6 +110,13 @@ class ProductRepository(IProductRepository):
             if entity.compare_at_price
             else None,
             cost_price=entity.cost_price.cents if entity.cost_price else None,
+            sale_price=entity.sale_price.cents if entity.sale_price else None,
+            sale_starts_at=entity.sale_starts_at,
+            sale_ends_at=entity.sale_ends_at,
+            requires_shipping=entity.requires_shipping,
+            tax_exempt=entity.tax_exempt,
+            related_product_ids=[str(pid) for pid in entity.related_product_ids]
+            or None,
             quantity=entity.quantity,
             low_stock_threshold=entity.low_stock_threshold,
             weight=entity.weight,
@@ -180,6 +201,14 @@ class ProductRepository(IProductRepository):
                 entity.compare_at_price.cents if entity.compare_at_price else None
             )
             model.cost_price = entity.cost_price.cents if entity.cost_price else None
+            model.sale_price = entity.sale_price.cents if entity.sale_price else None
+            model.sale_starts_at = entity.sale_starts_at
+            model.sale_ends_at = entity.sale_ends_at
+            model.requires_shipping = entity.requires_shipping
+            model.tax_exempt = entity.tax_exempt
+            model.related_product_ids = [
+                str(pid) for pid in entity.related_product_ids
+            ] or None
             model.quantity = entity.quantity
             model.low_stock_threshold = entity.low_stock_threshold
             model.weight = entity.weight

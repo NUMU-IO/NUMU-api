@@ -1,10 +1,12 @@
 """Product database model (public schema with tenant_id discriminator)."""
 
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
     Computed,
+    DateTime,
     Enum,
     ForeignKey,
     Integer,
@@ -12,6 +14,8 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy import false as sa_false
+from sqlalchemy import true as sa_true
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -66,6 +70,27 @@ class ProductModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
     compare_at_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Scheduled sale. `sale_price` is cents, same unit as price_amount;
+    # an open bound means "no bound" on that side of the window.
+    sale_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sale_starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sale_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Commerce flags. Defaults keep every existing row behaving exactly as
+    # it does today: physical and taxable.
+    requires_shipping: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa_true()
+    )
+    tax_exempt: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa_false()
+    )
+    # Curated similar products — a list of product-id strings that
+    # overrides the automatic recommendation.
+    related_product_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # Inventory
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

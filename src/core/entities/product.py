@@ -1,5 +1,6 @@
 """Product entity representing a product in a store."""
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
@@ -16,8 +17,22 @@ class ProductStatus(StrEnum):
 
     DRAFT = "draft"
     ACTIVE = "active"
+    # Reachable by direct link, but absent from listings, search, feeds and
+    # the sitemap. For a product a merchant wants to sell to specific
+    # customers without putting it in the catalogue.
+    UNLISTED = "unlisted"
     ARCHIVED = "archived"
     OUT_OF_STOCK = "out_of_stock"
+
+
+# Statuses a customer may buy. UNLISTED is deliberately included: the
+# whole point of an unlisted product is that someone holding the link can
+# buy it. Keep this OUT of listing/search/feed queries, which must stay
+# ACTIVE-only, or unlisted products leak back into the catalogue.
+PURCHASABLE_STATUSES: tuple[ProductStatus, ...] = (
+    ProductStatus.ACTIVE,
+    ProductStatus.UNLISTED,
+)
 
 
 class ProductType(StrEnum):
@@ -78,6 +93,54 @@ class Product(BaseEntity):
     # so storefront Pixel/CAPI events can reference the Catalog row Meta
     # has on file (enables dynamic ad matching). Null = use product.id.
     meta_catalog_id: str | None = None
+
+    # ── Commerce flags ──────────────────────────────────────────────────
+    # A digital product should not ask the buyer for an address or attract
+    # a shipping fee. Defaults True: every existing row is physical.
+    requires_shipping: bool = True
+    # Zero-rated goods. Tax used to be computed on every line regardless.
+    tax_exempt: bool = False
+
+    # ── Scheduled sale ──────────────────────────────────────────────────
+    # `compare_at_price` can express "was/now" but never *when*, so a
+    # merchant had to remember to change prices back by hand. When
+    # `sale_price` is set and the window is open, it is what the customer
+    # pays and `price` becomes the struck-through original.
+    sale_price: Money | None = None
+    sale_starts_at: datetime | None = None
+    sale_ends_at: datetime | None = None
+
+    # Curated "similar products", overriding the automatic list.
+    related_product_ids: list[UUID] = Field(default_factory=list)
+
+    def sale_is_active(self, now: datetime | None = None) -> bool:
+        """True when a sale price is configured AND the window is open.
+
+        An open-ended bound means "no bound": a sale with only a start
+        runs until the merchant ends it, and one with only an end has
+        been running since it was set.
+        """
+        if self.sale_price is None:
+            return False
+        moment = now or datetime.now(UTC)
+        if self.sale_starts_at and moment < self.sale_starts_at:
+            return False
+        if self.sale_ends_at and moment > self.sale_ends_at:
+            return False
+        return True
+
+    def effective_price(self, now: datetime | None = None) -> Money:
+        """What the customer actually pays right now.
+
+        Every price the storefront quotes, the cart totals and the
+        checkout charges must come through here — reading `.price`
+        directly is what would silently ignore an active sale.
+        """
+        if self.sale_is_active(now):
+            assert self.sale_price is not None  # narrowed by sale_is_active
+            return self.sale_price
+        return self.price
+
     # Phase 8.1 — option axes (size / color / material / ...). Each
     # entry is `{"name": "Size", "position": 0, "values": ["S","M","L"]}`.
     # Variants reference these by name (`variant.option_values["Size"] = "M"`).
@@ -152,21 +215,31 @@ class Product(BaseEntity):
 
     @property
     def is_on_sale(self) -> bool:
-        """Check if product is on sale (compare_at_price > price)."""
+        """True when the customer pays less than the list price.
+
+        Two independent ways that happens, and the storefront badge must
+        light up for both: a permanent markdown (`compare_at_price` above
+        `price`) or a scheduled sale whose window is currently open.
+        """
+        if self.sale_is_active():
+            return True
         if self.compare_at_price is None:
             return False
         return self.price < self.compare_at_price
 
     @property
     def discount_percentage(self) -> float:
-        """Calculate discount percentage if on sale."""
-        if not self.is_on_sale or self.compare_at_price is None:
+        """Percent off the price the customer would otherwise have paid.
+
+        Measured against `compare_at_price` when there is one, else the
+        list `price` — so a scheduled sale on a product with no
+        compare-at still reports a real number instead of zero.
+        """
+        reference = self.compare_at_price or self.price
+        effective = self.effective_price()
+        if reference.amount <= 0 or effective.amount >= reference.amount:
             return 0.0
-        discount = (
-            (self.compare_at_price.amount - self.price.amount)
-            / self.compare_at_price.amount
-            * 100
-        )
+        discount = (reference.amount - effective.amount) / reference.amount * 100
         return float(round(discount, 1))
 
     @property
