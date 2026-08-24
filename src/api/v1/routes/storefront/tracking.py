@@ -32,10 +32,10 @@ from src.application.services.campaign_auto_match import (
     resolve_via_auto_match,
 )
 from src.application.services.campaign_resolver import resolve_campaign_id
-from src.application.services.click_id_attribution import (
+from src.application.services.device_classifier import classify as classify_device
+from src.application.services.traffic_source import (
     effective_utm_source_medium,
 )
-from src.application.services.device_classifier import classify as classify_device
 from src.config import settings
 from src.core.entities.attribution import AttributionSnapshot
 from src.core.entities.store import Store
@@ -521,17 +521,24 @@ async def track_page_view(
         # impossible).
         f_utm_source = sanitize_utm(last_touch.utm_source if last_touch else None)
         f_utm_medium = sanitize_utm(last_touch.utm_medium if last_touch else None)
-        # Ad clicks carry a click id, not UTMs. Derive the platform from it
-        # so a TikTok/Meta/Google session is bucketed under its platform —
-        # and the journey touch below is recorded — instead of "Direct".
-        f_utm_source, f_utm_medium = effective_utm_source_medium(
-            last_touch, f_utm_source, f_utm_medium
-        )
         f_utm_campaign = sanitize_utm(last_touch.utm_campaign if last_touch else None)
         f_utm_term = sanitize_utm(last_touch.utm_term if last_touch else None)
         f_utm_content = sanitize_utm(last_touch.utm_content if last_touch else None)
         f_referrer = (
             last_touch.referrer if last_touch and last_touch.referrer else body.referrer
+        )
+        # Untagged visits carry no UTMs. Derive the platform from the click
+        # id, the in-app browser or the referrer so the session is bucketed
+        # under its platform — and the journey touch below is recorded —
+        # instead of "Direct". Resolved AFTER f_referrer so the chain can
+        # use it: an organic Instagram visit has no touch at all, and its
+        # only signal is the request's own referrer.
+        f_utm_source, f_utm_medium = effective_utm_source_medium(
+            last_touch,
+            f_utm_source,
+            f_utm_medium,
+            referrer=f_referrer,
+            user_agent=ua,
         )
         f_campaign_id = await resolve_campaign_id(
             session=funnel_repo.session,
@@ -756,14 +763,18 @@ async def track_analytics_event(
         last_touch = attribution.last_touch if attribution else None
         e_utm_source = sanitize_utm(last_touch.utm_source if last_touch else None)
         e_utm_medium = sanitize_utm(last_touch.utm_medium if last_touch else None)
-        # Same click-id fallback as track_page_view — both rows must agree.
-        e_utm_source, e_utm_medium = effective_utm_source_medium(
-            last_touch, e_utm_source, e_utm_medium
-        )
         e_utm_campaign = sanitize_utm(last_touch.utm_campaign if last_touch else None)
         e_utm_term = sanitize_utm(last_touch.utm_term if last_touch else None)
         e_utm_content = sanitize_utm(last_touch.utm_content if last_touch else None)
         e_referrer = last_touch.referrer if last_touch else None
+        # Same fallback chain as track_page_view — both rows must agree.
+        e_utm_source, e_utm_medium = effective_utm_source_medium(
+            last_touch,
+            e_utm_source,
+            e_utm_medium,
+            referrer=e_referrer,
+            user_agent=ua,
+        )
         e_campaign_id = await resolve_campaign_id(
             session=funnel_repo.session,
             store_id=store.id,
