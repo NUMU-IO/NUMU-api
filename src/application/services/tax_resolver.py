@@ -78,6 +78,11 @@ class TaxLineInput:
 
     unit_price_cents: int
     quantity: int
+    # False for a zero-rated product. The line still counts toward the
+    # subtotal and still absorbs its share of the order discount — it just
+    # contributes no tax, and reports a rate of 0 on the invoice so the
+    # exemption is visible rather than looking like a rounding artefact.
+    taxable: bool = True
 
 
 class TaxResolver:
@@ -167,6 +172,22 @@ class TaxResolver:
             zip(line_totals, per_line_discount, strict=True)
         ):
             taxable = max(0, line_total - alloc_disc)
+
+            # Zero-rated line: no tax, and a 0 rate on its breakdown row.
+            # Skipped AFTER the discount allocation above so the remaining
+            # lines' shares are unchanged — an exempt line must not shift
+            # tax onto its neighbours.
+            if not line_items[idx].taxable:
+                breakdown.append(
+                    TaxLineBreakdown(
+                        line_index=idx,
+                        taxable_amount_cents=0,
+                        tax_cents=0,
+                        rate=0.0,
+                    )
+                )
+                continue
+
             if inclusive:
                 # Inclusive: the listed price ALREADY contains VAT.
                 # Back-compute the tax component: tax = gross * rate /

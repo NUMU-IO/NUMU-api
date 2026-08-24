@@ -141,6 +141,17 @@ async def create_product(
         seo_title=request.seo_title,
         seo_description=request.seo_description,
         template_suffix=request.template_suffix,
+        weight=request.weight,
+        # Create has no "leave unchanged" case, so the entity defaults
+        # (physical, taxable) stand in when the caller omits them.
+        requires_shipping=(
+            True if request.requires_shipping is None else request.requires_shipping
+        ),
+        tax_exempt=bool(request.tax_exempt),
+        sale_price=request.sale_price,
+        sale_starts_at=request.sale_starts_at,
+        sale_ends_at=request.sale_ends_at,
+        related_product_ids=request.related_product_ids or [],
     )
 
     result = await use_case.execute(
@@ -831,6 +842,21 @@ async def update_product(
         # from an omitted field (leave it alone) so a partial PATCH never wipes
         # the merchant's template variant.
         template_suffix_provided="template_suffix" in request.model_fields_set,
+        weight=request.weight,
+        weight_provided="weight" in request.model_fields_set,
+        requires_shipping=request.requires_shipping,
+        tax_exempt=request.tax_exempt,
+        sale_price=request.sale_price,
+        sale_starts_at=request.sale_starts_at,
+        sale_ends_at=request.sale_ends_at,
+        # The sale is one unit: any of the three keys on the wire means the
+        # caller is addressing the sale. Sending the group with no price is
+        # how a merchant ends one, which a plain `is not None` could never
+        # express.
+        sale_provided=bool(
+            {"sale_price", "sale_starts_at", "sale_ends_at"} & request.model_fields_set
+        ),
+        related_product_ids=request.related_product_ids,
     )
 
     result = await use_case.execute(

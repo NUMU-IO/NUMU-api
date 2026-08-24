@@ -58,6 +58,20 @@ class ProductDTO(BaseDTO):
     # is a 500 (see `_image_alts` in routes/storefront/public.py).
     image_alts: dict[str, str] = field(default_factory=dict)
 
+    # ── Commerce controls ───────────────────────────────────────────────
+    weight: Decimal | None = None
+    requires_shipping: bool = True
+    tax_exempt: bool = False
+    # `price` above stays the LIST price so a storefront can strike it
+    # through; `effective_price` is what the customer actually pays. Any
+    # consumer quoting a total must read the latter.
+    effective_price: Decimal | None = None
+    sale_price: Decimal | None = None
+    sale_starts_at: datetime | None = None
+    sale_ends_at: datetime | None = None
+    sale_is_active: bool = False
+    related_product_ids: list[UUID] = field(default_factory=list)
+
     @classmethod
     def from_entity(cls, entity: Product) -> "ProductDTO":
         """Create DTO from Product entity."""
@@ -96,6 +110,15 @@ class ProductDTO(BaseDTO):
             created_at=entity.created_at,
             updated_at=entity.updated_at,
             image_alts=entity.image_alts() if hasattr(entity, "image_alts") else {},
+            weight=getattr(entity, "weight", None),
+            requires_shipping=getattr(entity, "requires_shipping", True),
+            tax_exempt=getattr(entity, "tax_exempt", False),
+            effective_price=entity.effective_price().amount,
+            sale_price=entity.sale_price.amount if entity.sale_price else None,
+            sale_starts_at=getattr(entity, "sale_starts_at", None),
+            sale_ends_at=getattr(entity, "sale_ends_at", None),
+            sale_is_active=entity.sale_is_active(),
+            related_product_ids=list(getattr(entity, "related_product_ids", []) or []),
         )
 
 
@@ -129,6 +152,22 @@ class CreateProductDTO(BaseDTO):
     seo_description: str | None = None
     # Alternate template variant suffix (Shopify-style); null = base template.
     template_suffix: str | None = None
+
+    # Shipping weight. The column and entity field existed all along but no
+    # DTO carried it, so it was unreachable through the API.
+    weight: Decimal | None = None
+
+    # Commerce flags. Defaults match the entity: physical and taxable.
+    requires_shipping: bool = True
+    tax_exempt: bool = False
+
+    # Scheduled sale. An open bound means no bound on that side.
+    sale_price: Decimal | None = None
+    sale_starts_at: datetime | None = None
+    sale_ends_at: datetime | None = None
+
+    # Curated similar products; empty = fall back to the automatic list.
+    related_product_ids: list[UUID] = field(default_factory=list)
 
 
 @dataclass
@@ -165,3 +204,26 @@ class UpdateProductDTO(BaseDTO):
     # leave the current variant untouched.
     template_suffix: str | None = None
     template_suffix_provided: bool = False
+
+    # Shipping weight — nullable AND clearable, so it needs the same
+    # provided-flag treatment as template_suffix above.
+    weight: Decimal | None = None
+    weight_provided: bool = False
+
+    # Commerce flags. None = leave alone (a bool cannot express that on
+    # its own, so these are tri-state rather than carrying a flag each).
+    requires_shipping: bool | None = None
+    tax_exempt: bool | None = None
+
+    # Scheduled sale. The three fields move together — a merchant either
+    # sets a sale or removes one — so ONE flag covers the group: provided
+    # with a price → set it, provided without → clear the whole sale, not
+    # provided → leave whatever is running untouched.
+    sale_price: Decimal | None = None
+    sale_starts_at: datetime | None = None
+    sale_ends_at: datetime | None = None
+    sale_provided: bool = False
+
+    # None = leave alone, [] = clear back to the automatic list. A list can
+    # express both without a companion flag.
+    related_product_ids: list[UUID] | None = None

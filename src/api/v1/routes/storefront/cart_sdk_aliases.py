@@ -48,7 +48,7 @@ from src.api.v1.routes.storefront.cart import (
     emit_add_to_cart_event,
 )
 from src.api.v1.schemas.storefront.cart import CartResponse
-from src.core.entities.product import ProductStatus
+from src.core.entities.product import PURCHASABLE_STATUSES
 from src.core.value_objects.cart_item import CartItem
 from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.repositories import ProductRepository
@@ -214,7 +214,7 @@ async def sdk_add_cart_item(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Product not found"
         )
-    if product.status != ProductStatus.ACTIVE:
+    if product.status not in PURCHASABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Product is not available",
@@ -236,7 +236,7 @@ async def sdk_add_cart_item(
     # sku / image and carry a human `variant_name` (e.g. "L" or "L / Red").
     # Without this the line bills the product price, shows the product sku,
     # and renders with no size in the cart drawer + checkout summary.
-    unit_price_cents = product.price.cents
+    unit_price_cents = product.effective_price().cents
     line_sku = product.sku
     line_image = product.images[0] if product.images else None
     variant_name: str | None = None
@@ -331,7 +331,7 @@ async def sdk_add_cart_item(
             "product_id": str(request.product_id),
             "product_name": product.name,
             "quantity": request.quantity,
-            "unit_price": product.price.cents,
+            "unit_price": product.effective_price().cents,
             "is_guest": owner.is_guest,
             "session_id": str(owner.session_id) if owner.session_id else None,
         },
@@ -554,13 +554,13 @@ async def sdk_recover_cart(
         product = await product_repo.get_by_id(product_id)
         if (
             not product
-            or product.status != ProductStatus.ACTIVE
+            or product.status not in PURCHASABLE_STATUSES
             or product.store_id != owner.store_id
             or not product.is_in_stock
         ):
             continue  # dead / cross-store / OOS product — skip, don't fail
 
-        unit_price_cents = product.price.cents
+        unit_price_cents = product.effective_price().cents
         line_sku = product.sku
         line_image = product.images[0] if product.images else None
         variant_name: str | None = None

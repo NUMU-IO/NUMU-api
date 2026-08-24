@@ -27,7 +27,7 @@ from src.api.v1.schemas.storefront.cart import (
 )
 from src.core.entities.cart import Cart
 from src.core.entities.customer import Customer
-from src.core.entities.product import ProductStatus
+from src.core.entities.product import PURCHASABLE_STATUSES
 from src.core.value_objects.cart_item import CartItem
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.repositories import ProductRepository
@@ -308,7 +308,7 @@ async def _build_cart_response(
 
     for cart_item in cart.items:
         product = products_by_id.get(cart_item.product_id)
-        if not product or product.status != ProductStatus.ACTIVE:
+        if not product or product.status not in PURCHASABLE_STATUSES:
             continue
         visible_items.append(cart_item)
 
@@ -320,7 +320,10 @@ async def _build_cart_response(
 
         # Live deltas — the front-end uses these to render "price changed"
         # banners and to disable Checkout when any line is sold-out.
-        current_price = product.price.cents
+        # effective_price, not `.price`: a scheduled sale that has opened
+        # since the line was added must show as a price CHANGE, otherwise
+        # the banner never fires and the customer keeps the old price.
+        current_price = product.effective_price().cents
         price_changed = current_price != unit_price
         available_now = product.quantity if product.quantity is not None else None
         sold_out_now = not product.is_in_stock
@@ -438,7 +441,7 @@ async def add_cart_item(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Product not found",
         )
-    if product.status != ProductStatus.ACTIVE:
+    if product.status not in PURCHASABLE_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Product is not available",
@@ -462,7 +465,7 @@ async def add_cart_item(
     # surfaces it via `variants[0].id`). Falling back to product.price
     # is still supported transitionally for clients that haven't
     # picked up the new shape.
-    variant_price_cents = product.price.cents
+    variant_price_cents = product.effective_price().cents
     variant_sku = product.sku
     variant_image: str | None = product.images[0] if product.images else None
     variant_name: str | None = None
@@ -555,7 +558,7 @@ async def add_cart_item(
             "product_id": str(request.product_id),
             "product_name": product.name,
             "quantity": request.quantity,
-            "unit_price": product.price.cents,
+            "unit_price": product.effective_price().cents,
         },
     )
 
