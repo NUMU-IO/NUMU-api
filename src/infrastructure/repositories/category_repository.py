@@ -211,7 +211,13 @@ class CategoryRepository(ICategoryRepository):
         return result.scalar() or 0
 
     async def get_product_counts(self, store_id: UUID) -> dict[UUID, int]:
-        """Get product count per category for a store."""
+        """Get product count per category for a store.
+
+        Counts roll up the tree: a parent category reports its own products
+        plus every descendant's. Without this, parents (which rarely hold
+        products directly) all display 0 and their collection pages look
+        broken next to the product grid, which now aggregates descendants too.
+        """
         query = (
             select(
                 ProductModel.category_id,
@@ -224,4 +230,19 @@ class CategoryRepository(ICategoryRepository):
             .group_by(ProductModel.category_id)
         )
         result = await self.session.execute(query)
-        return {row[0]: row[1] for row in result.all()}
+        direct = {row[0]: row[1] for row in result.all()}
+
+        parents_q = select(CategoryModel.id, CategoryModel.parent_id).where(
+            CategoryModel.store_id == store_id
+        )
+        parent_of = {
+            row[0]: row[1] for row in (await self.session.execute(parents_q)).all()
+        }
+
+        totals: dict[UUID, int] = dict(direct)
+        for cat_id, cnt in direct.items():
+            node, hops = parent_of.get(cat_id), 0
+            while node is not None and hops < 10:  # hops guards a cycle
+                totals[node] = totals.get(node, 0) + cnt
+                node, hops = parent_of.get(node), hops + 1
+        return totals
