@@ -93,6 +93,10 @@ class UpdateStoreDTO(BaseDTO):
     """Update store data transfer object."""
 
     name: str | None = None
+    # Changing the subdomain re-homes the storefront URL. Wildcard DNS serves
+    # any *.numueg.app, so the new host is live immediately; the old one stops
+    # resolving to this store as soon as caches expire.
+    subdomain: str | None = None
     default_language: str | None = None
     description: str | None = None
     logo_url: str | None = None

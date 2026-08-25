@@ -92,6 +92,16 @@ class UpdateStoreRequest(BaseModel):
     name: SanitizedStr | None = Field(
         None, min_length=1, max_length=255, description="Store display name"
     )
+    subdomain: str | None = Field(
+        None,
+        min_length=3,
+        max_length=63,
+        description=(
+            "New store subdomain (e.g. 'mystore' for mystore.numueg.app). "
+            "Must be available and not reserved; the old subdomain is "
+            "released immediately."
+        ),
+    )
     description: SanitizedStr | None = Field(None, description="Store description")
     logo_url: str | None = Field(
         None, max_length=500, description="Store logo image URL"

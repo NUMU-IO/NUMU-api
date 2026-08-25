@@ -250,6 +250,13 @@ class UpdateProfileRequest(BaseModel):
     avatar_url: str | None = Field(
         None, max_length=500, description="Profile avatar URL"
     )
+    email: DevEmailStr | None = Field(
+        None,
+        description=(
+            "New login email. Must be unused; changing it clears email "
+            "verification for the account (auth emails go to the new address)."
+        ),
+    )
 
 
 class VerifyEmailRequest(BaseModel):
