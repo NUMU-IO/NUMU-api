@@ -143,16 +143,32 @@ class StoreRepository(IStoreRepository):
         raise ValueError(f"Store with id {entity.id} not found")
 
     async def delete(self, entity_id: UUID) -> bool:
-        """Delete a store by ID."""
-        result = await self.session.execute(
-            select(StoreModel).where(StoreModel.id == entity_id)
-        )
-        model = result.scalar_one_or_none()
-        if model:
-            await self.session.delete(model)
+        """Delete a store by ID.
+
+        Uses a core DELETE so Postgres FK `ON DELETE CASCADE` removes the
+        store's children (products, categories, orders, menus, pages,
+        store_themes, …). The previous `session.delete(model)` walked the ORM
+        relationships — several are `lazy="raise"` and others tried to NULL
+        NOT-NULL FKs — so deleting any populated store 500'd (same class as
+        the passive_deletes incident).
+        """
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy.exc import IntegrityError
+
+        from src.core.exceptions import BusinessRuleViolationError
+
+        try:
+            result = await self.session.execute(
+                sa_delete(StoreModel).where(StoreModel.id == entity_id)
+            )
             await self.session.flush()
-            return True
-        return False
+        except IntegrityError as exc:
+            raise BusinessRuleViolationError(
+                "Store still has records that block deletion "
+                "(a child table without ON DELETE CASCADE). "
+                "Deactivate the store instead, or clear the blocking records."
+            ) from exc
+        return bool(result.rowcount)
 
     async def count(self, is_active: bool | None = None) -> int:
         """Get total count of stores, optionally filtered by active status."""

@@ -491,6 +491,7 @@ async def update_store(
 
     dto = UpdateStoreDTO(
         name=request.name,
+        subdomain=request.subdomain,
         description=request.description,
         logo_url=request.logo_url,
         banner_url=request.banner_url,
@@ -518,6 +519,14 @@ async def update_store(
         subdomain=result.subdomain,
         custom_domain=result.custom_domain,
     )
+    # On a subdomain change the OLD host's cache entries must die too, or the
+    # old URL keeps serving the store until natural expiry.
+    if request.subdomain is not None and store.subdomain != result.subdomain:
+        await cache.invalidate_store(
+            store_id=result.id,
+            subdomain=store.subdomain,
+            custom_domain=result.custom_domain,
+        )
     if request.theme_settings is not None:
         await cache.invalidate_theme(result.id)
 

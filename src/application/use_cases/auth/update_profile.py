@@ -4,8 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from src.core.exceptions import EntityNotFoundError
+from src.core.exceptions import EntityAlreadyExistsError, EntityNotFoundError
 from src.core.interfaces.repositories.user_repository import IUserRepository
+from src.core.value_objects.email import Email
 from src.core.value_objects.phone import PhoneNumber
 
 
@@ -17,6 +18,10 @@ class UpdateProfileDTO:
     last_name: str | None = None
     phone: str | None = None
     avatar_url: str | None = None
+    # Login email. Changing it re-opens verification (email_verified_at is
+    # cleared) — nothing in the merchant path gates on verification, so the
+    # account keeps working; auth emails simply go to the new address.
+    email: str | None = None
 
 
 @dataclass
@@ -66,6 +71,15 @@ class UpdateProfileUseCase:
 
         if dto.avatar_url is not None:
             user.avatar_url = dto.avatar_url if dto.avatar_url else None
+
+        if dto.email is not None and dto.email.strip():
+            new_email = Email(value=dto.email.strip().lower())
+            if new_email.value != user.email.value:
+                if await self.user_repository.email_exists(new_email):
+                    raise EntityAlreadyExistsError("User", "email", new_email.value)
+                user.email = new_email
+                # The new address has never been verified.
+                user.email_verified_at = None
 
         user.touch()
 

@@ -40,6 +40,18 @@ class UpdateStoreUseCase:
         # Update fields
         if dto.name is not None:
             store.name = dto.name
+        if dto.subdomain is not None:
+            from src.application.use_cases.stores.create_store import (
+                validate_subdomain,
+            )
+            from src.core.exceptions import EntityAlreadyExistsError
+
+            new_subdomain = validate_subdomain(dto.subdomain)
+            if new_subdomain != store.subdomain:
+                existing = await self.store_repository.get_by_subdomain(new_subdomain)
+                if existing and existing.id != store.id:
+                    raise EntityAlreadyExistsError("Store", "subdomain", new_subdomain)
+                store.subdomain = new_subdomain
         if dto.description is not None:
             store.description = dto.description
         if dto.logo_url is not None:

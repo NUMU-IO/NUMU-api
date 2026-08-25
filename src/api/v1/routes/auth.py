@@ -1147,6 +1147,7 @@ async def update_profile(
             last_name=request.last_name,
             phone=request.phone,
             avatar_url=request.avatar_url,
+            email=request.email,
         )
 
         result = await use_case.execute(

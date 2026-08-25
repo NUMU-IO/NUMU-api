@@ -316,7 +316,9 @@ class ProductRepository(IProductRepository):
         """
         query = select(ProductModel).where(
             ProductModel.store_id == store_id,
-            ProductModel.category_id == category_id,
+            # Parent categories include their descendants' products — see
+            # _category_tree_ids. store_id scoping above keeps it tenant-safe.
+            ProductModel.category_id.in_(self._category_tree_ids(category_id)),
         )
         # Mirror list_with_filters: the legacy is_active boolean maps onto the
         # 3-state status column (ACTIVE for published, DRAFT otherwise).
@@ -622,6 +624,29 @@ class ProductRepository(IProductRepository):
             )
         await self.session.flush()
 
+    def _category_tree_ids(self, category_id):
+        """Selectable yielding a category's id plus ALL descendant ids.
+
+        Categories nest (parent_id); products live on leaf categories. A
+        filter on a parent category must include its children's products or
+        every parent collection page renders empty — recursive CTE walks the
+        tree in one query.
+        """
+        from sqlalchemy.orm import aliased
+
+        from src.infrastructure.database.models.tenant.category import (
+            CategoryModel,
+        )
+
+        tree = (
+            select(CategoryModel.id)
+            .where(CategoryModel.id == category_id)
+            .cte("category_tree", recursive=True)
+        )
+        child = aliased(CategoryModel)
+        tree = tree.union_all(select(child.id).where(child.parent_id == tree.c.id))
+        return select(tree.c.id)
+
     def _apply_product_filters(
         self,
         query,
@@ -641,7 +666,9 @@ class ProductRepository(IProductRepository):
         if store_id:
             query = query.where(ProductModel.store_id == store_id)
         if category_id:
-            query = query.where(ProductModel.category_id == category_id)
+            query = query.where(
+                ProductModel.category_id.in_(self._category_tree_ids(category_id))
+            )
         # status_filter is the 3-state path (active/draft/archived/out_of_stock)
         # and wins over the legacy `is_active` boolean when both are provided.
         # The old boolean couldn't represent ARCHIVED at all, so the merchant
