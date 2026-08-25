@@ -305,14 +305,16 @@ class ProductRepository(IProductRepository):
         category_id: UUID,
         skip: int = 0,
         limit: int = 100,
-        is_active: bool | None = None,
+        is_active: bool | None = True,
     ) -> list[Product]:
         """Get products in a category, scoped to a store.
 
         store_id scoping is required: category ids are not guaranteed unique
-        across tenants, so an unscoped lookup leaks another store's catalog
-        (including unpublished drafts). Pass ``is_active=True`` from public
-        storefront callers to restrict to published products.
+        across tenants, so an unscoped lookup leaks another store's catalog.
+
+        Defaults to published-only; pass ``is_active=None`` to include every
+        status. Forgetting the argument therefore narrows what comes back
+        rather than widening it.
 
         Shares `_apply_product_filters` with `count_with_filters` so a
         collection page's item list and its reported total can never drift
@@ -359,13 +361,14 @@ class ProductRepository(IProductRepository):
         query: str,
         skip: int = 0,
         limit: int = 100,
-        is_active: bool | None = None,
+        is_active: bool | None = True,
     ) -> list[Product]:
         """Search products by name or description.
 
-        Pass ``is_active=True`` from public storefront callers: without it
-        this returns every status, so unpublished drafts are searchable by
-        anyone who guesses a word in their name.
+        Defaults to published-only. This method backs an unauthenticated
+        storefront endpoint, and the previous unfiltered default made every
+        draft searchable by anyone who guessed a word in its name. Callers
+        that want every status must now say so with ``is_active=None``.
         """
         result = await self.session.execute(
             select(ProductModel)
@@ -376,7 +379,7 @@ class ProductRepository(IProductRepository):
         return [self._to_entity(model) for model in result.scalars().all()]
 
     async def count_search(
-        self, store_id: UUID, query: str, is_active: bool | None = None
+        self, store_id: UUID, query: str, is_active: bool | None = True
     ) -> int:
         """Count products matching `search`, sharing its exact predicates."""
         result = await self.session.execute(
