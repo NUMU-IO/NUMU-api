@@ -69,19 +69,26 @@ class ListProductsUseCase:
         query: str,
         page: int = 1,
         page_size: int = 20,
+        is_active: bool | None = None,
     ) -> PaginatedDTO:
-        """Search products in a store."""
+        """Search products in a store.
+
+        Pass ``is_active=True`` from public storefront callers to hide drafts,
+        the same way `by_category` does.
+        """
         skip = (page - 1) * page_size
         products = await self.product_repository.search(
             store_id=store_id,
             query=query,
             skip=skip,
             limit=page_size,
+            is_active=is_active,
         )
 
         total = await self.product_repository.count_search(
             store_id=store_id,
             query=query,
+            is_active=is_active,
         )
 
         return PaginatedDTO.create(

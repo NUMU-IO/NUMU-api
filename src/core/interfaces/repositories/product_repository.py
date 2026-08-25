@@ -67,12 +67,19 @@ class IProductRepository(BaseRepository[Product]):
         query: str,
         skip: int = 0,
         limit: int = 100,
+        is_active: bool | None = None,
     ) -> list[Product]:
-        """Search products by name or description."""
+        """Search products by name or description.
+
+        Public storefront callers MUST pass ``is_active=True``; without it
+        every status matches and unpublished drafts become searchable.
+        """
         ...
 
     @abstractmethod
-    async def count_search(self, store_id: UUID, query: str) -> int:
+    async def count_search(
+        self, store_id: UUID, query: str, is_active: bool | None = None
+    ) -> int:
         """Count products a `search` call would match, ignoring pagination."""
         ...
 

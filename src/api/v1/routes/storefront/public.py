@@ -1041,11 +1041,15 @@ async def browse_products(
     use_case = ListProductsUseCase(product_repository=product_repo)
 
     if search:
+        # is_active=True is required here, exactly as on the category branch
+        # below: without it the search matched every status, so a shopper who
+        # guessed a word in an unpublished product's name got the draft back.
         result = await use_case.search(
             store_id=store_id,
             query=search,
             page=page,
             page_size=limit,
+            is_active=True,
         )
     elif category_id:
         # store_id + is_active are required: an unscoped category lookup would
