@@ -51,12 +51,16 @@ class IProductRepository(BaseRepository[Product]):
         category_id: UUID,
         skip: int = 0,
         limit: int = 100,
-        is_active: bool | None = None,
+        is_active: bool | None = True,
     ) -> list[Product]:
         """Get products in a category, scoped to a store.
 
-        store_id is required to prevent cross-tenant leaks; ``is_active=True``
-        restricts to published products for public storefront callers.
+        store_id is required to prevent cross-tenant leaks.
+
+        Defaults to published-only. A caller that genuinely wants every
+        status — the merchant hub's own views — must ask for it with
+        ``is_active=None``, so forgetting the argument can never widen what a
+        public endpoint returns.
         """
         ...
 
@@ -67,12 +71,21 @@ class IProductRepository(BaseRepository[Product]):
         query: str,
         skip: int = 0,
         limit: int = 100,
+        is_active: bool | None = True,
     ) -> list[Product]:
-        """Search products by name or description."""
+        """Search products by name or description.
+
+        Defaults to published-only. A caller that genuinely wants every
+        status — the merchant hub's own views — must ask for it with
+        ``is_active=None``, so forgetting the argument can never widen what a
+        public endpoint returns.
+        """
         ...
 
     @abstractmethod
-    async def count_search(self, store_id: UUID, query: str) -> int:
+    async def count_search(
+        self, store_id: UUID, query: str, is_active: bool | None = True
+    ) -> int:
         """Count products a `search` call would match, ignoring pagination."""
         ...
 

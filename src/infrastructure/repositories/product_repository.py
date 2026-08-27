@@ -305,14 +305,16 @@ class ProductRepository(IProductRepository):
         category_id: UUID,
         skip: int = 0,
         limit: int = 100,
-        is_active: bool | None = None,
+        is_active: bool | None = True,
     ) -> list[Product]:
         """Get products in a category, scoped to a store.
 
         store_id scoping is required: category ids are not guaranteed unique
-        across tenants, so an unscoped lookup leaks another store's catalog
-        (including unpublished drafts). Pass ``is_active=True`` from public
-        storefront callers to restrict to published products.
+        across tenants, so an unscoped lookup leaks another store's catalog.
+
+        Defaults to published-only; pass ``is_active=None`` to include every
+        status. Forgetting the argument therefore narrows what comes back
+        rather than widening it.
 
         Shares `_apply_product_filters` with `count_with_filters` so a
         collection page's item list and its reported total can never drift
@@ -332,44 +334,57 @@ class ProductRepository(IProductRepository):
         result = await self.session.execute(query.offset(skip).limit(limit))
         return [self._to_entity(model) for model in result.scalars().all()]
 
+    def _search_predicates(
+        self, store_id: UUID, query: str, is_active: bool | None
+    ) -> list:
+        """WHERE clause shared by `search` and `count_search`."""
+        search_term = f"%{query}%"
+        predicates = [
+            ProductModel.store_id == store_id,
+            or_(
+                ProductModel.name.ilike(search_term),
+                ProductModel.description.ilike(search_term),
+            ),
+        ]
+        # Mirror _apply_product_filters: the legacy is_active boolean maps onto
+        # the 3-state status column. Public callers pass True, which keeps
+        # DRAFT, UNLISTED and ARCHIVED out — see PURCHASABLE_STATUSES on the
+        # entity for why UNLISTED must stay out of search in particular.
+        if is_active is not None:
+            target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
+            predicates.append(ProductModel.status == target_status)
+        return predicates
+
     async def search(
         self,
         store_id: UUID,
         query: str,
         skip: int = 0,
         limit: int = 100,
+        is_active: bool | None = True,
     ) -> list[Product]:
-        """Search products by name or description."""
-        search_term = f"%{query}%"
+        """Search products by name or description.
+
+        Defaults to published-only. This method backs an unauthenticated
+        storefront endpoint, and the previous unfiltered default made every
+        draft searchable by anyone who guessed a word in its name. Callers
+        that want every status must now say so with ``is_active=None``.
+        """
         result = await self.session.execute(
             select(ProductModel)
-            .where(
-                ProductModel.store_id == store_id,
-                or_(
-                    ProductModel.name.ilike(search_term),
-                    ProductModel.description.ilike(search_term),
-                ),
-            )
+            .where(*self._search_predicates(store_id, query, is_active))
             .offset(skip)
             .limit(limit)
         )
         return [self._to_entity(model) for model in result.scalars().all()]
 
-    async def count_search(self, store_id: UUID, query: str) -> int:
-        """Count products matching `search`, mirroring `search` exactly.
-
-        Kept beside `search` on purpose: it matches the same two columns, so
-        the two must be edited together or a search result page will report a
-        total it cannot deliver.
-        """
-        search_term = f"%{query}%"
+    async def count_search(
+        self, store_id: UUID, query: str, is_active: bool | None = True
+    ) -> int:
+        """Count products matching `search`, sharing its exact predicates."""
         result = await self.session.execute(
             select(func.count(ProductModel.id)).where(
-                ProductModel.store_id == store_id,
-                or_(
-                    ProductModel.name.ilike(search_term),
-                    ProductModel.description.ilike(search_term),
-                ),
+                *self._search_predicates(store_id, query, is_active)
             )
         )
         return result.scalar() or 0

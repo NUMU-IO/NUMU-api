@@ -171,7 +171,7 @@ class TestListProductsUseCase:
         self.mock_product_repo.count_search.return_value = 47
 
         result = await self.use_case.search(
-            store_id=self.store_id, query="blue", page=1, page_size=20
+            store_id=self.store_id, query="blue", page=1, page_size=20, is_active=True
         )
 
         assert len(result.items) == 1
@@ -180,6 +180,10 @@ class TestListProductsUseCase:
         # 47-hit search reports one page and hides the other two.
         assert result.total == 47
         assert result.total_pages == 3
+        # Regression guard: is_active must reach both the item query and the
+        # count, or public storefront search hands out unpublished drafts.
+        assert self.mock_product_repo.search.call_args.kwargs["is_active"] is True
+        assert self.mock_product_repo.count_search.call_args.kwargs["is_active"] is True
 
     @pytest.mark.asyncio
     async def test_list_products_by_category(self):
@@ -211,6 +215,29 @@ class TestListProductsUseCase:
         count_kwargs = self.mock_product_repo.count_with_filters.call_args.kwargs
         assert count_kwargs["store_id"] == self.store_id
         assert count_kwargs["category_id"] == category_id
+        assert count_kwargs["is_active"] is True
+
+    @pytest.mark.asyncio
+    async def test_public_listings_default_to_published_only(self):
+        """Omitting is_active must narrow the result, never widen it.
+
+        Both of these back an unauthenticated storefront endpoint. A caller
+        that forgets the argument has to get published products only —
+        drafts, unlisted and archived are opt-in via is_active=None.
+        """
+        self.mock_product_repo.search.return_value = []
+        self.mock_product_repo.count_search.return_value = 0
+        self.mock_product_repo.get_by_category.return_value = []
+        self.mock_product_repo.count_with_filters.return_value = 0
+
+        await self.use_case.search(store_id=self.store_id, query="blue")
+        assert self.mock_product_repo.search.call_args.kwargs["is_active"] is True
+        assert self.mock_product_repo.count_search.call_args.kwargs["is_active"] is True
+
+        await self.use_case.by_category(store_id=self.store_id, category_id=uuid4())
+        category_kwargs = self.mock_product_repo.get_by_category.call_args.kwargs
+        assert category_kwargs["is_active"] is True
+        count_kwargs = self.mock_product_repo.count_with_filters.call_args.kwargs
         assert count_kwargs["is_active"] is True
         # Regression guard (Phase 0 tenant-leak fix): by_category MUST forward
         # store_id and is_active so it can never return another store's catalog

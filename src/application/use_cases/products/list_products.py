@@ -69,19 +69,27 @@ class ListProductsUseCase:
         query: str,
         page: int = 1,
         page_size: int = 20,
+        is_active: bool | None = True,
     ) -> PaginatedDTO:
-        """Search products in a store."""
+        """Search products in a store.
+
+        Published-only by default, matching the repository: this backs a
+        public endpoint, so an omitted argument must not widen the result.
+        Pass ``is_active=None`` for a merchant-side search over every status.
+        """
         skip = (page - 1) * page_size
         products = await self.product_repository.search(
             store_id=store_id,
             query=query,
             skip=skip,
             limit=page_size,
+            is_active=is_active,
         )
 
         total = await self.product_repository.count_search(
             store_id=store_id,
             query=query,
+            is_active=is_active,
         )
 
         return PaginatedDTO.create(
@@ -97,12 +105,13 @@ class ListProductsUseCase:
         category_id: UUID,
         page: int = 1,
         page_size: int = 20,
-        is_active: bool | None = None,
+        is_active: bool | None = True,
     ) -> PaginatedDTO:
         """List products by category, scoped to a store.
 
-        store_id is required to prevent cross-tenant leaks; pass
-        ``is_active=True`` from public storefront callers to hide drafts.
+        store_id is required to prevent cross-tenant leaks. Published-only by
+        default, for the same reason as `search`; pass ``is_active=None`` to
+        include every status.
         """
         skip = (page - 1) * page_size
         products = await self.product_repository.get_by_category(
