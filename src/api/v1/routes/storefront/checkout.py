@@ -3057,6 +3057,8 @@ class CartTrackLineItem(BaseModel):
     quantity: int = 1
     unit_price: int = 0  # cents
     total_price: int = 0  # cents
+    # Merchants recognise an abandoned cart by its pictures, not its SKUs.
+    image_url: str | None = None
 
 
 class CartTrackRequest(BaseModel):
@@ -3187,6 +3189,18 @@ async def cart_track(
         extra = {
             "session_fingerprint": request.session_fingerprint,
         }
+        # When THIS cart session began, which is not the row's `created_at`.
+        # `find_active_for_session` deliberately stitches a returning
+        # shopper's new session onto their existing recoverable row (that is
+        # what makes recovery work across devices), so `created_at` can be
+        # weeks older than the cart in front of you. The merchant's timeline
+        # read that as "Started cart", which described a cart the shopper no
+        # longer has. A changed fingerprint means a new session — restamp.
+        prior_fingerprint = (
+            (existing.extra_data or {}).get("session_fingerprint") if existing else None
+        )
+        if existing is None or prior_fingerprint != request.session_fingerprint:
+            extra["cart_started_at"] = now.isoformat()
 
         if existing:
             existing.line_items = line_items_payload

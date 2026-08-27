@@ -52,6 +52,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{store_id}/abandoned-checkouts")
 
 
+def _cart_started_at(c: AbandonedCheckout) -> datetime | None:
+    """When the CURRENT cart session began, if we know.
+
+    Stamped by ``cart/track`` each time the session fingerprint changes.
+    Rows written before that shipped have no value and fall back to
+    ``created_at`` in the hub.
+    """
+    raw = (c.extra_data or {}).get("cart_started_at")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _to_response(c: AbandonedCheckout) -> AbandonedCheckoutResponse:
     return AbandonedCheckoutResponse(
         id=c.id,
@@ -79,6 +95,7 @@ def _to_response(c: AbandonedCheckout) -> AbandonedCheckoutResponse:
         item_count=sum((li.get("quantity") or 0) for li in c.line_items),
         created_at=c.created_at,
         updated_at=c.updated_at,
+        cart_started_at=_cart_started_at(c),
     )
 
 

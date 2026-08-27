@@ -35,6 +35,7 @@ from src.infrastructure.repositories import (
     TwoFactorRepository,
     UpsellRuleRepository,
     UserRepository,
+    VariantRepository,
     WaitlistRepository,
     WebhookDeliveryLogRepository,
     WebhookSubscriptionRepository,
@@ -72,6 +73,13 @@ def get_product_repository(
 ) -> ProductRepository:
     """Get product repository dependency."""
     return ProductRepository(session)
+
+
+def get_variant_repository(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> VariantRepository:
+    """Get variant repository dependency."""
+    return VariantRepository(session)
 
 
 def get_product_review_repository(
