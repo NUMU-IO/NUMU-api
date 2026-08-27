@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import verify_store_ownership
+from src.api.dependencies import get_current_user_id, verify_store_ownership
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.core.entities.store import Store
@@ -65,6 +65,11 @@ class MismatchSummary(BaseModel):
     notes: str | None
     resolved: bool
     created_at: str
+
+
+class ResolveMismatchRequest(BaseModel):
+    resolved: bool = True
+    note: str | None = None
 
 
 class TriggerReconciliationRequest(BaseModel):
@@ -206,6 +211,74 @@ async def list_run_mismatches(
             for m in mismatches
         ],
         message="Mismatches retrieved",
+    )
+
+
+@router.patch(
+    "/{store_id}/reconciliation/mismatches/{mismatch_id}",
+    response_model=SuccessResponse[MismatchSummary],
+    summary="Resolve or reopen a reconciliation mismatch",
+    operation_id="store_resolve_reconciliation_mismatch",
+)
+async def resolve_mismatch(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    mismatch_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    request: ResolveMismatchRequest | None = None,
+):
+    """Mark a mismatch resolved (or reopen it).
+
+    `resolved` was readable and filterable from day one but nothing could
+    ever set it, so every mismatch sat at "Open" forever and the list only
+    grew. Ownership is checked through the parent run — the same lesson as
+    the CL-1 cross-owner fix on the listing endpoint above.
+    """
+    row = (
+        await db.execute(
+            select(ReconciliationMismatchModel)
+            .join(
+                PaymentReconciliationRunModel,
+                PaymentReconciliationRunModel.id == ReconciliationMismatchModel.run_id,
+            )
+            .where(
+                ReconciliationMismatchModel.id == mismatch_id,
+                PaymentReconciliationRunModel.store_id == store.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mismatch not found",
+        )
+
+    resolved = request.resolved if request is not None else True
+    row.resolved = resolved
+    row.resolved_at = datetime.now(UTC) if resolved else None
+    row.resolved_by = str(user_id) if resolved else None
+    if request is not None and request.note:
+        # Keep the engine's own note and append the merchant's explanation —
+        # "why this gap was fine" is the whole value of resolving it.
+        prior = row.notes or ""
+        row.notes = f"{prior}\n— {request.note}".strip()
+    await db.commit()
+    await db.refresh(row)
+
+    return SuccessResponse(
+        data=MismatchSummary(
+            id=str(row.id),
+            mismatch_type=row.mismatch_type,
+            order_number=row.order_number,
+            gateway_transaction_id=row.gateway_transaction_id,
+            expected_amount_cents=row.expected_amount_cents,
+            actual_amount_cents=row.actual_amount_cents,
+            gateway=row.gateway,
+            notes=row.notes,
+            resolved=row.resolved,
+            created_at=row.created_at.isoformat(),
+        ),
+        message="Mismatch updated",
     )
 
 

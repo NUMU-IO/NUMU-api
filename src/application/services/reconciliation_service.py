@@ -7,6 +7,18 @@ Supported mismatch types:
 - paid_order_no_transaction  — order.payment_status=PAID but no matching transaction
 - transaction_no_order       — transaction exists with no linked order
 - amount_mismatch            — order total != transaction amount
+- cod_not_remitted           — courier delivered the parcel but has not handed
+                               the cash over yet
+
+COD is reconciled against the SHIPMENT, not against payment_transactions —
+cash collected at the door never produces a gateway transaction, so demanding
+one flagged every healthy COD order as a mismatch and made `actual` a copy of
+`expected` (variance structurally 0, which is useless on a COD-only store).
+The courier's own report (`shipments.cod_collected` / `cod_amount`) is the
+only real evidence the money arrived, so that is what `actual` is built from.
+Orders with no shipment row at all (manual-ship merchants) fall back to the
+merchant's own "mark as paid" — an assertion, not evidence, but not a
+discrepancy either.
 
 Run daily via Celery beat at 02:00 UTC (after end-of-day settlement).
 """
@@ -33,6 +45,7 @@ from src.infrastructure.database.models.public.reconciliation import (
 from src.infrastructure.database.models.tenant.payment_transaction import (
     PaymentTransactionModel,
 )
+from src.infrastructure.database.models.tenant.shipment import ShipmentModel
 
 logger = get_logger(__name__)
 
@@ -131,6 +144,21 @@ class ReconciliationService:
         paid_orders = paid_orders_result.all()
 
         # --- 2. Fetch successful payment_transactions for the period ---
+        # SCOPED TO THE STORE on a store-level run. This filter was missing
+        # and `payment_transactions` is not in TENANT_SCOPED_TABLES, so RLS
+        # did not cover for it: a merchant-triggered run read every store's
+        # transactions, counted them in `total_transactions_checked`, and
+        # step 5 then emitted a `transaction_no_order` mismatch for each one
+        # — publishing other merchants' gateway_transaction_id, amount and
+        # order_id into this merchant's mismatch table.
+        txn_filters = [
+            PaymentTransactionModel.status.in_(_SUCCESSFUL_TX_STATUSES),
+            PaymentTransactionModel.processing_completed_at >= period_start,
+            PaymentTransactionModel.processing_completed_at < period_end,
+        ]
+        if run.store_id:
+            txn_filters.append(PaymentTransactionModel.store_id == run.store_id)
+
         txns_result = await self.session.execute(
             select(
                 PaymentTransactionModel.id,
@@ -140,13 +168,7 @@ class ReconciliationService:
                 PaymentTransactionModel.gateway_transaction_id,
                 PaymentTransactionModel.status,
                 PaymentTransactionModel.processing_completed_at,
-            ).where(
-                and_(
-                    PaymentTransactionModel.status.in_(_SUCCESSFUL_TX_STATUSES),
-                    PaymentTransactionModel.processing_completed_at >= period_start,
-                    PaymentTransactionModel.processing_completed_at < period_end,
-                )
-            )
+            ).where(and_(*txn_filters))
         )
         txns = txns_result.all()
 
@@ -156,6 +178,32 @@ class ReconciliationService:
         for txn in txns:
             if txn.order_id:
                 txn_by_order.setdefault(txn.order_id, []).append(txn)
+
+        # --- 3b. Courier COD remittance for those orders ---
+        # The only real evidence that cash collected at the door reached the
+        # merchant. Keyed by order so step 4 can resolve each COD line.
+        cod_by_order: dict[UUID, tuple[bool, int, str]] = {}
+        if order_id_set:
+            shipment_filters = [ShipmentModel.order_id.in_(order_id_set)]
+            if run.store_id:
+                shipment_filters.append(ShipmentModel.store_id == run.store_id)
+            shipments_result = await self.session.execute(
+                select(
+                    ShipmentModel.order_id,
+                    ShipmentModel.cod_collected,
+                    ShipmentModel.cod_amount,
+                    ShipmentModel.status,
+                ).where(and_(*shipment_filters))
+            )
+            for row in shipments_result.all():
+                # A parcel can be re-shipped; the collected one wins.
+                existing = cod_by_order.get(row.order_id)
+                if existing is None or (row.cod_collected and not existing[0]):
+                    cod_by_order[row.order_id] = (
+                        bool(row.cod_collected),
+                        int(row.cod_amount or 0),
+                        row.status or "",
+                    )
 
         mismatches: list[ReconciliationMismatch] = []
         expected_cents = 0
@@ -179,23 +227,81 @@ class ReconciliationService:
             if not linked_txns:
                 is_cod = (order.payment_method or "").lower() in _COD_METHODS
                 if is_cod:
-                    # COD: cash collected at delivery counts as actual
-                    actual_cents += order_cents
-                mismatches.append(
-                    ReconciliationMismatch(
-                        run_id=run.id,
-                        mismatch_type=MismatchType.PAID_ORDER_NO_TRANSACTION,
-                        order_id=order.id,
-                        order_number=order.order_number,
-                        expected_amount_cents=order_cents,
-                        actual_amount_cents=order_cents if is_cod else None,
-                        gateway=order.payment_method,
-                        notes=(
-                            f"Order {order.order_number} — "
-                            f"{'COD (cash collected)' if is_cod else 'no matching payment transaction'}"
-                        ),
+                    # COD never produces a gateway transaction, so "no
+                    # transaction" is the healthy state, not a discrepancy.
+                    # This used to add the order to BOTH sides of the ledger
+                    # and file a mismatch anyway — which is why a clean run
+                    # showed "2 mismatches" beside a green "Matched" badge,
+                    # rows whose expected equalled their actual, and an
+                    # actual of EGP 870 against 0 transactions.
+                    collected, cod_cents, ship_status = cod_by_order.get(
+                        order.id, (None, 0, "")
                     )
-                )
+                    if collected is None:
+                        # No shipment row — a manual-ship merchant. The only
+                        # evidence is the merchant's own "mark as paid".
+                        # Trust it (they were there), but it is an assertion,
+                        # not a courier confirmation.
+                        actual_cents += order_cents
+                    elif collected:
+                        # The courier reported the cash. THIS is the observed
+                        # figure the "actual" column is supposed to hold.
+                        observed = cod_cents or order_cents
+                        actual_cents += observed
+                        if abs(observed - order_cents) > 1:
+                            mismatches.append(
+                                ReconciliationMismatch(
+                                    run_id=run.id,
+                                    mismatch_type=MismatchType.AMOUNT_MISMATCH,
+                                    order_id=order.id,
+                                    order_number=order.order_number,
+                                    expected_amount_cents=order_cents,
+                                    actual_amount_cents=observed,
+                                    gateway=order.payment_method,
+                                    notes=(
+                                        f"Order {order.order_number} — courier "
+                                        f"remitted {observed} piastres against "
+                                        f"{order_cents} expected"
+                                    ),
+                                )
+                            )
+                    else:
+                        # Delivered (or in transit) and the courier has not
+                        # handed the cash over. A real, actionable gap — and
+                        # the first thing on this screen that can move the
+                        # variance off zero.
+                        mismatches.append(
+                            ReconciliationMismatch(
+                                run_id=run.id,
+                                mismatch_type=MismatchType.COD_NOT_REMITTED,
+                                order_id=order.id,
+                                order_number=order.order_number,
+                                expected_amount_cents=order_cents,
+                                actual_amount_cents=0,
+                                gateway=order.payment_method,
+                                notes=(
+                                    f"Order {order.order_number} — shipment is "
+                                    f"'{ship_status or 'unknown'}' and the courier "
+                                    f"has not remitted the cash"
+                                ),
+                            )
+                        )
+                else:
+                    mismatches.append(
+                        ReconciliationMismatch(
+                            run_id=run.id,
+                            mismatch_type=MismatchType.PAID_ORDER_NO_TRANSACTION,
+                            order_id=order.id,
+                            order_number=order.order_number,
+                            expected_amount_cents=order_cents,
+                            actual_amount_cents=None,
+                            gateway=order.payment_method,
+                            notes=(
+                                f"Order {order.order_number} — no matching "
+                                f"payment transaction"
+                            ),
+                        )
+                    )
             else:
                 # Check amount matches the most recent successful transaction
                 latest_txn = linked_txns[-1]
