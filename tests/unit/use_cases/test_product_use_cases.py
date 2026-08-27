@@ -93,6 +93,7 @@ class TestListProductsUseCase:
         self.mock_product_repo.list_with_filters = AsyncMock()
         self.mock_product_repo.count_with_filters = AsyncMock()
         self.mock_product_repo.search = AsyncMock()
+        self.mock_product_repo.count_search = AsyncMock()
         self.mock_product_repo.get_by_category = AsyncMock()
 
         self.use_case = ListProductsUseCase(product_repository=self.mock_product_repo)
@@ -167,6 +168,7 @@ class TestListProductsUseCase:
             )
         ]
         self.mock_product_repo.search.return_value = products
+        self.mock_product_repo.count_search.return_value = 47
 
         result = await self.use_case.search(
             store_id=self.store_id, query="blue", page=1, page_size=20
@@ -174,6 +176,10 @@ class TestListProductsUseCase:
 
         assert len(result.items) == 1
         assert "Blue" in result.items[0].name
+        # The total is the match count, not the page length — otherwise a
+        # 47-hit search reports one page and hides the other two.
+        assert result.total == 47
+        assert result.total_pages == 3
 
     @pytest.mark.asyncio
     async def test_list_products_by_category(self):
@@ -190,12 +196,22 @@ class TestListProductsUseCase:
             )
         ]
         self.mock_product_repo.get_by_category.return_value = products
+        self.mock_product_repo.count_with_filters.return_value = 203
 
         result = await self.use_case.by_category(
             store_id=self.store_id, category_id=category_id, is_active=True
         )
 
         assert len(result.items) == 1
+        # Regression guard: the total is the collection's match count, not the
+        # page length. `len(products)` made a 203-product collection report
+        # `total_pages == 1` and the storefront rendered one page of nine.
+        assert result.total == 203
+        assert result.total_pages == 11
+        count_kwargs = self.mock_product_repo.count_with_filters.call_args.kwargs
+        assert count_kwargs["store_id"] == self.store_id
+        assert count_kwargs["category_id"] == category_id
+        assert count_kwargs["is_active"] is True
         # Regression guard (Phase 0 tenant-leak fix): by_category MUST forward
         # store_id and is_active so it can never return another store's catalog
         # or unpublished drafts.

@@ -72,6 +72,11 @@ class IProductRepository(BaseRepository[Product]):
         ...
 
     @abstractmethod
+    async def count_search(self, store_id: UUID, query: str) -> int:
+        """Count products a `search` call would match, ignoring pagination."""
+        ...
+
+    @abstractmethod
     async def get_low_stock(
         self,
         store_id: UUID,

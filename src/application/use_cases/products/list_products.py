@@ -79,9 +79,14 @@ class ListProductsUseCase:
             limit=page_size,
         )
 
+        total = await self.product_repository.count_search(
+            store_id=store_id,
+            query=query,
+        )
+
         return PaginatedDTO.create(
             items=[ProductDTO.from_entity(product) for product in products],
-            total=len(products),  # Would need a search count method for accuracy
+            total=total,
             page=page,
             page_size=page_size,
         )
@@ -108,9 +113,18 @@ class ListProductsUseCase:
             is_active=is_active,
         )
 
+        # `len(products)` is the page size, not the match count: a 203-product
+        # collection reported `total: 20`, so `total_pages` came back as 1 and
+        # the storefront rendered a single page of a nine-page collection.
+        total = await self.product_repository.count_with_filters(
+            store_id=store_id,
+            category_id=category_id,
+            is_active=is_active,
+        )
+
         return PaginatedDTO.create(
             items=[ProductDTO.from_entity(product) for product in products],
-            total=len(products),
+            total=total,
             page=page,
             page_size=page_size,
         )
