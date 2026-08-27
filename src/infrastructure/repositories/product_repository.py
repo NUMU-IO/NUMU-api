@@ -313,18 +313,22 @@ class ProductRepository(IProductRepository):
         across tenants, so an unscoped lookup leaks another store's catalog
         (including unpublished drafts). Pass ``is_active=True`` from public
         storefront callers to restrict to published products.
+
+        Shares `_apply_product_filters` with `count_with_filters` so a
+        collection page's item list and its reported total can never drift
+        apart. Parent categories include their descendants' products — see
+        `_category_tree_ids`.
         """
-        query = select(ProductModel).where(
-            ProductModel.store_id == store_id,
-            # Parent categories include their descendants' products — see
-            # _category_tree_ids. store_id scoping above keeps it tenant-safe.
-            ProductModel.category_id.in_(self._category_tree_ids(category_id)),
+        query = self._apply_product_filters(
+            select(ProductModel),
+            store_id=store_id,
+            category_id=category_id,
+            is_active=is_active,
         )
-        # Mirror list_with_filters: the legacy is_active boolean maps onto the
-        # 3-state status column (ACTIVE for published, DRAFT otherwise).
-        if is_active is not None:
-            target_status = ProductStatus.ACTIVE if is_active else ProductStatus.DRAFT
-            query = query.where(ProductModel.status == target_status)
+        # Deterministic order: without one, Postgres is free to return rows in
+        # any order per execution, so paging through a collection could repeat
+        # or skip products between page 1 and page 2.
+        query = query.order_by(ProductModel.created_at.desc(), ProductModel.id.desc())
         result = await self.session.execute(query.offset(skip).limit(limit))
         return [self._to_entity(model) for model in result.scalars().all()]
 
@@ -350,6 +354,25 @@ class ProductRepository(IProductRepository):
             .limit(limit)
         )
         return [self._to_entity(model) for model in result.scalars().all()]
+
+    async def count_search(self, store_id: UUID, query: str) -> int:
+        """Count products matching `search`, mirroring `search` exactly.
+
+        Kept beside `search` on purpose: it matches the same two columns, so
+        the two must be edited together or a search result page will report a
+        total it cannot deliver.
+        """
+        search_term = f"%{query}%"
+        result = await self.session.execute(
+            select(func.count(ProductModel.id)).where(
+                ProductModel.store_id == store_id,
+                or_(
+                    ProductModel.name.ilike(search_term),
+                    ProductModel.description.ilike(search_term),
+                ),
+            )
+        )
+        return result.scalar() or 0
 
     async def get_low_stock(
         self,
