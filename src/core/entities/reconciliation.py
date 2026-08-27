@@ -19,6 +19,9 @@ class MismatchType(StrEnum):
     TRANSACTION_NO_ORDER = "transaction_no_order"
     AMOUNT_MISMATCH = "amount_mismatch"
     DUPLICATE_TRANSACTION = "duplicate_transaction"
+    # COD only: the parcel moved but the courier still holds the cash. The
+    # column is String(50), so this needs no enum migration.
+    COD_NOT_REMITTED = "cod_not_remitted"
 
 
 class PaymentReconciliationRun(BaseEntity):

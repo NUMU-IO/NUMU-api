@@ -12,6 +12,7 @@ from src.core.interfaces.repositories.product_repository import IProductReposito
 from src.core.value_objects.money import Currency, Money
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models import ProductModel
+from src.infrastructure.database.models.tenant.variant import VariantModel
 
 
 class ProductRepository(IProductRepository):
@@ -709,10 +710,23 @@ class ProductRepository(IProductRepository):
             query = query.where(ProductModel.price_amount <= price_max)
         # Profit-readiness filter: the hub's "N products missing cost" banner
         # and `/products?cost=missing` deep link.
-        if has_cost is True:
-            query = query.where(ProductModel.cost_price.isnot(None))
-        elif has_cost is False:
-            query = query.where(ProductModel.cost_price.is_(None))
+        #
+        # A cost on ANY variant counts, because the dashboard's gross-profit
+        # maths prefers the variant's own cost over the parent product's. If
+        # this looked at `products.cost_price` alone, the tile's "N of M have
+        # a cost set" hint and the list its link opens would disagree for
+        # every product costed per-SKU.
+        if has_cost is not None:
+            variant_cost_exists = (
+                select(literal(1))
+                .where(
+                    VariantModel.product_id == ProductModel.id,
+                    VariantModel.cost_price.isnot(None),
+                )
+                .exists()
+            )
+            costed = or_(ProductModel.cost_price.isnot(None), variant_cost_exists)
+            query = query.where(costed if has_cost else ~costed)
         if search:
             search_term = f"%{search}%"
             query = query.where(

@@ -17,6 +17,7 @@ class AbandonedCheckoutLineItem(BaseModel):
     quantity: int = 1
     unit_price: int = 0
     total_price: int = 0
+    image_url: str | None = None
 
 
 class AbandonedCheckoutResponse(BaseModel):
@@ -49,6 +50,12 @@ class AbandonedCheckoutResponse(BaseModel):
     item_count: int = 0
     created_at: datetime
     updated_at: datetime
+    # When the CURRENT cart session began. A returning shopper's new session
+    # is deliberately stitched onto their existing recoverable row, so
+    # `created_at` is when we first ever saw them — often weeks earlier — and
+    # is the wrong thing to label "Started cart". Null on rows written before
+    # this shipped; the hub falls back to `created_at`.
+    cart_started_at: datetime | None = None
 
 
 class AbandonedCheckoutListResponse(BaseModel):

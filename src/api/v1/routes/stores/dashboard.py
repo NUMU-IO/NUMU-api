@@ -13,6 +13,7 @@ from src.api.dependencies import (
     get_order_repository,
     get_product_repository,
     get_store_repository,
+    get_variant_repository,
     verify_store_ownership,
 )
 from src.api.dependencies.date_range import DateRangeWindow, get_date_range_window
@@ -28,6 +29,7 @@ from src.infrastructure.repositories import (
     OrderRepository,
     ProductRepository,
     StoreRepository,
+    VariantRepository,
 )
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
 
@@ -111,6 +113,7 @@ async def get_dashboard_stats(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    variant_repo: Annotated[VariantRepository, Depends(get_variant_repository)],
     window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get dashboard statistics for the store."""
@@ -119,6 +122,8 @@ async def get_dashboard_stats(
         customer_repository=customer_repo,
         product_repository=product_repo,
         store_repository=store_repo,
+        # Needed for gross profit: variants carry their own cost_price.
+        variant_repository=variant_repo,
     )
 
     result = await use_case.execute(
