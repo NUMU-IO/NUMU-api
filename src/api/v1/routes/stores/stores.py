@@ -641,6 +641,53 @@ async def _revalidate_on_domain_activation(store: Store) -> None:
         logger.warning("custom_domain_revalidate_failed", exc_info=True)
 
 
+async def _authorize_maps_referrer(domain: str | None) -> None:
+    """Add a newly-live domain to the Maps browser key's referrer allowlist.
+
+    Google validates the Maps JS API against the *page's* URL, so a merchant
+    domain absent from that list gets RefererNotAllowedMapError and the
+    checkout's location picker silently degrades to manual address entry.
+    Nothing about that is visible server-side, and the checkout still
+    completes, so it goes unreported.
+
+    Best-effort by design, like the revalidation above it: the picker's
+    fallback is a working checkout, so a Google outage must not stop a
+    merchant's domain from going live over a degraded map.
+    """
+    if not domain:
+        return
+    try:
+        from src.infrastructure.external_services.google_maps_key_service import (
+            google_maps_key_service,
+        )
+
+        added = await google_maps_key_service.authorize_domain(domain)
+        if added:
+            logger.info("maps_key_referrer_added", extra={"domain": domain})
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "maps_key_referrer_add_failed", extra={"domain": domain}, exc_info=True
+        )
+
+
+async def _revoke_maps_referrer(domain: str | None) -> None:
+    """Remove a disconnected domain from the Maps key's referrer allowlist."""
+    if not domain:
+        return
+    try:
+        from src.infrastructure.external_services.google_maps_key_service import (
+            google_maps_key_service,
+        )
+
+        removed = await google_maps_key_service.revoke_domain(domain)
+        if removed:
+            logger.info("maps_key_referrer_removed", extra={"domain": domain})
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "maps_key_referrer_remove_failed", extra={"domain": domain}, exc_info=True
+        )
+
+
 def _build_custom_domain_response(
     store: Store, cf_state: dict | None
 ) -> CustomDomainStatusResponse:
@@ -748,6 +795,7 @@ async def get_custom_domain(
             prev = cd.get("status")
             if _persist_domain_state(store, store.custom_domain, cf_state):
                 await _revalidate_on_domain_activation(store)
+                await _authorize_maps_referrer(store.custom_domain)
             new = (store.settings or {}).get("custom_domain", {}).get("status")
             if new != prev:
                 await store_repo.update(store)
@@ -800,6 +848,7 @@ async def connect_custom_domain(
     store.custom_domain = domain
     if _persist_domain_state(store, domain, cf_state):
         await _revalidate_on_domain_activation(store)
+        await _authorize_maps_referrer(domain)
     await store_repo.update(store)
     await cache.invalidate_store(
         store_id=store.id,
@@ -840,6 +889,13 @@ async def disconnect_custom_domain(
     store.custom_domain = None
     _persist_domain_state(store, None, None)
     await store_repo.update(store)
+
+    # Drop the referrer too, so the allowlist tracks live domains instead of
+    # growing forever. Best-effort: a stale entry authorises a domain the
+    # merchant no longer routes here, which is untidy but harmless, whereas
+    # failing the disconnect over it would strand them on a domain they asked
+    # to remove.
+    await _revoke_maps_referrer(prev_domain)
     await cache.invalidate_store(
         store_id=store.id,
         subdomain=store.subdomain,
