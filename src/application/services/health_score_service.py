@@ -72,6 +72,31 @@ MIN_USABLE_WEIGHT = 0.45
 # 3 still shipping read as 57% completion. Terminal-only matches what the
 # hub's copy always claimed ("excluding pending").
 _TERMINAL_DELIVERED = ["DELIVERED", "delivered"]
+# Orders that reached a shipped OUTCOME — the order-side equivalent of the
+# shipment denominator. Cancelled and refunded are deliberately absent:
+# cancelled never went out for delivery, and a refund is a returns signal
+# rather than a delivery one.
+_SHIPPED_OUTCOME = [
+    "DELIVERED",
+    "delivered",
+    "RETURNED",
+    "returned",
+    "FAILED",
+    "failed",
+]
+
+# Order payment_method carrying cash on delivery. Matches how
+# cod_autopilot_service identifies COD orders; compared case-insensitively
+# because payment_method is a free-text String(50), not an enum column.
+_COD_PAYMENT_METHODS = ["cod", "cash_on_delivery"]
+
+
+def _is_cod_order():
+    return func.lower(func.coalesce(OrderModel.payment_method, "")).in_(
+        _COD_PAYMENT_METHODS
+    )
+
+
 _TERMINAL_NEGATIVE = [
     "CANCELLED",
     "cancelled",
@@ -289,6 +314,7 @@ async def calculate_store_health_score(
             "insufficient_data": bool,  # True when no orders AND no shipments
             "insufficient_metrics": list[str],  # metric keys with not enough data
             "metrics": {...},
+            "metric_basis": {...},  # per metric: "shipments" | "orders"
             "sub_scores": {...},
             "recommendations": list[str],
             "orders_analyzed": int,
@@ -391,6 +417,38 @@ async def calculate_store_health_score(
                     else_=0,
                 )
             ).label("returned"),
+            # Orders that reached a SHIPPED outcome — delivered, returned or
+            # failed. Cancelled is excluded on purpose: an order killed before
+            # dispatch is not a delivery failure. This is the order-side
+            # equivalent of the shipment denominator, for stores that have no
+            # shipment rows at all (see the fallback below).
+            func.sum(case((status_text.in_(_SHIPPED_OUTCOME), 1), else_=0)).label(
+                "shipped_outcome"
+            ),
+            func.sum(
+                case(
+                    (
+                        and_(
+                            _is_cod_order(),
+                            status_text.in_(_SHIPPED_OUTCOME),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("cod_outcome"),
+            func.sum(
+                case(
+                    (
+                        and_(
+                            _is_cod_order(),
+                            status_text.in_(_TERMINAL_DELIVERED),
+                        ),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("cod_delivered"),
         ).where(
             and_(
                 OrderModel.store_id == store_id,
@@ -403,6 +461,38 @@ async def calculate_store_health_score(
     completed_orders = order_row.completed or 0
     settled_orders = order_row.settled or 0
     returned_orders = order_row.returned or 0
+    shipped_outcome_orders = order_row.shipped_outcome or 0
+    cod_outcome_orders = order_row.cod_outcome or 0
+    cod_delivered_orders = order_row.cod_delivered or 0
+
+    # ── Manual-fulfilment fallback ────────────────────────────────────────
+    # Delivery success and COD acceptance are computed from `shipments`,
+    # which only exist when a carrier integration writes them. A merchant
+    # who fulfils by hand — marking orders shipped and delivered in the hub,
+    # the norm for COD in-market — has no shipment rows at all, so BOTH
+    # metrics reported "not enough data" and 55% of the model (delivery 30 +
+    # COD 25) was permanently unavailable. A store with 15 delivered COD
+    # orders was told it had insufficient data about COD delivery.
+    #
+    # Shipments still win when present: they are the better signal, carrying
+    # carrier-reported outcomes rather than merchant self-reporting. The
+    # order-derived rate is only consulted when shipments cannot clear their
+    # own sample gate.
+    delivery_basis = "shipments"
+    if total_shipments < MIN_SHIPMENTS_FOR_DELIVERY and shipped_outcome_orders > 0:
+        delivery_basis = "orders"
+        delivery_sample = shipped_outcome_orders
+        delivery_success_rate = completed_orders / shipped_outcome_orders
+    else:
+        delivery_sample = total_shipments
+
+    cod_basis = "shipments"
+    if total_cod < MIN_COD_SHIPMENTS and cod_outcome_orders > 0:
+        cod_basis = "orders"
+        cod_sample = cod_outcome_orders
+        cod_acceptance_rate = cod_delivered_orders / cod_outcome_orders
+    else:
+        cod_sample = total_cod
     order_completion_rate = (
         (completed_orders / settled_orders) if settled_orders > 0 else 0.0
     )
@@ -488,9 +578,9 @@ async def calculate_store_health_score(
     # `insufficient_data: True` so the UI can show a friendly empty state
     # instead of a misleading grade.
     insufficient_metrics: set[str] = set()
-    if total_shipments < MIN_SHIPMENTS_FOR_DELIVERY:
+    if delivery_sample < MIN_SHIPMENTS_FOR_DELIVERY:
         insufficient_metrics.add("delivery_success")
-    if total_cod < MIN_COD_SHIPMENTS:
+    if cod_sample < MIN_COD_SHIPMENTS:
         insufficient_metrics.add("cod_acceptance")
     if settled_orders < MIN_ORDERS_FOR_COMPLETION:
         insufficient_metrics.add("order_completion")
@@ -508,9 +598,16 @@ async def calculate_store_health_score(
         {
             "key": "shipments",
             "needed": MIN_SHIPMENTS_FOR_DELIVERY,
-            "have": int(total_shipments),
+            # Report whichever basis the metric is actually using, or the
+            # checklist tells a manual store to collect shipment rows it will
+            # never have.
+            "have": int(delivery_sample),
         },
-        {"key": "cod_shipments", "needed": MIN_COD_SHIPMENTS, "have": int(total_cod)},
+        {
+            "key": "cod_shipments",
+            "needed": MIN_COD_SHIPMENTS,
+            "have": int(cod_sample),
+        },
         {
             "key": "settled_orders",
             "needed": MIN_ORDERS_FOR_COMPLETION,
@@ -588,6 +685,15 @@ async def calculate_store_health_score(
             "order_completion_rate": round(order_completion_rate * 100, 1),
             "return_rate": round(return_rate * 100, 1),
             "avg_response_hours": round(avg_response_hours, 1),
+        },
+        # Which source each shipment-shaped metric was computed from:
+        # "shipments" = carrier-reported, "orders" = the merchant's own
+        # marking via the manual-fulfilment fallback. Worth surfacing rather
+        # than hiding — the two are not equally trustworthy, and a merchant
+        # reading a delivery rate deserves to know which one they are seeing.
+        "metric_basis": {
+            "delivery_success": delivery_basis,
+            "cod_acceptance": cod_basis,
         },
         "sub_scores": sub_scores,
         "recommendations": recommendations,
