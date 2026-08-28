@@ -459,8 +459,14 @@ async def test_approved_refunds_count_toward_return_rate(test_session):
 
 @pytest.mark.asyncio
 async def test_partial_data_only_excludes_unmeasurable_metrics(test_session):
-    """A store with only orders (no shipments) should produce a score
-    based on order metrics, with delivery + cod flagged insufficient."""
+    """A store with only orders (no shipments) still gets a delivery rate.
+
+    This used to assert that delivery_success was insufficient here. It no
+    longer is: 10 delivered orders are a measurable delivery outcome, and
+    reading them only from `shipments` is what left every manual-fulfilment
+    store — the in-market norm for COD — without 30% of its grade. COD stays
+    insufficient because none of these orders are COD.
+    """
     store_id = uuid4()
     customer_id = uuid4()
 
@@ -482,8 +488,12 @@ async def test_partial_data_only_excludes_unmeasurable_metrics(test_session):
 
     assert result["insufficient_data"] is False
     assert result["score"] is not None
-    # Delivery and COD have no data
-    assert "delivery_success" in result["insufficient_metrics"]
+    # Measurable from order outcomes, and labelled as such so the UI can say
+    # it came from the merchant's own marking rather than a carrier.
+    assert "delivery_success" not in result["insufficient_metrics"]
+    assert result["metric_basis"]["delivery_success"] == "orders"
+    assert result["metrics"]["delivery_success_rate"] == 100.0
+    # No COD orders at all, so this one genuinely has nothing to measure.
     assert "cod_acceptance" in result["insufficient_metrics"]
     # Order completion + low_return + response time have data
     assert "order_completion" not in result["insufficient_metrics"]
