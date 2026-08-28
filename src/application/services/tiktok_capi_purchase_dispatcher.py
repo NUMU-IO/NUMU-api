@@ -45,6 +45,13 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     fire is blocked. They are absent on orders created before that
     snapshot shipped, and on paths with no browser request at all
     (merchant-created / imported orders) — TikTok drops null fields.
+
+    ``email`` is deliberately None here and resolved from the customer record
+    by ``fill_identity_from_customer`` at the call site — the same correction
+    the Meta sibling already carries. ``OrderShippingAddress`` has no email
+    field and never has, so ``shipping.get("email")`` was a permanent None and
+    every server-side CompletePayment reached TikTok with no email match key
+    at all.
     """
     from src.infrastructure.external_services.meta.country_iso import (
         canonicalize_country,
@@ -54,7 +61,9 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     meta = getattr(order, "metadata", None) or {}
     raw_country = shipping.get("country_code") or shipping.get("country")
     return {
-        "email": shipping.get("email"),
+        # Resolved from the customer row by `fill_identity_from_customer`;
+        # see the docstring.
+        "email": None,
         "phone": shipping.get("phone"),
         "first_name": shipping.get("first_name"),
         "last_name": shipping.get("last_name"),
@@ -62,6 +71,13 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
         "country_code": canonicalize_country(raw_country),
         "zip": shipping.get("postal_code") or shipping.get("zip"),
         "customer_id": str(order.customer_id) if order.customer_id else None,
+        # The session fingerprint the mid-funnel events already sent as
+        # `external_id`. `_first_external_id` falls back to this key when
+        # there is no customer id, so without it a GUEST order — the majority
+        # of MENA COD checkouts — sent TikTok no external_id at all and the
+        # conversion could not be joined to the browsing session TikTok had
+        # already seen. Mirrors the Meta sibling.
+        "external_id": getattr(order, "session_fingerprint", None),
         "ip": meta.get("ip_address"),
         "user_agent": meta.get("user_agent"),
         "ttclid": meta.get("ttclid"),
@@ -155,11 +171,16 @@ async def enqueue_tiktok_capi_event_for_order(
         )
 
     from src.application.services.meta_capi_purchase_dispatcher import (
+        fill_identity_from_customer,
         resolve_catalog_ids,
     )
 
     paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)
     user_data = _build_user_data_from_order(order)
+    # Same customer-record enrichment the Meta Purchase path runs. Reused
+    # verbatim: it writes `email` / `phone` / `first_name` / `last_name`, which
+    # are exactly the raw keys TikTok's `hash_user_data` reads.
+    await fill_identity_from_customer(db, user_data, order)
     custom_data = _build_custom_data_from_order(
         order, await resolve_catalog_ids(db, order)
     )
