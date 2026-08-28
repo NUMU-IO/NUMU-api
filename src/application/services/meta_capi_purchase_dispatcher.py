@@ -33,6 +33,7 @@ import math
 import re
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,7 +47,25 @@ logger = get_logger(__name__)
 _ISO_4217_RE = re.compile(r"[A-Za-z]{3}")
 
 
-def _build_user_data_from_order(order: Any) -> dict[str, Any]:
+def _store_host(store: Any) -> str | None:
+    """Canonical storefront host for ``store`` — the domain the Pixel set its
+    cookies on, and therefore the domain Meta's ``fbc`` subdomain index is
+    counted against.
+
+    ``Store.store_url`` already encodes the custom-domain-wins rule (see
+    ``link_builder``), so this only has to strip the scheme off it.
+    """
+    origin = getattr(store, "store_url", None)
+    if not origin:
+        return None
+    with contextlib.suppress(Exception):
+        return urlparse(str(origin)).hostname or None
+    return None
+
+
+def _build_user_data_from_order(
+    order: Any, *, host: str | None = None
+) -> dict[str, Any]:
     """Extract Meta-CAPI user_data from an Order.
 
     The Meta CAPI client SHA-256-hashes PII downstream (see
@@ -83,7 +102,7 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     # attribution snapshot. /track has rebuilt `fbc` from this for a while;
     # the CONVERSION event — the one Meta optimizes spend against — did not,
     # which is exactly backwards.
-    fbc = meta.get("fbc") or _fbc_from_attribution(order)
+    fbc = meta.get("fbc") or _fbc_from_attribution(order, host=host)
 
     return {
         # `email` is deliberately NOT read from `shipping` — OrderShippingAddress
@@ -116,11 +135,18 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     }
 
 
-def _fbc_from_attribution(order: Any) -> str | None:
+def _fbc_from_attribution(order: Any, *, host: str | None = None) -> str | None:
     """Rebuild ``fbc`` from the order's stored attribution envelope.
 
     Uses the LANDING timestamp, not "now" and not the payment time — Meta
     wants the moment the ``fbclid`` was first observed.
+
+    ``host`` drives the subdomain index. It was not passed before, so this
+    always emitted ``fb.1.…`` while ``/track`` — which does pass one — emitted
+    ``fb.2.…`` for the same click on any multi-label domain (``*.com.eg`` is
+    the ordinary shape of an Egyptian business domain). Meta then held two
+    different click ids for one click, and the one attached to the CONVERSION
+    was the malformed one.
     """
     from src.infrastructure.external_services.meta.click_id import synthesize_fbc
 
@@ -130,7 +156,7 @@ def _fbc_from_attribution(order: Any) -> str | None:
     last_touch = attribution.get("last_touch") or attribution.get("first_touch") or {}
     if not isinstance(last_touch, dict):
         return None
-    return synthesize_fbc(last_touch.get("fbclid"), last_touch.get("ts"))
+    return synthesize_fbc(last_touch.get("fbclid"), last_touch.get("ts"), host=host)
 
 
 async def fill_identity_from_customer(
@@ -556,7 +582,7 @@ async def enqueue_meta_capi_event_for_order(
         )
 
     paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)
-    user_data = _build_user_data_from_order(order)
+    user_data = _build_user_data_from_order(order, host=_store_host(store))
     await fill_identity_from_customer(db, user_data, order)
     custom_data = _build_custom_data_from_order(
         order, await resolve_catalog_ids(db, order)
@@ -658,7 +684,7 @@ async def enqueue_meta_capi_refund(db: AsyncSession, order: Any) -> None:
     custom_data["value"] = -abs(custom_data.get("value") or 0.0)
     custom_data["refund_for_order_id"] = str(order.id)
 
-    user_data = _build_user_data_from_order(order)
+    user_data = _build_user_data_from_order(order, host=_store_host(store))
     await fill_identity_from_customer(db, user_data, order)
     if not _guard_conversion_payload(custom_data, "Refund", order):
         return

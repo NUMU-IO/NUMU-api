@@ -1554,15 +1554,26 @@ async def _maybe_enqueue_tiktok_capi(
     event_time = body.event_time or datetime.now(UTC)
     page_url = body.page_url
 
-    # Compose user_data from request signals + explicit body.user_data.
-    user_data = dict(body.user_data or {})
-    if "ttclid" not in user_data and (body.ttclid or landing_ttclid):
+    # Compose user_data. SERVER-DERIVED SIGNALS WIN — identical discipline to
+    # the Meta path above, which this branch was missing entirely.
+    #
+    # `body.user_data` was merged verbatim and every server-derived value only
+    # filled a blank, so any script running on the storefront origin — BYOT
+    # theme bundles execute there — could set `user_data.ip`, `user_agent`,
+    # `external_id` or `ttclid` and replace the exact match keys that carry
+    # anonymous traffic. A real value that is uniformly wrong is worse than no
+    # value: it does not merely fail to match, it actively mis-clusters
+    # visitors. The allowlist admits the eight PII fields a page may
+    # legitimately contribute and drops everything else.
+    user_data = _client_supplied_user_data(body.user_data)
+    if body.ttclid or landing_ttclid:
         user_data["ttclid"] = body.ttclid or landing_ttclid
-    if "ttp" not in user_data and body.ttp:
+    if body.ttp:
         user_data["ttp"] = body.ttp
-    if "ip" not in user_data and ip:
+    # Unconditional: the request's own IP/UA are ground truth.
+    if ip:
         user_data["ip"] = ip
-    if "user_agent" not in user_data and user_agent:
+    if user_agent:
         user_data["user_agent"] = user_agent
     _apply_pseudonymous_external_id(user_data, body.fingerprint)
 
