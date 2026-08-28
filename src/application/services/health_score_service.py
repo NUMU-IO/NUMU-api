@@ -303,24 +303,24 @@ async def calculate_store_health_score(
 
     # === 1. Delivery Success Rate ===
     # Shipments that were delivered / total shipments (excluding cancelled before pickup)
+    # ShipmentModel.status is a free-text String(30) written by carrier
+    # adapters, not an enum column, so nothing enforces the lowercase these
+    # comparisons assume. One adapter emitting "DELIVERED" would silently
+    # score every one of its shipments as a failed delivery — 30% of the
+    # grade, wrong, with no error anywhere. Compare case-insensitively.
+    ship_status = func.lower(ShipmentModel.status)
     shipment_stats = await session.execute(
         select(
             func.count().label("total"),
-            func.sum(case((ShipmentModel.status == "delivered", 1), else_=0)).label(
-                "delivered"
-            ),
-            func.sum(case((ShipmentModel.status == "failed", 1), else_=0)).label(
-                "failed"
-            ),
-            func.sum(case((ShipmentModel.status == "returned", 1), else_=0)).label(
-                "returned"
-            ),
+            func.sum(case((ship_status == "delivered", 1), else_=0)).label("delivered"),
+            func.sum(case((ship_status == "failed", 1), else_=0)).label("failed"),
+            func.sum(case((ship_status == "returned", 1), else_=0)).label("returned"),
         ).where(
             and_(
                 ShipmentModel.store_id == store_id,
                 ShipmentModel.created_at >= period_start,
-                ShipmentModel.status != "cancelled",
-                ShipmentModel.status != "pending",
+                ship_status != "cancelled",
+                ship_status != "pending",
             )
         )
     )
@@ -414,12 +414,33 @@ async def calculate_store_health_score(
     #       merchants without a connected carrier).
     # Denominator = delivered orders + returned orders (i.e. all orders
     # that actually shipped to a customer in the period).
+    # Counted as DISTINCT ORDERS joined to the same cohort as the
+    # denominator, which closes three separate double-counts that between
+    # them could push this rate above 1.0 — where `_rate_to_score` saturates
+    # and hands the store the worst possible return score, permanently, for
+    # 15% of its grade:
+    #
+    #   1. An order both refunded AND marked RETURNED was counted twice: once
+    #      here and once in `returned_orders`. Excluded by the status filter.
+    #   2. Two partial refunds against one order counted as two returns.
+    #      Fixed by count(DISTINCT order_id).
+    #   3. The window was on the REFUND's created_at while the denominator
+    #      windows on the ORDER's, so a refund settled this month against an
+    #      order from last quarter scored against a cohort it was not part
+    #      of. Now both sides window on the order.
     refund_status_text = cast(RefundModel.status, SAString)
     refund_stats = await session.execute(
-        select(func.count().label("total_refunds")).where(
+        select(func.count(func.distinct(RefundModel.order_id)))
+        .select_from(RefundModel)
+        .join(OrderModel, OrderModel.id == RefundModel.order_id)
+        .where(
             and_(
                 RefundModel.store_id == store_id,
-                RefundModel.created_at >= period_start,
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= period_start,
+                # Already counted by `returned_orders`; adding it again is
+                # double-counting the same physical return.
+                status_text.notin_(["RETURNED", "returned"]),
                 or_(
                     refund_status_text.in_(["APPROVED", "COMPLETED", "PROCESSING"]),
                     refund_status_text.in_(["approved", "completed", "processing"]),
@@ -431,8 +452,12 @@ async def calculate_store_health_score(
 
     return_signals = total_refunds + returned_orders
     return_denominator = completed_orders + returned_orders
+    # Clamped as a backstop, not as the fix: the numerator is now a subset of
+    # the same population as the denominator, so this should never bind. If it
+    # ever does, a rate over 1.0 silently becomes the worst grade, which is
+    # exactly the failure that is hard to notice from the outside.
     return_rate = (
-        (return_signals / return_denominator) if return_denominator > 0 else 0.0
+        min(1.0, return_signals / return_denominator) if return_denominator > 0 else 0.0
     )
 
     # === 5. Average Response Time ===

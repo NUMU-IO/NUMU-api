@@ -98,5 +98,35 @@ async def _calculate_all_scores() -> dict:
             except Exception as e:
                 logger.warning(f"Health score failed for store {store_id}: {e}")
                 stats["errors"] += 1
+                # Every store shares this session. Postgres aborts the whole
+                # transaction on a failed statement, so without this rollback
+                # the FIRST store to error poisoned the session and every
+                # store after it failed with "current transaction is aborted"
+                # — one bad store silently took out the entire nightly run,
+                # and the task still returned successfully.
+                try:
+                    await session.rollback()
+                except Exception:  # noqa: BLE001
+                    logger.exception("health_score_rollback_failed")
+
+    # A run where nothing succeeded is a failed run, not a quiet one. This
+    # returned {"processed": 400, "updated": 0, "errors": 400} at log level
+    # info and looked like a completed job.
+    # Counts go in the message, not in extra={}: the structured-logging
+    # processor drops extra fields, so an alert carrying them there arrives
+    # with no numbers in it.
+    if stats["processed"] and not stats["updated"]:
+        logger.error(
+            "health_score_run_produced_nothing: processed=%s errors=%s",
+            stats["processed"],
+            stats["errors"],
+        )
+    elif stats["errors"]:
+        logger.warning(
+            "health_score_run_partial: processed=%s updated=%s errors=%s",
+            stats["processed"],
+            stats["updated"],
+            stats["errors"],
+        )
 
     return stats
