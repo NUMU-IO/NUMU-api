@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_current_user_id
@@ -148,52 +148,86 @@ async def get_my_referrals(
     )
     refs = (await db.execute(refs_q)).scalars().all()
 
-    total_earned = sum(r.total_commission_earned_cents for r in refs)
     total_count = len(refs)
     tier = _tier(total_count)
+    ref_ids = [r.id for r in refs]
 
-    # Build per-referral details
+    # Referred tenant names, in one query rather than one per referral.
+    names: dict[UUID, TenantModel] = {}
+    if refs:
+        referred_rows = (
+            await db.execute(
+                select(TenantModel).where(
+                    TenantModel.id.in_([r.referred_tenant_id for r in refs])
+                )
+            )
+        ).scalars()
+        names = {t.id: t for t in referred_rows}
+
+    # Per-referral commission counts and sums, also in one query. This used to
+    # be two round trips inside the loop, so a merchant with 40 referrals paid
+    # 80 sequential queries to open the page.
+    #
+    # Everything below is derived from the commission ledger, including the
+    # totals. The summary previously took its total from the denormalised
+    # `total_commission_earned_cents` column on the referral row while the
+    # table rows summed the ledger: any drift between the two showed as a
+    # header that disagreed with the rows beneath it, and — because pending
+    # was computed as (denormalised total − ledger confirmed) — could render
+    # a NEGATIVE amount pending.
+    per_ref: dict[UUID, tuple[int, int, int]] = {}
+    if ref_ids:
+        agg_rows = await db.execute(
+            select(
+                ReferralCommissionModel.referral_id,
+                func.count(ReferralCommissionModel.id),
+                func.coalesce(func.sum(ReferralCommissionModel.commission_cents), 0),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                ReferralCommissionModel.status == "confirmed",
+                                ReferralCommissionModel.commission_cents,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+            )
+            .where(ReferralCommissionModel.referral_id.in_(ref_ids))
+            .group_by(ReferralCommissionModel.referral_id)
+        )
+        per_ref = {row[0]: (row[1], row[2], row[3]) for row in agg_rows.all()}
+
     referral_list = []
     for ref in refs:
-        # Get referred tenant name
-        referred = (
-            await db.execute(
-                select(TenantModel).where(TenantModel.id == ref.referred_tenant_id)
-            )
-        ).scalar_one_or_none()
-
-        # Count commissions
-        comm_q = select(
-            func.count(ReferralCommissionModel.id),
-            func.coalesce(func.sum(ReferralCommissionModel.commission_cents), 0),
-        ).where(ReferralCommissionModel.referral_id == ref.id)
-        comm_row = (await db.execute(comm_q)).one()
-
+        orders, earned, _confirmed = per_ref.get(ref.id, (0, 0, 0))
+        referred = names.get(ref.referred_tenant_id)
         referral_list.append(
             ReferredMerchant(
                 tenant_name=referred.name if referred else "Unknown",
                 subdomain=referred.subdomain if referred else "",
-                referral_date=str(ref.created_at),
-                orders=comm_row[0],
-                commission_earned_cents=comm_row[1],
+                # isoformat, not str(): str() renders "2026-08-27 14:23:23+00:00"
+                # with a space, which `new Date()` rejects outright on Safari —
+                # the hub then printed "Invalid Date" in the referral table.
+                referral_date=ref.created_at.isoformat(),
+                orders=orders,
+                commission_earned_cents=earned,
             )
         )
 
-    # Split confirmed vs pending
-    confirmed_q = select(
-        func.coalesce(func.sum(ReferralCommissionModel.commission_cents), 0)
-    ).where(
-        ReferralCommissionModel.referral_id.in_([r.id for r in refs]),
-        ReferralCommissionModel.status == "confirmed",
-    )
-    confirmed = (await db.execute(confirmed_q)).scalar() if refs else 0
+    total_earned = sum(v[1] for v in per_ref.values())
+    confirmed = sum(v[2] for v in per_ref.values())
 
     return SuccessResponse(
         data=MyReferralsResponse(
             summary=ReferralSummary(
                 total_earned_cents=total_earned,
-                confirmed_cents=confirmed or 0,
-                pending_cents=total_earned - (confirmed or 0),
+                confirmed_cents=confirmed,
+                # Both sides now come from the same ledger, so this cannot go
+                # negative; max() is a belt-and-braces guard, not a fudge.
+                pending_cents=max(0, total_earned - confirmed),
                 total_referrals=total_count,
                 tier=tier,
             ),
