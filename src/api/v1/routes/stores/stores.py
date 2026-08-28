@@ -60,9 +60,33 @@ from src.infrastructure.tenancy.service import TenantService
 router = APIRouter()
 
 
-def _build_store_response(store) -> StoreResponse:
+async def _founder_cohorts_for(db, stores) -> dict[str, str | None]:
+    """Map store id -> its tenant's founder cohort, in one query.
+
+    Batched rather than per-store: the list endpoint renders the store
+    switcher, and a lookup per row is how an N+1 gets into a hot path.
+    """
+    from sqlalchemy import select as _select
+
+    from src.infrastructure.database.models.public.tenant import TenantModel
+
+    tenant_ids = {str(t) for t in (getattr(s, "tenant_id", None) for s in stores) if t}
+    if not tenant_ids:
+        return {}
+
+    rows = await db.execute(
+        _select(TenantModel.id, TenantModel.founder_cohort).where(
+            TenantModel.id.in_(tenant_ids)
+        )
+    )
+    by_tenant = {str(tid): fc for tid, fc in rows.all()}
+    return {str(s.id): by_tenant.get(str(getattr(s, "tenant_id", ""))) for s in stores}
+
+
+def _build_store_response(store, founder_cohort: str | None = None) -> StoreResponse:
     """Build StoreResponse from store DTO."""
     return StoreResponse(
+        founder_cohort=founder_cohort,
         id=str(store.id),
         owner_id=str(store.owner_id),
         name=store.name,
@@ -420,6 +444,7 @@ async def _seed_default_theme_if_configured(
 async def list_stores(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
@@ -438,7 +463,11 @@ async def list_stores(
         page_size=limit,
     )
 
-    stores = [_build_store_response(store) for store in result.items]
+    cohorts = await _founder_cohorts_for(db, result.items)
+    stores = [
+        _build_store_response(store, cohorts.get(str(store.id)))
+        for store in result.items
+    ]
 
     return SuccessResponse(
         data=PaginatedListResponse(
