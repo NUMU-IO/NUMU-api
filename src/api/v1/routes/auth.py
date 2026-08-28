@@ -867,6 +867,7 @@ async def get_current_user(
                 days_remaining=tenant.days_remaining,
                 demo_email=tenant.demo_email,
                 feature_flags={**(tenant.feature_flags or {}), **platform_flags},
+                founder_cohort=tenant.founder_cohort,
             )
     except Exception:
         pass  # Non-critical — old tenants without lifecycle columns still work

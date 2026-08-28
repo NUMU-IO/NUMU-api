@@ -161,6 +161,10 @@ class TenantInfoResponse(BaseModel):
     # `/marketing/promotions` nav and offers-v2 surfaces during phased
     # rollout. Empty `{}` means no flags enabled (legacy default).
     feature_flags: dict[str, bool] = {}
+    # Founder-merchant cohort year ("2025"), or null. Rendered by the hub as
+    # a badge beside the store name. A year, never a rank — see the column
+    # comment on TenantModel.founder_cohort.
+    founder_cohort: str | None = None
 
 
 # Keep TokenResponse for internal use / backward compat with use-case DTOs

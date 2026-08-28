@@ -80,6 +80,16 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
     subdomain: Mapped[str] = mapped_column(
         String(63), unique=True, index=True, nullable=False
     )
+    # Founder-merchant cohort — the YEAR this merchant joined, e.g. "2025".
+    # Null for everyone else.
+    #
+    # Deliberately a cohort and not a rank. A rank tells merchant #42 that
+    # 41 came before them, which publishes the platform's size to every
+    # merchant and every shopper who sees the badge. A year carries the same
+    # "I was here early" meaning and reveals nothing about volume — and
+    # because it is stored per merchant rather than derived from a counter,
+    # there is no count in the schema to leak in the first place.
+    founder_cohort: Mapped[str | None] = mapped_column(String(4), nullable=True)
     owner_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("public.users.id", ondelete="SET NULL"),
