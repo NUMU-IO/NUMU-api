@@ -215,6 +215,20 @@ class StoreResponse(BaseModel):
     )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
+    # Founder-merchant cohort of THIS STORE's tenant.
+    #
+    # Also on /auth/me, but that one resolves the tenant differently: it
+    # prefers the current-store tenant only when that tenant's owner_id
+    # matches the caller, and otherwise falls back to *any* tenant the user
+    # owns (newest non-demo first). For a merchant with more than one store
+    # — or a store whose tenant has a null owner_id — that returns a tenant
+    # unrelated to the store on screen, so the badge either vanished or
+    # showed against the wrong store. Reading it off the store makes it
+    # follow the store switcher, which is what a per-store badge has to do.
+    founder_cohort: str | None = Field(
+        default=None,
+        description="Founder cohort year of this store's tenant, or null",
+    )
 
 
 class CheckSubdomainRequest(BaseModel):
