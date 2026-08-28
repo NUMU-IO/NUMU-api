@@ -649,6 +649,27 @@ class Settings(BaseSettings):
     # assign it 503 cleanly via the DI factory.
     google_vision_api_key: str | None = None
 
+    # Google Maps JS key referrer automation.
+    #
+    # The storefront's checkout location picker loads the Maps JS API with a
+    # browser key restricted by HTTP referrer. That allowlist has to name every
+    # host the checkout is served from — including each merchant's own domain.
+    # Miss one and Maps answers RefererNotAllowedMapError, the picker degrades
+    # to manual address entry, and nobody notices because checkout still works.
+    #
+    # With these set, connecting a custom domain appends it to the key's
+    # allowlist automatically. Unset → the automation is inert and the
+    # allowlist stays a manual console job (see is_enabled on the service).
+    #
+    #   google_maps_key_project      GCP project id or number owning the key
+    #   google_maps_key_id           the API Keys *resource* id (a uuid), NOT
+    #                                the AIza… key string the browser sends
+    #   google_maps_key_credentials  service-account JSON, inline. Needs
+    #                                apikeys.keys.get + apikeys.keys.update.
+    google_maps_key_project: str | None = None
+    google_maps_key_id: str | None = None
+    google_maps_key_credentials: str | None = None
+
     # HuggingFace Hub access token. Used by the HF-backed OCR
     # providers (DeepSeek / GLM Spaces) to bump our ZeroGPU queue
     # priority. Anonymous calls get rejected after 60s on busy
