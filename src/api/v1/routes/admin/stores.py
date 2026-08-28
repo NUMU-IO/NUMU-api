@@ -9,7 +9,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,6 +68,8 @@ class AdminStoreListItem(BaseModel):
     plan: str | None = None
     lifecycle_state: str | None = None
     is_internal: bool = False
+    # Founder-merchant cohort year ("2025"), or null. Lives on the tenant.
+    founder_cohort: str | None = None
     logo_url: str | None = None
     total_revenue: int = 0
     total_orders: int = 0
@@ -119,6 +121,7 @@ def _store_to_list_item(
         plan=tenant.plan if tenant else None,
         lifecycle_state=tenant.lifecycle_state if tenant else None,
         is_internal=tenant.is_internal if tenant else False,
+        founder_cohort=tenant.founder_cohort if tenant else None,
         logo_url=store.logo_url,
         total_revenue=total_revenue,
         total_orders=total_orders,
@@ -607,6 +610,39 @@ class ToggleInternalRequest(BaseModel):
     is_internal: bool
 
 
+class SetFounderCohortRequest(BaseModel):
+    """Grant or revoke founder-merchant status.
+
+    `founder_cohort` is the merchant's JOIN YEAR, never a rank — a rank
+    would tell merchant #42 that 41 came before them, publishing the
+    platform's size to every merchant and every shopper who sees the badge.
+    `None` revokes.
+    """
+
+    founder_cohort: str | None = Field(
+        None,
+        max_length=4,
+        description='Cohort year, e.g. "2025". Null revokes the badge.',
+    )
+
+    @field_validator("founder_cohort")
+    @classmethod
+    def _reject_a_rank(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            # "" from an empty form field means revoke, not a blank cohort.
+            return None
+        if not v.isdigit() or len(v) != 4:
+            raise ValueError(
+                "founder_cohort must be a 4-digit year, e.g. 2025. "
+                "It is a cohort, not a position — a rank would leak how "
+                "many merchants are on the platform."
+            )
+        return v
+
+
 @router.patch(
     "/{store_id}/internal",
     response_model=SuccessResponse[dict],
@@ -649,6 +685,66 @@ async def toggle_internal(
             "is_internal": tenant.is_internal,
         },
         message=f"Tenant marked as {'internal' if tenant.is_internal else 'real'}",
+    )
+
+
+@router.patch(
+    "/{store_id}/founder",
+    response_model=SuccessResponse[dict],
+    summary="Grant or revoke founder-merchant status (admin)",
+    operation_id="admin_set_founder_cohort",
+)
+async def set_founder_cohort(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    request: SetFounderCohortRequest,
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Mark a merchant as a founder, or clear the badge.
+
+    Set on the TENANT, not the store: the founder is the merchant, so a
+    merchant with three stores is one founder and the badge follows all
+    three. Granting it from any one of their stores is therefore correct
+    and intentional — the response says which tenant was changed so the
+    admin UI can say so too.
+    """
+    store_repo = StoreRepository(db)
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
+        )
+
+    tenant_repo = TenantRepository(db)
+    tenant = await tenant_repo.get_by_id(store.tenant_id)
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found"
+        )
+
+    previous = tenant.founder_cohort
+    tenant.founder_cohort = request.founder_cohort
+    await tenant_repo.update(tenant)
+
+    logger.info(
+        "admin_founder_cohort_set: tenant=%s from=%s to=%s by=%s",
+        tenant.id,
+        previous,
+        tenant.founder_cohort,
+        _admin_id,
+    )
+
+    return SuccessResponse(
+        data={
+            "store_id": str(store.id),
+            "tenant_id": str(tenant.id),
+            "founder_cohort": tenant.founder_cohort,
+        },
+        message=(
+            f"Founder cohort set to {tenant.founder_cohort}"
+            if tenant.founder_cohort
+            else "Founder badge removed"
+        ),
     )
 
 
