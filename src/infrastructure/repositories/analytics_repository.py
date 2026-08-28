@@ -2153,10 +2153,26 @@ class AnalyticsRepository:
         revenue) vs. LTV (lifetime revenue of a cohort).
 
         Missing first-touch data falls into a ``"direct"`` bucket so
-        organic / direct visitors aren't lost from the rollup. Customers
-        whose every order was cancelled / refunded contribute zero
-        revenue but still count toward ``customer_count`` (the cohort
-        size doesn't depend on order outcomes).
+        organic / direct visitors aren't lost from the rollup — which
+        covers BOTH a first-touch row carrying no ``utm_source`` (the
+        coalesce on ``channel_expr``) and a customer with no first-touch
+        row at all (the acquisition coalesce below). The predicate used
+        to require ``first_touch_at IS NOT NULL``, which dropped the
+        second group entirely and made this paragraph a lie: a store
+        whose customers mostly arrive untagged — walk-ins keyed into the
+        hub, COD phone orders, anyone acquired before attribution
+        tracking was switched on — saw a handful of customers on a page
+        titled "lifetime value", with nothing to say the rest existed.
+
+        Customers whose every order was cancelled / refunded contribute
+        zero revenue but still count toward ``customer_count`` (the
+        cohort size doesn't depend on order outcomes).
+
+        NOTE the window is on ACQUISITION, not on orders: a customer
+        first seen before ``date_from`` is outside the cohort however
+        recently they ordered. That is what makes this LTV rather than
+        period revenue, and it is why this page legitimately reports
+        fewer customers than the store's order count for the period.
 
         Returns per-channel rows; the caller derives ``avg_order_value``,
         ``orders_per_customer``, and ``ltv`` at the route layer where
@@ -2167,6 +2183,13 @@ class AnalyticsRepository:
                 f"group_by={group_by!r}; expected one of {list(self._LTV_GROUP_FIELDS)}"
             )
         json_field = self._LTV_GROUP_FIELDS[group_by]
+
+        # When a customer has no first-touch row, fall back to when the
+        # customer record was created. Both answer "when did we first see
+        # them"; only one of the two is populated for an untagged customer.
+        acquired_at = func.coalesce(
+            CustomerModel.first_touch_at, CustomerModel.created_at
+        )
 
         channel_expr = func.coalesce(
             func.nullif(
@@ -2210,9 +2233,8 @@ class AnalyticsRepository:
             .outerjoin(OrderModel, join_clause)
             .where(
                 CustomerModel.store_id == store_id,
-                CustomerModel.first_touch_at.isnot(None),
-                CustomerModel.first_touch_at >= date_from,
-                CustomerModel.first_touch_at <= date_to,
+                acquired_at >= date_from,
+                acquired_at <= date_to,
             )
             .group_by(channel_expr)
             .order_by(func.coalesce(func.sum(OrderModel.total), 0).desc())
