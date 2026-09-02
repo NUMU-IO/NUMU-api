@@ -142,13 +142,52 @@ def _get_default_payment_settings() -> dict:
     }
 
 
+# Carriers that live in store settings but have no registry entry.
+#
+# ``manual`` is a merchant-managed courier with no API — P2 turns it into
+# a real Tier 3 provider with carrier profiles. It defaults to enabled,
+# so **every existing store already has it on**; do not change that
+# default without a migration.
+#
+# ``aramex`` has a settings toggle and a hub card but no provider behind
+# it. Kept so existing stores' stored values survive; see decision D2
+# (likely answer: Aramex arrives via an aggregator, never as a native
+# adapter). Do not add it to the registry until it has a provider.
+_NON_REGISTRY_CARRIERS: dict[str, dict] = {
+    "aramex": {"enabled": False, "is_configured": False, "last_configured": None},
+    "manual": {"enabled": True, "is_configured": True, "last_configured": None},
+}
+
+
+def shipping_carrier_keys() -> list[str]:
+    """Every carrier slug that can appear in a store's shipping settings.
+
+    Registry carriers plus the non-registry ones above. Before this, four
+    surfaces in this file hardcoded ``("aramex","bosta","mylerz","manual")``
+    and **all four omitted J&T** — so a merchant could create J&T
+    shipments through the shipments route but never enable J&T here.
+    """
+    from src.application.services.carrier_registry import carrier_slugs
+
+    return [*carrier_slugs(), *_NON_REGISTRY_CARRIERS]
+
+
 def _get_default_shipping_settings() -> dict:
-    """Get default shipping settings."""
+    """Get default shipping settings.
+
+    Carrier entries are generated from the registry, so adding a carrier
+    there makes it configurable here with no change to this file.
+    """
+    from src.application.services.carrier_registry import carrier_slugs
+
+    carriers: dict = {
+        slug: {"enabled": False, "is_configured": False, "last_configured": None}
+        for slug in carrier_slugs()
+    }
+    carriers.update({k: dict(v) for k, v in _NON_REGISTRY_CARRIERS.items()})
+
     return {
-        "aramex": {"enabled": False, "is_configured": False, "last_configured": None},
-        "bosta": {"enabled": False, "is_configured": False, "last_configured": None},
-        "mylerz": {"enabled": False, "is_configured": False, "last_configured": None},
-        "manual": {"enabled": True, "is_configured": True, "last_configured": None},
+        **carriers,
         "zones": [
             {
                 "id": str(uuid.uuid4()),
@@ -282,11 +321,26 @@ def _build_shipping_response(settings: dict) -> ShippingSettingsResponse:
 
     zones = [ShippingZone(**z) for z in merged.get("zones", defaults["zones"])]
 
+    def _status(slug: str) -> ShippingCarrierStatus:
+        raw = merged.get(slug) or defaults.get(slug) or {}
+        return ShippingCarrierStatus(**{
+            "enabled": bool(raw.get("enabled", False)),
+            "is_configured": bool(raw.get("is_configured", False)),
+            "last_configured": raw.get("last_configured"),
+        })
+
+    # `carriers` is the forward-looking shape: every carrier keyed by
+    # slug, generated from the registry, so a new carrier appears without
+    # touching this file. The four named fields below are kept for the
+    # hub's current reads and go away once P3 consumes `carriers`.
+    carriers = {slug: _status(slug) for slug in shipping_carrier_keys()}
+
     return ShippingSettingsResponse(
-        aramex=ShippingCarrierStatus(**merged.get("aramex", defaults["aramex"])),
-        bosta=ShippingCarrierStatus(**merged.get("bosta", defaults["bosta"])),
-        mylerz=ShippingCarrierStatus(**merged.get("mylerz", defaults["mylerz"])),
-        manual=ShippingCarrierStatus(**merged.get("manual", defaults["manual"])),
+        carriers=carriers,
+        aramex=carriers["aramex"],
+        bosta=carriers["bosta"],
+        mylerz=carriers["mylerz"],
+        manual=carriers["manual"],
         zones=zones,
         free_shipping_threshold=merged.get("free_shipping_threshold", 500),
         restrict_to_zones=bool(merged.get("restrict_to_zones", False)),
@@ -1600,30 +1654,51 @@ async def update_shipping_settings(
     settings = store.settings or {}
     shipping_settings = settings.get("shipping", _get_default_shipping_settings())
 
-    # Update only provided fields
-    if request.aramex_enabled is not None:
-        if not shipping_settings["aramex"]["is_configured"]:
+    # Collect requested toggles from both shapes: the new carrier-keyed
+    # `carriers` map, and the legacy per-carrier fields the hub still
+    # sends. Legacy first so an explicit `carriers` entry wins.
+    requested: dict[str, bool] = {}
+    for slug in shipping_carrier_keys():
+        legacy = getattr(request, f"{slug}_enabled", None)
+        if legacy is not None:
+            requested[slug] = bool(legacy)
+    for slug, value in (request.carriers or {}).items():
+        if slug not in shipping_carrier_keys():
             raise HTTPException(
                 status_code=400,
-                detail="Aramex is not configured. Contact administrator.",
+                detail={
+                    "code": "UNKNOWN_CARRIER",
+                    "message_en": f"Unknown carrier '{slug}'.",
+                    "message_ar": f"شركة شحن غير معروفة '{slug}'.",
+                    "supported_carriers": shipping_carrier_keys(),
+                },
             )
-        shipping_settings["aramex"]["enabled"] = request.aramex_enabled
-    if request.bosta_enabled is not None:
-        if not shipping_settings["bosta"]["is_configured"]:
+        requested[slug] = bool(value)
+
+    from src.application.services.carrier_resolver import carrier_name
+
+    for slug, enabled in requested.items():
+        entry = shipping_settings.setdefault(
+            slug, {"enabled": False, "is_configured": False, "last_configured": None}
+        )
+        # `manual` needs no credentials, so it has no configured gate —
+        # preserved from the original behaviour.
+        if enabled and slug != "manual" and not entry.get("is_configured"):
             raise HTTPException(
                 status_code=400,
-                detail="Bosta is not configured. Contact administrator.",
+                detail={
+                    "code": "CARRIER_NOT_CONFIGURED",
+                    "message_en": (
+                        f"{carrier_name(slug, 'en')} is not configured. "
+                        f"Add its credentials first."
+                    ),
+                    "message_ar": (
+                        f"{carrier_name(slug, 'ar')} مش متظبط. ضيف بيانات الربط الأول."
+                    ),
+                    "carrier": slug,
+                },
             )
-        shipping_settings["bosta"]["enabled"] = request.bosta_enabled
-    if request.mylerz_enabled is not None:
-        if not shipping_settings["mylerz"]["is_configured"]:
-            raise HTTPException(
-                status_code=400,
-                detail="MylerZ is not configured. Contact administrator.",
-            )
-        shipping_settings["mylerz"]["enabled"] = request.mylerz_enabled
-    if request.manual_enabled is not None:
-        shipping_settings["manual"]["enabled"] = request.manual_enabled
+        entry["enabled"] = enabled
     if request.free_shipping_threshold is not None:
         shipping_settings["free_shipping_threshold"] = request.free_shipping_threshold
     if request.restrict_to_zones is not None:
@@ -1637,7 +1712,7 @@ async def update_shipping_settings(
     # Auto-complete add_shipping onboarding step when any carrier is enabled
     any_enabled = any(
         shipping_settings.get(c, {}).get("enabled", False)
-        for c in ("aramex", "bosta", "mylerz", "manual")
+        for c in shipping_carrier_keys()
     )
     if any_enabled:
         await try_complete_onboarding_step(

@@ -479,6 +479,14 @@ class ShippingZone(BaseModel):
 class ShippingSettingsResponse(BaseModel):
     """Shipping settings response."""
 
+    # Every carrier keyed by slug, generated from the carrier registry.
+    # This is the shape to read: a new carrier appears here automatically,
+    # and it is the only field that includes J&T, which the four named
+    # fields below have always omitted.
+    carriers: dict[str, ShippingCarrierStatus] = {}
+
+    # Legacy per-carrier fields, kept so the current hub keeps working.
+    # Remove once P3 reads `carriers`.
     aramex: ShippingCarrierStatus
     bosta: ShippingCarrierStatus
     mylerz: ShippingCarrierStatus
@@ -493,8 +501,17 @@ class ShippingSettingsResponse(BaseModel):
 
 
 class UpdateShippingSettingsRequest(BaseModel):
-    """Update shipping settings."""
+    """Update shipping settings.
 
+    Send toggles via ``carriers`` — it works for every registered carrier,
+    including J&T, which the legacy per-carrier fields below never
+    covered. Those fields still work and are applied first, so an
+    explicit ``carriers`` entry wins over a conflicting legacy one.
+    """
+
+    carriers: dict[str, bool] | None = None
+
+    # Legacy per-carrier toggles. Remove once P3 sends `carriers`.
     aramex_enabled: bool | None = None
     bosta_enabled: bool | None = None
     mylerz_enabled: bool | None = None

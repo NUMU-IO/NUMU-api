@@ -7,7 +7,6 @@ tracking, and rate calculation.
 API Documentation: https://api.mylerz.com/
 """
 
-import base64
 import hashlib
 import hmac
 import json
@@ -237,24 +236,15 @@ async def get_mylerz_service_for_store(
 
     Falls back to global env vars if no per-store credentials are configured.
     """
-    if store_settings:
-        shipping = (store_settings or {}).get("shipping", {}).get("mylerz", {})
-        encrypted_creds = shipping.get("encrypted_credentials")
-        key_id = shipping.get("encryption_key_id")
-        if encrypted_creds and key_id:
-            from src.infrastructure.external_services.secrets.secrets_manager import (
-                get_secrets_manager,
-            )
+    from src.application.services.carrier_credentials import load_credentials
 
-            secrets_mgr = get_secrets_manager()
-            cred_data = await secrets_mgr.decrypt(
-                base64.b64decode(encrypted_creds), key_id
-            )
-            return MylerzShippingService(
-                api_key=cred_data.get("api_key"),
-                merchant_id=cred_data.get("merchant_id"),
-                webhook_secret=cred_data.get("webhook_secret"),
-                base_url=settings.mylerz_base_url,
-            )
+    creds = await load_credentials(store_settings, "mylerz")
+    if creds:
+        return MylerzShippingService(
+            api_key=creds.get("api_key"),
+            merchant_id=creds.get("merchant_id"),
+            webhook_secret=creds.get("webhook_secret"),
+            base_url=settings.mylerz_base_url,
+        )
     # Fallback to global settings
     return MylerzShippingService()

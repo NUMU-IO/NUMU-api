@@ -7,7 +7,6 @@ for shipment creation, tracking, and rate calculation.
 API Documentation: https://developers.bosta.co/
 """
 
-import base64
 import hashlib
 import hmac
 import logging
@@ -900,27 +899,16 @@ class BostaShippingService(IShippingService):
 async def get_merchant_bosta_credentials(store_settings: dict) -> dict | None:
     """Decrypt and return a merchant's Bosta credentials from store settings.
 
+    Thin wrapper kept for existing callers; the shared implementation
+    lives in ``application/services/carrier_credentials.py`` so all
+    carriers read credentials the same way.
+
     Returns:
         dict with keys: api_key, business_id, webhook_secret, or None if not configured.
     """
-    bosta_settings = (store_settings or {}).get("shipping", {}).get("bosta", {})
+    from src.application.services.carrier_credentials import load_credentials
 
-    if not bosta_settings.get("encrypted_credentials"):
-        return None
-
-    from src.infrastructure.external_services.secrets.secrets_manager import (
-        get_secrets_manager,
-    )
-
-    secrets_manager = get_secrets_manager()
-    key_id = bosta_settings["encryption_key_id"]
-    encrypted = base64.b64decode(bosta_settings["encrypted_credentials"])
-
-    try:
-        return await secrets_manager.decrypt(encrypted, key_id)
-    except Exception as e:
-        logger.error(f"Failed to decrypt Bosta credentials: {e}")
-        return None
+    return await load_credentials(store_settings, "bosta")
 
 
 async def get_bosta_service_for_store(store_settings: dict) -> BostaShippingService:
