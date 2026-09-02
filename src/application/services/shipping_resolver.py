@@ -167,17 +167,31 @@ class ShippingResolver:
                     lowest_free_over_threshold = cfg.free_when_subtotal_gte_cents
 
         # Never dead-end the customer with "No shipping options available". If
-        # no configured rate applied to this destination — no zone covers it,
-        # the zone has no active rates, or every rate was filtered out (e.g. by
-        # COD policy) — fall back to a free "Standard Shipping" default so every
-        # address can always check out. The merchant overrides this the moment
-        # they configure a zone + rate that covers the destination.
+        # no configured rate applied to this destination — no zone covers it or
+        # the zone has no active rates — fall back to a free "Standard Shipping"
+        # default so every address can always check out. The merchant overrides
+        # this the moment they configure a zone + rate that covers the
+        # destination.
         #
-        # Exception: a merchant who turned on `restrict_to_zones` wants the
+        # Exception 1: a merchant who turned on `restrict_to_zones` wants the
         # opposite — ship ONLY where they've configured a zone — so we skip the
         # default and let the empty list surface "no options" for uncovered
         # destinations.
-        if not options and not restrict_to_zones:
+        #
+        # Exception 2 — COD policy is an explicit merchant decision, not a gap.
+        # The synthetic option hardcodes `cod_supported=True` and 0 cents, so
+        # firing it here handed a COD shopper FREE shipping WITH COD in a
+        # governorate where the merchant had switched COD off — overriding both
+        # their price and their policy. A zone that covers this destination and
+        # disables COD means "no COD here", and an empty list is the correct,
+        # honest answer. Only suppress when a zone actually covers the
+        # destination: with no covering zone the merchant has expressed no COD
+        # opinion, so the always-shippable default still applies.
+        cod_blocked_by_zone = (
+            cod_requested and zone is not None and not zone.cod_enabled
+        )
+
+        if not options and not restrict_to_zones and not cod_blocked_by_zone:
             options.append(self._default_ships_everywhere_option())
 
         progress: FreeShippingProgress | None = None

@@ -31,14 +31,16 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
     )
 
     try:
+        from src.application.services.carrier_resolver import (
+            DEFAULT_CARRIER,
+            service_for_carrier,
+            tracking_url_for,
+        )
         from src.core.interfaces.services.shipping_service import (
             Parcel,
             ShippingAddress,
         )
         from src.infrastructure.database.connection import AsyncSessionLocal
-        from src.infrastructure.external_services.bosta.shipping_service import (
-            get_bosta_service_for_store,
-        )
         from src.infrastructure.repositories.order_repository import OrderRepository
         from src.infrastructure.repositories.shipment_repository import (
             ShipmentRepository,
@@ -55,10 +57,14 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
                 log.warning("auto_shipment_skip", reason="store_not_found")
                 return
 
-            # Check Bosta is enabled with auto-create
+            # Auto-create uses the platform default carrier; check that
+            # carrier is enabled with auto-create. Bound here so the gate
+            # and the shipment below can never check different carriers.
+            # P1 replaces this with the store's configured default.
+            carrier = DEFAULT_CARRIER
             shipping_settings = (store.settings or {}).get("shipping", {})
-            bosta_settings = shipping_settings.get("bosta", {})
-            if not bosta_settings.get("enabled") or not bosta_settings.get(
+            carrier_settings = shipping_settings.get(carrier, {})
+            if not carrier_settings.get("enabled") or not carrier_settings.get(
                 "auto_create_shipment"
             ):
                 return  # Silent skip - auto-create not enabled
@@ -106,27 +112,29 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
             ):
                 cod_amount = order.total
 
-            bosta_service = await get_bosta_service_for_store(store.settings or {})
+            shipping_service = await service_for_carrier(carrier, store.settings or {})
 
             try:
-                label = await bosta_service.create_shipment(
+                label = await shipping_service.create_shipment(
                     from_address=from_address,
                     to_address=to_address,
                     parcel=parcel,
-                    rate_id="bosta_standard",
+                    rate_id=f"{carrier}_standard",
                     cod_amount=cod_amount if cod_amount > 0 else None,
                     order_reference=order.order_number,
                 )
             except Exception as e:
                 error_msg = str(e)
-                log.error("auto_shipment_bosta_failed", error=error_msg)
+                log.error(
+                    "auto_shipment_create_failed", carrier=carrier, error=error_msg
+                )
 
                 # Save failed shipment record so merchant can see it and retry
                 failed_shipment = Shipment(
                     store_id=store.id,
                     tenant_id=store.tenant_id,
                     order_id=order.id,
-                    carrier="bosta",
+                    carrier=carrier,
                     status=ShipmentStatus.FAILED,
                     shipping_method="standard",
                     shipping_cost=order.shipping_cost,
@@ -156,10 +164,10 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
                 store_id=store.id,
                 tenant_id=store.tenant_id,
                 order_id=order.id,
-                carrier="bosta",
+                carrier=carrier,
                 carrier_shipment_id=label.tracking_number,
                 tracking_number=label.tracking_number,
-                tracking_url=f"https://bosta.co/tracking-shipment/?tracking_number={label.tracking_number}",
+                tracking_url=tracking_url_for(carrier, label.tracking_number),
                 awb_url=label.label_url,
                 status=ShipmentStatus.CREATED,
                 shipping_method="standard",
@@ -178,8 +186,8 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
 
             # Update order with tracking info
             order.tracking_number = label.tracking_number
-            order.tracking_url = f"https://bosta.co/tracking-shipment/?tracking_number={label.tracking_number}"
-            order.shipping_method = "bosta_standard"
+            order.tracking_url = tracking_url_for(carrier, label.tracking_number)
+            order.shipping_method = f"{carrier}_standard"
             await order_repo.update(order)
 
             await session.commit()
