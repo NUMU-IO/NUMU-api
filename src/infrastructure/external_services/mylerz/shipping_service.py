@@ -23,6 +23,7 @@ from src.core.interfaces.services.shipping_service import (
     ShippingRate,
     TrackingEvent,
     TrackingInfo,
+    parse_carrier_timestamp,
 )
 
 logger = logging.getLogger(__name__)
@@ -191,7 +192,7 @@ class MylerzShippingService(IShippingService):
                         status=log_entry.get("Status", ""),
                         description=log_entry.get("Description", ""),
                         location=log_entry.get("Location"),
-                        timestamp=log_entry.get("Date", ""),
+                        timestamp=parse_carrier_timestamp(log_entry.get("Date", "")),
                     )
                 )
 
@@ -200,7 +201,11 @@ class MylerzShippingService(IShippingService):
                 tracking_number=tracking_number,
                 status=data.get("CurrentStatus", "unknown"),
                 events=events,
-                estimated_delivery=data.get("EstimatedDelivery"),
+                estimated_delivery=(
+                    parse_carrier_timestamp(data["EstimatedDelivery"])
+                    if data.get("EstimatedDelivery")
+                    else None
+                ),
             )
 
     async def validate_address(

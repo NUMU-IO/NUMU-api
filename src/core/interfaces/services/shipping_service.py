@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -49,6 +49,57 @@ class ShipmentLabel:
     tracking_number: str
     carrier: str
     service: str
+
+
+def parse_carrier_timestamp(value: object) -> datetime:
+    """Coerce a carrier's timestamp into a real ``datetime``.
+
+    ``TrackingEvent.timestamp`` is typed ``datetime`` but dataclasses do
+    not validate, so a provider passing the raw string straight from the
+    carrier looked fine until something called ``.isoformat()`` on it —
+    which the tracking route does, returning 500.
+
+    Mylerz and J&T both did exactly that. It stayed hidden while every
+    carrier action resolved to Bosta (which parses); the moment tracking
+    began dispatching on the shipment's real carrier, tracking a Mylerz
+    or J&T shipment started failing.
+
+    Carriers are inconsistent about format, so this accepts what they
+    actually send and falls back to "now" rather than raising — losing a
+    timestamp is much better than losing the whole tracking history to
+    one unparseable entry.
+    """
+    if isinstance(value, datetime):
+        return value
+
+    if isinstance(value, int | float):
+        # Some carriers send epoch seconds, some milliseconds.
+        seconds = value / 1000 if value > 1e11 else value
+        try:
+            return datetime.fromtimestamp(seconds, tz=UTC)
+        except (OSError, OverflowError, ValueError):
+            return datetime.now(UTC)
+
+    if isinstance(value, str) and value.strip():
+        raw = value.strip().replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d",
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y",
+        ):
+            try:
+                return datetime.strptime(raw, fmt).replace(tzinfo=UTC)
+            except ValueError:
+                continue
+
+    return datetime.now(UTC)
 
 
 @dataclass

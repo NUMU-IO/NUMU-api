@@ -23,6 +23,7 @@ from src.core.interfaces.services.shipping_service import (
     ShippingRate,
     TrackingEvent,
     TrackingInfo,
+    parse_carrier_timestamp,
 )
 
 logger = logging.getLogger(__name__)
@@ -233,7 +234,7 @@ class JTShippingService(IShippingService):
                         status=detail.get("scanType", ""),
                         description=detail.get("desc", ""),
                         location=detail.get("scanCity"),
-                        timestamp=detail.get("scanTime", ""),
+                        timestamp=parse_carrier_timestamp(detail.get("scanTime", "")),
                     )
                 )
 

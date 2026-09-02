@@ -24,6 +24,7 @@ from src.core.interfaces.services.shipping_service import (
     ShippingRate,
     TrackingEvent,
     TrackingInfo,
+    parse_carrier_timestamp,
 )
 from src.infrastructure.external_services.bosta.governorates import (
     ShippingZone,
@@ -356,11 +357,7 @@ class BostaShippingService(IShippingService):
                         status=log.get("state", ""),
                         description=log.get("description", ""),
                         location=log.get("location", None),
-                        timestamp=datetime.fromisoformat(
-                            log.get("timestamp", datetime.utcnow().isoformat()).replace(
-                                "Z", "+00:00"
-                            )
-                        ),
+                        timestamp=parse_carrier_timestamp(log.get("timestamp")),
                     )
                 )
 
