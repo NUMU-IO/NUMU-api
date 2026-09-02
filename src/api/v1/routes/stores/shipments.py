@@ -31,7 +31,6 @@ from src.application.services.carrier_resolver import (
     CarrierCapabilityError,
     UnknownCarrierError,
     capability,
-    carrier_catalog,
     service_for_carrier,
     service_for_shipment,
     tracking_url_for,
@@ -427,33 +426,10 @@ async def get_cod_summary(
 # guards this for every route in this router — add new literals here.
 
 
-@router.get(
-    "/carriers",
-    summary="List supported carriers and their capabilities",
-    operation_id="list_shipment_carriers",
-)
-async def list_shipment_carriers(
-    store: Annotated[Store, Depends(get_current_store)],
-):
-    """The carrier catalog: names, tier, capabilities, credential fields.
-
-    Registry-backed — adding a carrier to ``CARRIERS`` makes it appear
-    here, and in the hub, with no further code change. This is what lets
-    the hub render the carrier list and generate connect-forms instead of
-    hardcoding a panel per carrier (P3 consumes it).
-
-    Also lets the hub disable the actions a carrier can't do rather than
-    letting merchants find out by clicking and getting a 501: Mylerz and
-    J&T implement 4 of the 20 operations Bosta does. Before P0 those
-    clicks silently called Bosta instead of failing.
-
-    Answers from the registry alone — no credentials, no network — so it
-    works for a store that has connected nothing.
-
-    Read-only and store-scoped for auth; the catalog itself is global.
-    """
-    _ = store
-    return SuccessResponse(data=carrier_catalog(), message="Carriers retrieved")
+# NOTE: `GET /carriers` lives in `stores/carriers.py`, which is registered
+# ahead of this router and serves the catalog *plus* this store's
+# connection state. It was briefly defined here too; that duplicate was
+# dead code shadowed by the other router.
 
 
 @router.get(

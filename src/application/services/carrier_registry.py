@@ -97,6 +97,16 @@ class CarrierSpec:
     is_default: bool = False
     #: False hides it from the hub while keeping shipments resolvable.
     is_selectable: bool = True
+    #: A cheap, read-only provider method used to prove credentials
+    #: actually work. None when the carrier has no safe call to make —
+    #: then the UI must say "configured, not verified" rather than show a
+    #: green badge it cannot justify.
+    #:
+    #: Saving credentials used to set ``is_configured: True`` without ever
+    #: calling the carrier, so a typo'd API key showed a live badge. The
+    #: hub patched around it with a localStorage probe; this is the
+    #: server-side fix.
+    verification_operation: str | None = None
     #: Header the carrier signs its webhooks with.
     webhook_signature_header: str | None = None
     #: Turns a raw webhook body into a WebhookEvent. Lazily imported for
@@ -156,6 +166,7 @@ class CarrierSpec:
             "is_selectable": self.is_selectable,
             "tracking_url_template": self.tracking_url_template,
             "capabilities": self.capabilities.as_dict(),
+            "can_verify": self.verification_operation is not None,
         }
         if include_credentials:
             out["credential_fields"] = [f.as_dict() for f in self.credential_fields]
@@ -262,6 +273,7 @@ CARRIERS: dict[str, CarrierSpec] = {
         ),
         factory=_bosta_factory,
         provider_cls_loader=_bosta_cls,
+        verification_operation="get_cities",
         webhook_signature_header="x-bosta-signature",
         webhook_parser_loader=_parser("bosta"),
         tracking_url_template=(
@@ -486,6 +498,17 @@ def validate_registry() -> None:
             if not spec.webhook_signature_header:
                 raise AssertionError(
                     f"Carrier '{slug}' claims webhooks but has no signature header"
+                )
+
+        if spec.verification_operation:
+            from src.application.services.carrier_resolver import (
+                KNOWN_OPERATIONS,
+            )
+
+            if spec.verification_operation not in KNOWN_OPERATIONS:
+                raise AssertionError(
+                    f"Carrier '{slug}' verifies with unknown operation "
+                    f"'{spec.verification_operation}'"
                 )
 
         keys = [f.key for f in spec.credential_fields]

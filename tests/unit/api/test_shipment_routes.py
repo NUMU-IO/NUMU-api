@@ -28,6 +28,22 @@ def app() -> FastAPI:
     return application
 
 
+@pytest.fixture(scope="module")
+def stores_app() -> FastAPI:
+    """The whole `/stores` tree, as it is actually mounted.
+
+    Shadowing happens *between* routers as well as within one. A duplicate
+    `GET /shipments/carriers` was once defined in both the shipments and
+    carriers routers; testing the shipments router alone could not see it,
+    because the loser was in a different module.
+    """
+    from src.api.v1.routes.stores import router
+
+    application = FastAPI()
+    application.include_router(router)
+    return application
+
+
 def _routes(app: FastAPI) -> list[APIRoute]:
     return [r for r in app.routes if isinstance(r, APIRoute)]
 
@@ -89,16 +105,36 @@ class TestRouteShadowing:
             f"above /{{shipment_id}}"
         )
 
-    def test_carriers_endpoint_is_reachable(self, app):
+    def test_carriers_endpoint_is_reachable(self, stores_app):
+        """Served by the carriers router, which mounts ahead of this one."""
         target = _concrete("/{store_id}/shipments/carriers")
         winner = next(
-            r for r in _routes(app) if "GET" in r.methods and r.path_regex.match(target)
+            r
+            for r in _routes(stores_app)
+            if "GET" in r.methods and r.path_regex.match(target)
         )
         assert winner.path.endswith("/carriers")
 
     def test_operation_ids_are_unique_in_this_router(self, app):
         ids = [r.operation_id for r in _routes(app) if r.operation_id]
         assert len(ids) == len(set(ids))
+
+    def test_no_duplicate_shipping_paths_across_routers(self, stores_app):
+        """Cross-router duplicates: the loser is silently dead code.
+
+        Caught a real one — `GET /shipments/carriers` was defined in both
+        the shipments and carriers routers. Only the carriers one ever
+        ran.
+        """
+        seen: dict[tuple[str, str], int] = {}
+        for route in _routes(stores_app):
+            if "/shipments" not in route.path:
+                continue
+            for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
+                seen[(method, route.path)] = seen.get((method, route.path), 0) + 1
+
+        dupes = [f"{m} {p}" for (m, p), n in seen.items() if n > 1]
+        assert not dupes, f"Duplicate shipping routes (later one is dead): {dupes}"
 
 
 class TestCarrierCatalog:

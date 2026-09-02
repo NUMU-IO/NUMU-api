@@ -32,6 +32,7 @@ from src.api.v1.routes.stores import apps as apps_module
 from src.api.v1.routes.stores import audit as audit_module
 from src.api.v1.routes.stores import blogs as blogs_module
 from src.api.v1.routes.stores import bundles as bundles_module
+from src.api.v1.routes.stores import carriers as carriers_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
@@ -191,6 +192,9 @@ router.include_router(refunds_module.router, tags=["Store Refunds"])
 router.include_router(returns_module.router, tags=["Store Returns"])
 router.include_router(webhooks_module.router, tags=["Store Webhooks"])
 router.include_router(reconciliation_module.router, tags=["Store Reconciliation"])
+# Registered before shipments: /shipments/carriers/{slug}/... must not be
+# matched by the shipments router's /{shipment_id} path parameter.
+router.include_router(carriers_module.router, tags=["Store Carriers"])
 router.include_router(shipments_module.router, tags=["Store Shipments"])
 router.include_router(shipping_module.router, tags=["Store Shipping"])
 router.include_router(payments_module.router, tags=["Store Payments"])
