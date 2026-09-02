@@ -149,6 +149,41 @@ class TestCarrierStatus:
         assert status["verification_error"] == "401 Unauthorized"
 
 
+class TestLegacyBostaPathSharesTheFix:
+    """The legacy endpoint must not keep the behaviour we just removed.
+
+    The hub still calls `PUT /settings/shipping/bosta/credentials`. If only
+    the new generic route were fixed, the bug would stay live on the path
+    real merchants actually use.
+    """
+
+    def _source(self) -> str:
+        import inspect
+
+        from src.api.v1.routes.stores import settings as mod
+
+        return inspect.getsource(mod.save_bosta_credentials)
+
+    def test_it_no_longer_hardcodes_enabled_true(self):
+        """Saving a key used to switch the carrier on as a side effect."""
+        src = self._source()
+        assert '"enabled": True' not in src
+        assert '"is_configured": True' not in src
+
+    def test_it_verifies_before_reporting_configured(self):
+        assert "_run_verification" in self._source()
+
+    def test_it_uses_the_shared_credential_helper(self):
+        assert "store_credentials" in self._source()
+
+    def test_delete_uses_the_shared_helper(self):
+        import inspect
+
+        from src.api.v1.routes.stores import settings as mod
+
+        assert "clear_credentials" in inspect.getsource(mod.delete_bosta_credentials)
+
+
 class TestCatalogShape:
     """The hub renders entirely from this payload."""
 

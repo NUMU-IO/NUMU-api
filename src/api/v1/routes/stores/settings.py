@@ -1864,36 +1864,49 @@ async def save_bosta_credentials(
     """Save or update Bosta shipping credentials for the store.
 
     Credentials are encrypted at rest using AES-128 (Fernet).
+
+    **Superseded by** ``PUT /shipments/carriers/{slug}/credentials``, which
+    works for every registered carrier. Kept because existing clients call
+    this path, but it now runs the same shared logic so both routes behave
+    identically.
+
+    Two behaviours changed here, deliberately:
+
+    * It used to set ``is_configured: True`` **without ever calling
+      Bosta**, so a typo'd API key showed a green "Live" badge. It now
+      verifies and persists the result.
+    * It used to set ``enabled: True``, silently switching the carrier on
+      as a side effect of saving a key. Enabling is an explicit action in
+      shipping settings; a carrier whose credentials Bosta rejects must
+      not be enabled at all.
     """
-    from src.infrastructure.external_services.secrets.secrets_manager import (
-        get_secrets_manager,
+    from src.api.v1.routes.stores.carriers import _run_verification
+    from src.application.services.carrier_credentials import store_credentials
+
+    settings = await store_credentials(
+        store.settings,
+        "bosta",
+        {
+            "api_key": request.api_key,
+            "business_id": request.business_id,
+            "webhook_secret": request.webhook_secret,
+        },
     )
+    shipping_settings = settings["shipping"]
+    entry = shipping_settings["bosta"]
+    entry["last_configured"] = datetime.now(UTC).isoformat()
+    entry["auto_create_shipment"] = request.auto_create_shipment
 
-    secrets = get_secrets_manager()
-    key_id = await secrets.get_current_key_id()
-
-    credential_data = {
-        "api_key": request.api_key,
-        "business_id": request.business_id,
-        "webhook_secret": request.webhook_secret,
-    }
-
-    encrypted = await secrets.encrypt(credential_data, key_id)
-    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
-
-    settings = store.settings or {}
-    shipping_settings = settings.get("shipping", _get_default_shipping_settings())
-
-    shipping_settings["bosta"] = {
-        "enabled": True,
-        "is_configured": True,
-        "last_configured": datetime.now(UTC).isoformat(),
-        "encrypted_credentials": encrypted_b64,
-        "encryption_key_id": key_id,
-        "auto_create_shipment": request.auto_create_shipment,
-    }
-
-    settings["shipping"] = shipping_settings
+    verified, verification_error = await _run_verification("bosta", settings)
+    entry["verified"] = verified
+    entry["verified_at"] = datetime.now(UTC).isoformat() if verified else None
+    entry["verification_error"] = verification_error
+    # Preserve any prior explicit enable; never enable as a side effect of
+    # saving, and never leave a rejected credential enabled.
+    if verified is False:
+        entry["enabled"] = False
+    else:
+        entry.setdefault("enabled", False)
     store.settings = settings
     await store_repo.update(store)
 
@@ -1901,15 +1914,19 @@ async def save_bosta_credentials(
         onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
     )
 
-    logger.info(f"Bosta credentials saved for store {store.id}")
+    logger.info(f"Bosta credentials saved for store {store.id} (verified={verified})")
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
 
     return SuccessResponse(
         data=BostaCredentialsResponse(
             is_configured=True,
-            api_key_masked=secrets.mask_credential(request.api_key),
+            api_key_masked=get_secrets_manager().mask_credential(request.api_key),
             business_id=request.business_id,
             auto_create_shipment=request.auto_create_shipment,
-            last_configured=shipping_settings["bosta"]["last_configured"],
+            last_configured=entry["last_configured"],
         ),
         message="Bosta credentials saved successfully",
     )
@@ -1976,17 +1993,18 @@ async def delete_bosta_credentials(
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
-    """Remove Bosta credentials and disable Bosta shipping."""
-    settings = store.settings or {}
-    shipping_settings = settings.get("shipping", _get_default_shipping_settings())
+    """Remove Bosta credentials and disable Bosta shipping.
 
-    shipping_settings["bosta"] = {
-        "enabled": False,
-        "is_configured": False,
-        "last_configured": None,
-    }
+    Superseded by ``DELETE /shipments/carriers/{slug}/credentials``; shares
+    its implementation so the two paths cannot drift.
+    """
+    from src.application.services.carrier_credentials import clear_credentials
 
-    settings["shipping"] = shipping_settings
+    settings = clear_credentials(store.settings, "bosta")
+    entry = settings["shipping"]["bosta"]
+    entry["last_configured"] = None
+    for key in ("verified", "verified_at", "verification_error"):
+        entry.pop(key, None)
     store.settings = settings
     await store_repo.update(store)
 
