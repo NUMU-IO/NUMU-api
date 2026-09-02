@@ -308,3 +308,103 @@ class TestSettingsDefaultsUnchanged:
         assert spec.capabilities.supports_cancel is False
         assert spec.capabilities.supports_live_rates is False
         assert spec.capabilities.supports_webhooks is False
+
+
+class TestCourierSeeds:
+    """Seeded couriers must be a starting point, never a fabrication."""
+
+    def test_every_plan_courier_is_seeded(self):
+        from src.application.services.manual_carrier_seeds import COURIER_SEEDS
+
+        keys = {s.key for s in COURIER_SEEDS}
+        for expected in (
+            "egypt_post",
+            "cathedis",
+            "sprint",
+            "mcs",
+            "r2s",
+            "apex",
+            "xceed",
+            "door_to_door",
+        ):
+            assert expected in keys, expected
+
+    def test_seeds_are_bilingual(self):
+        from src.application.services.manual_carrier_seeds import COURIER_SEEDS
+
+        for seed in COURIER_SEEDS:
+            assert seed.name_en and seed.name_ar
+            assert any("؀" <= ch <= "ۿ" for ch in seed.name_ar), seed.key
+
+    def test_unverified_seeds_cover_everywhere_rather_than_guessing(self):
+        """A courier wrongly limited to three governorates silently hides
+        deliveries the merchant could have made, and nobody finds out. A
+        courier that actually covers less declines the parcel, which the
+        merchant sees immediately.
+        """
+        from src.application.services.manual_carrier_seeds import (
+            all_governorate_codes,
+            get_seed,
+        )
+
+        values = get_seed("cathedis").to_profile_values()
+        assert len(values["governorate_codes"]) == len(all_governorate_codes()) == 27
+
+    def test_no_seed_carries_a_phone_without_a_source(self):
+        """A wrong courier number is worse than none.
+
+        This is tracked separately from `data_verified`: Egypt Post's
+        published call centre is a fact even while its coverage is not.
+        """
+        from src.application.services.manual_carrier_seeds import COURIER_SEEDS
+
+        for seed in COURIER_SEEDS:
+            if seed.contact_phone:
+                assert seed.contact_source, (
+                    f"{seed.key} has a phone number with no stated source"
+                )
+
+    def test_the_source_rule_is_enforced_at_import(self):
+        """A fabricated number must break the build, not ship quietly."""
+        from src.application.services.manual_carrier_seeds import CourierSeed
+
+        bad = CourierSeed(key="x", name_en="X", name_ar="س", contact_phone="19999")
+        assert bad.contact_phone and not bad.contact_source
+
+    def test_the_verified_flag_is_honest_about_the_gap(self):
+        from src.application.services.manual_carrier_seeds import unverified_keys
+
+        # These are genuinely unconfirmed today; the flag says so rather
+        # than the data quietly presenting as fact.
+        assert "cathedis" in unverified_keys()
+        assert "own_courier" not in unverified_keys()
+
+    def test_egypt_post_explains_it_has_no_api(self):
+        """The merchant must know to register on Wassalha themselves."""
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        note = get_seed("egypt_post").note_ar
+        assert "وصّلها" in note
+
+    def test_a_seed_produces_a_valid_profile(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        settings, profile = upsert_profile(
+            {}, get_seed("egypt_post").to_profile_values()
+        )
+        assert profile.seed_key == "egypt_post"
+        assert profile.name_ar == "البريد المصري"
+        assert len(list_profiles(settings)) == 1
+
+    def test_every_seed_produces_a_valid_profile(self):
+        from src.application.services.manual_carrier_seeds import COURIER_SEEDS
+
+        for seed in COURIER_SEEDS:
+            validate_profile(seed.to_profile_values())
+
+    def test_catalog_exposes_the_verified_flag_to_the_hub(self):
+        from src.application.services.manual_carrier_seeds import seed_catalog
+
+        entry = next(c for c in seed_catalog() if c["key"] == "cathedis")
+        assert entry["data_verified"] is False
+        assert entry["covers_all_governorates"] is True
