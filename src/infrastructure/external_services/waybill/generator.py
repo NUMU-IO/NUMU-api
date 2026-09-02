@@ -4,14 +4,21 @@ A Tier 3 courier has no API and issues no label, so NUMU prints the
 parcel's identity itself: who it goes to, what to collect, and a number
 both sides can quote.
 
-**Format.** A6, 105×148mm. The common Egyptian thermal roll is 100×150mm
-and A6 also prints sanely 4-up on an A4 sheet, which is what a merchant
-without a label printer will use. It is a constant here rather than a
-hardcoded value in the template — see :data:`LABEL_SIZE`.
+**One layout, two outputs.** The label is authored once at 100×150mm —
+the common Egyptian thermal roll — and printed either 1:1 on that roll or
+tiled four-up on A4 for a merchant without a label printer. Both use the
+same markup (``_label.html``) and the same stylesheet (``label.css``), so
+the two can never drift into different labels.
 
-**Arabic.** Same approach as the invoice generator: WeasyPrint renders
-the HTML/CSS with real RTL, and Noto Sans Arabic (already installed in
-``docker/fonts``) provides the glyphs. Addresses are Arabic; **tracking
+Only the A4 sheet is scaled, to 99%: four 100×150mm labels tile to
+200×300mm and A4 is 297mm tall. The roll is never scaled — a thermal
+printer feeds fixed-width stock.
+
+**Arabic.** This rides the PDF pipeline the invoice generator already
+uses in production rather than building a second one: WeasyPrint renders
+the HTML/CSS with real RTL, and Noto Sans Arabic — already installed in
+``docker/fonts`` and registered via fontconfig in the image — provides
+the glyphs. Zero infrastructure change. Addresses are Arabic; **tracking
 numbers, phone numbers, the COD amount and dates are forced LTR**, because
 a phone number reordered by the bidi algorithm is worse than useless on a
 label a courier has to dial.
@@ -35,10 +42,24 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
-TEMPLATE_NAME = "waybill.html"
 
-#: A6. Change here, not in the stylesheet.
-LABEL_SIZE = "105mm 148mm"
+#: Thermal-roll wrapper: one label per page, printed 1:1.
+ROLL_TEMPLATE = "waybill.html"
+#: A4 wrapper: the same label tiled four to a page.
+SHEET_TEMPLATE = "waybill_sheet.html"
+
+#: The label's authored size — the common Egyptian thermal roll.
+LABEL_SIZE = "100mm 150mm"
+
+#: Labels per A4 sheet, in a 2x2 grid.
+SHEET_PER_PAGE = 4
+
+#: Four 100x150mm labels tile to 200x300mm; A4 is 297mm tall, so 1:1
+#: overflows by 3mm. 99% lands on exactly 297mm and is imperceptible on
+#: a printed label — well inside QR scanning tolerance. **The roll output
+#: is never scaled**: a thermal printer feeds fixed-width stock, and
+#: shrinking the label would walk it off its own roll.
+SHEET_SCALE = 0.99
 
 #: Items listed before the label runs out of room.
 MAX_ITEMS = 6
@@ -97,12 +118,11 @@ def build_context(
     notes: str | None = None,
     store_logo_url: str | None = None,
 ) -> dict[str, Any]:
-    """Assemble the template context, with the label's limits applied."""
+    """Assemble one label's data, with the label's limits applied."""
     all_items = items or []
     shown = all_items[:MAX_ITEMS]
 
     return {
-        "page_size": LABEL_SIZE,
         "tracking_number": tracking_number,
         "qr_data_uri": _qr_data_uri(tracking_number),
         "store_name": store_name,
@@ -119,49 +139,64 @@ def build_context(
         # shown 0.00 EGP asks the customer for money.
         "is_cod": bool(cod_amount_cents and cod_amount_cents > 0),
         "cod_display": _format_money(cod_amount_cents, currency),
-        "items": shown,
+        # Named line_items, not items: `label.items` in a Jinja template
+        # resolves to dict.items() rather than this key.
+        "line_items": shown,
         "extra_items": max(0, len(all_items) - len(shown)),
         "notes": notes,
     }
 
 
-def render_html(context: dict[str, Any]) -> str:
-    """Render the waybill template.
-
-    Autoescaping is on: addresses and notes are merchant- and
-    customer-supplied, and this HTML goes through a renderer.
-    """
+def _env():
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-    env = Environment(
+    return Environment(
         loader=FileSystemLoader(str(TEMPLATE_DIR)),
         autoescape=select_autoescape(["html"]),
     )
-    return env.get_template(TEMPLATE_NAME).render(**context)
 
 
-def generate_waybill_pdf(context: dict[str, Any]) -> bytes:
-    """Render one waybill to PDF bytes.
+def render_html(labels: list[dict[str, Any]] | dict[str, Any]) -> str:
+    """Render labels for a thermal roll — one per page, 1:1."""
+    if isinstance(labels, dict):
+        labels = [labels]
+    return (
+        _env().get_template(ROLL_TEMPLATE).render(labels=labels, page_size=LABEL_SIZE)
+    )
 
-    Raises:
-        WaybillRenderError: WeasyPrint is unavailable. Unlike the invoice
-            generator there is no fpdf2 fallback yet — a label is a
-            precise layout and a second implementation that drifts from
-            this one would put the COD amount in the wrong place. Local
-            Windows dev without Cairo gets a clear error rather than a
-            differently-wrong PDF.
-    """
-    html = render_html(context)
+
+def render_sheet_html(
+    labels: list[dict[str, Any]], *, per_page: int = SHEET_PER_PAGE
+) -> str:
+    """Render the same labels four-up on A4, with cut guides."""
+    pages = [labels[i : i + per_page] for i in range(0, len(labels), per_page)] or [[]]
+    return (
+        _env()
+        .get_template(SHEET_TEMPLATE)
+        .render(
+            pages=pages,
+            per_page=per_page,
+            sheet_scale=SHEET_SCALE,
+            sheet_title=f"{len(labels)} labels",
+        )
+    )
+
+
+def _to_pdf(html: str) -> bytes:
     try:
         from weasyprint import HTML
     except (ImportError, OSError) as e:  # pragma: no cover - env dependent
         raise WaybillRenderError(
             "WeasyPrint is required to render waybills (needs cairo/pango). "
             "It is installed in the Docker image; on local Windows use the "
-            "HTML preview endpoint instead."
+            "HTML preview instead."
         ) from e
+    return HTML(string=html, base_url=str(TEMPLATE_DIR)).write_pdf()
 
-    pdf: bytes = HTML(string=html, base_url=str(TEMPLATE_DIR)).write_pdf()
+
+def generate_waybill_pdf(context: dict[str, Any]) -> bytes:
+    """One label on a thermal roll."""
+    pdf = _to_pdf(render_html([context]))
     logger.info(
         "waybill_pdf_generated",
         extra={
@@ -173,29 +208,32 @@ def generate_waybill_pdf(context: dict[str, Any]) -> bytes:
 
 
 def generate_waybill_batch_pdf(contexts: list[dict[str, Any]]) -> bytes:
-    """One PDF, one page per parcel — the day's pickup in a single print.
+    """A day's pickup on a thermal roll, one label per page.
 
     Merchants ship in batches; sending them to print one label at a time
     is how labels get missed.
     """
     if not contexts:
         raise WaybillRenderError("No shipments to print.")
-
-    pages = [render_html(c) for c in contexts]
-    # Concatenate bodies with a hard page break so pagination stays under
-    # the stylesheet's control rather than the renderer's.
-    joined = '<div style="break-after:page"></div>'.join(pages)
-
-    try:
-        from weasyprint import HTML
-    except (ImportError, OSError) as e:  # pragma: no cover - env dependent
-        raise WaybillRenderError(
-            "WeasyPrint is required to render waybills (needs cairo/pango)."
-        ) from e
-
-    pdf: bytes = HTML(string=joined, base_url=str(TEMPLATE_DIR)).write_pdf()
+    pdf = _to_pdf(render_html(contexts))
     logger.info(
         "waybill_batch_generated",
+        extra={"count": len(contexts), "pdf_size_bytes": len(pdf)},
+    )
+    return pdf
+
+
+def generate_waybill_sheet_pdf(contexts: list[dict[str, Any]]) -> bytes:
+    """The same labels on A4, four to a page, for an office printer.
+
+    Same markup and stylesheet as the roll output, so the two can never
+    drift into different labels.
+    """
+    if not contexts:
+        raise WaybillRenderError("No shipments to print.")
+    pdf = _to_pdf(render_sheet_html(contexts))
+    logger.info(
+        "waybill_sheet_generated",
         extra={"count": len(contexts), "pdf_size_bytes": len(pdf)},
     )
     return pdf
@@ -208,10 +246,15 @@ class WaybillRenderError(RuntimeError):
 __all__ = [
     "LABEL_SIZE",
     "MAX_ITEMS",
-    "TEMPLATE_NAME",
+    "ROLL_TEMPLATE",
+    "SHEET_PER_PAGE",
+    "SHEET_SCALE",
+    "SHEET_TEMPLATE",
     "WaybillRenderError",
     "build_context",
     "generate_waybill_batch_pdf",
     "generate_waybill_pdf",
+    "generate_waybill_sheet_pdf",
     "render_html",
+    "render_sheet_html",
 ]

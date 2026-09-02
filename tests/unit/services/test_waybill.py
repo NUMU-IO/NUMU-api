@@ -15,10 +15,15 @@ import pytest
 from src.infrastructure.external_services.waybill.generator import (
     LABEL_SIZE,
     MAX_ITEMS,
+    SHEET_PER_PAGE,
+    SHEET_SCALE,
+    TEMPLATE_DIR,
     WaybillRenderError,
     build_context,
     generate_waybill_batch_pdf,
+    generate_waybill_sheet_pdf,
     render_html,
+    render_sheet_html,
 )
 
 ARABIC_ADDRESS = "١٢ شارع جامعة الدول العربية، المهندسين"
@@ -135,9 +140,14 @@ class TestDirectionality:
 
     def test_stylesheet_isolates_rather_than_only_aligning(self):
         """`direction` alone still lets neighbouring text reorder it;
-        `unicode-bidi: isolate` is what actually pins the run."""
-        html = render_html(_ctx())
-        assert "unicode-bidi: isolate" in html
+        `unicode-bidi: isolate` is what actually pins the run.
+
+        Asserted against the stylesheet itself, since it is linked rather
+        than inlined — and it is shared by both outputs, so this covers
+        the A4 sheet too.
+        """
+        css = (TEMPLATE_DIR / "label.css").read_text(encoding="utf-8")
+        assert "unicode-bidi: isolate" in css
 
 
 class TestLabelContents:
@@ -173,7 +183,7 @@ class TestLabelContents:
         """A label has finite room; silently dropping items is worse than
         saying how many were dropped."""
         ctx = _ctx(items=[{"name": f"item{i}"} for i in range(10)])
-        assert len(ctx["items"]) == MAX_ITEMS
+        assert len(ctx["line_items"]) == MAX_ITEMS
         assert ctx["extra_items"] == 10 - MAX_ITEMS
 
     def test_short_item_lists_show_no_overflow_note(self):
@@ -194,7 +204,7 @@ class TestLabelContents:
 
 
 class TestSafety:
-    def test_page_size_comes_from_the_constant(self):
+    def test_roll_page_size_comes_from_the_constant(self):
         assert LABEL_SIZE in render_html(_ctx())
 
     def test_customer_content_is_escaped(self):
@@ -206,3 +216,63 @@ class TestSafety:
     def test_batch_refuses_an_empty_run(self):
         with pytest.raises(WaybillRenderError):
             generate_waybill_batch_pdf([])
+
+
+class TestTwoOutputsOneLayout:
+    """The roll and the A4 sheet must stay the same label.
+
+    They are separate wrappers around one partial and one stylesheet, so
+    the failure to guard against is someone reintroducing a second set of
+    markup that slowly drifts.
+    """
+
+    def test_roll_is_the_thermal_size(self):
+        assert LABEL_SIZE == "100mm 150mm"
+        assert LABEL_SIZE in render_html(_ctx())
+
+    def test_roll_is_never_scaled(self):
+        """A thermal printer feeds fixed-width stock; scaling walks the
+        label off its own roll."""
+        assert "transform: scale" not in render_html(_ctx())
+
+    def test_sheet_is_a4_and_scaled_to_fit(self):
+        """Four 100x150 labels tile to 200x300; A4 is 297mm tall."""
+        html = render_sheet_html([_ctx()])
+        assert "A4" in html
+        assert f"scale({SHEET_SCALE})" in html
+        assert 200 * SHEET_SCALE <= 210  # width fits
+        assert 300 * SHEET_SCALE <= 297.0001  # height fits
+
+    def test_both_outputs_share_one_stylesheet(self):
+        for html in (render_html(_ctx()), render_sheet_html([_ctx()])):
+            assert 'href="label.css"' in html
+
+    def test_sheet_tiles_four_per_page(self):
+        html = render_sheet_html([_ctx() for _ in range(SHEET_PER_PAGE + 1)])
+        assert html.count('class="grid"') == 2
+
+    def test_incomplete_page_leaves_blanks_not_stretched_labels(self):
+        body = _body(render_sheet_html([_ctx(), _ctx()]))
+        assert body.count('class="label"') == 2
+        assert body.count("cell-empty") == SHEET_PER_PAGE - 2
+
+    def test_sheet_has_cut_guides(self):
+        """A merchant with scissors needs to see where to cut."""
+        assert "dashed" in render_sheet_html([_ctx()])
+
+    def test_same_label_content_in_both_outputs(self):
+        ctx = _ctx()
+        roll, sheet = render_html([ctx]), render_sheet_html([ctx])
+        for required in ("NM7NA2ZQKG2C", "650.00 EGP", "+201001234567"):
+            assert required in roll and required in sheet, required
+
+    def test_merchant_branding_leads_with_numu_underneath(self):
+        """The courier needs to know who a parcel returns to, and the
+        customer sees it. NUMU's mark sits under, not over."""
+        html = render_html(_ctx())
+        assert "Vionne" in html
+        assert "by-numu" in html
+
+    def test_sheet_refuses_an_empty_run(self):
+        with pytest.raises(WaybillRenderError):
+            generate_waybill_sheet_pdf([])

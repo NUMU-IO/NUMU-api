@@ -1,167 +1,22 @@
 <!doctype html>
+{# Thermal roll output: one 100x150mm label per page, printed 1:1.
+   Never scaled — a thermal printer feeds a fixed-width roll, and scaling
+   would shrink the label off its own stock. #}
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<title>{{ tracking_number }}</title>
+<title>{{ labels[0].tracking_number if labels else '' }}</title>
+<link rel="stylesheet" href="label.css">
 <style>
-  /* A6 — 105×148mm. The common Egyptian thermal roll is 100×150mm, and
-     A6 prints correctly on both that and a plain A4 sheet (4-up). Change
-     LABEL_SIZE in the generator, not here. */
   @page { size: {{ page_size }}; margin: 0; }
-
-  /* Noto Sans Arabic ships in docker/fonts and is registered with
-     fontconfig in the image; the invoice generator relies on the same
-     face. The Latin fallback matters: Noto Sans Arabic has no Latin
-     glyphs, so digits and codes would render as boxes without it. */
-  body {
-    font-family: "Noto Sans Arabic", "DejaVu Sans", sans-serif;
-    margin: 0;
-    padding: 4mm;
-    color: #0F1624;
-    font-size: 9pt;
-    line-height: 1.35;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  /* Identifiers, money, phones and dates stay LTR inside an RTL page.
-     An Arabic-context phone number renders with its digits reordered
-     otherwise, which is worse than useless on a label a courier dials. */
-  .ltr { direction: ltr; unicode-bidi: isolate; text-align: left; }
-
-  .row { display: flex; align-items: flex-start; gap: 3mm; }
-  .grow { flex: 1; min-width: 0; }
-  .rule { border-top: 0.4mm solid #0F1624; margin: 2mm 0; }
-  .thin { border-top: 0.2mm dashed #8AA5C2; margin: 1.6mm 0; }
-  .muted { color: #55617A; font-size: 7.5pt; }
-  .label { font-size: 7pt; color: #55617A; letter-spacing: .02em; }
-
-  header { display: flex; align-items: center; justify-content: space-between; }
-  .store { font-weight: 700; font-size: 11pt; }
-  .store img { max-height: 9mm; max-width: 34mm; }
-  .courier {
-    text-align: left; direction: ltr;
-    font-size: 8pt; font-weight: 700;
-  }
-
-  .track { display: flex; align-items: center; gap: 3mm; margin: 1mm 0; }
-  .qr img { width: 22mm; height: 22mm; display: block; }
-  .tracking-number {
-    font-family: "DejaVu Sans Mono", monospace;
-    font-size: 13pt; font-weight: 700; letter-spacing: .06em;
-  }
-
-  .to-name { font-weight: 700; font-size: 11pt; }
-  .to-phone {
-    font-family: "DejaVu Sans Mono", monospace;
-    font-size: 12pt; font-weight: 700;
-  }
-  .address { font-size: 9.5pt; }
-
-  /* The single most consequential number on the label. A courier
-     collecting the wrong amount is the most expensive mistake a manual
-     shipment can make, so it gets a box and the largest type. */
-  .cod {
-    border: 0.6mm solid #0F1624; border-radius: 1.5mm;
-    padding: 1.5mm 2.5mm; margin: 2mm 0;
-    display: flex; align-items: baseline; justify-content: space-between;
-  }
-  .cod-amount {
-    direction: ltr; unicode-bidi: isolate;
-    font-size: 17pt; font-weight: 800; letter-spacing: -.01em;
-  }
-  .cod-none { border-style: dashed; }
-  .cod-none .cod-amount { font-size: 11pt; font-weight: 700; }
-
-  .items { font-size: 8pt; }
-  .items li { margin-bottom: .4mm; }
-  ul { margin: 0; padding-inline-start: 4mm; }
-
-  .notes {
-    font-size: 8pt; background: #F5EFE6;
-    padding: 1.2mm 2mm; border-radius: 1mm;
-  }
-  footer { margin-top: 2mm; }
-  .sign { display: flex; gap: 3mm; margin-top: 3mm; }
-  .sign div { flex: 1; border-top: 0.3mm solid #0F1624; padding-top: 1mm; }
+  html, body { margin: 0; padding: 0; }
+  .sheet { break-after: page; }
+  .sheet:last-child { break-after: auto; }
 </style>
 </head>
 <body>
-
-<header>
-  <div class="store">
-    {% if store_logo_url %}
-      <img src="{{ store_logo_url }}" alt="">
-    {% else %}
-      {{ store_name }}
-    {% endif %}
-  </div>
-  <div class="courier">
-    {{ courier_name }}
-    {% if cutoff_time %}<div class="muted ltr">cut-off {{ cutoff_time }}</div>{% endif %}
-  </div>
-</header>
-
-<div class="rule"></div>
-
-<div class="track">
-  <div class="qr"><img src="{{ qr_data_uri }}" alt=""></div>
-  <div class="grow">
-    <div class="label">رقم الشحنة · Tracking</div>
-    <div class="tracking-number ltr">{{ tracking_number }}</div>
-    {% if order_number %}
-      <div class="muted ltr" style="margin-top:1mm">Order {{ order_number }}</div>
-    {% endif %}
-    {% if created_at %}<div class="muted ltr">{{ created_at }}</div>{% endif %}
-  </div>
-</div>
-
-<div class="rule"></div>
-
-<div class="label">المرسل إليه · Deliver to</div>
-<div class="to-name">{{ recipient_name }}</div>
-{% if recipient_phone %}
-  <div class="to-phone ltr">{{ recipient_phone }}</div>
-{% endif %}
-<div class="address">{{ address_line }}</div>
-{% if governorate %}<div class="muted">{{ governorate }}</div>{% endif %}
-
-{% if is_cod %}
-  <div class="cod">
-    <span class="label">مطلوب تحصيل · Collect</span>
-    <span class="cod-amount">{{ cod_display }}</span>
-  </div>
-{% else %}
-  <div class="cod cod-none">
-    <span class="label">الدفع · Payment</span>
-    <span class="cod-amount">مدفوع · PAID</span>
-  </div>
-{% endif %}
-
-{% if items %}
-  <div class="thin"></div>
-  <div class="label">المحتويات · Contents</div>
-  <ul class="items">
-    {% for item in items %}
-      <li>{{ item.name }}{% if item.quantity and item.quantity != 1 %}
-        <span class="ltr">×{{ item.quantity }}</span>{% endif %}</li>
-    {% endfor %}
-    {% if extra_items %}
-      <li class="muted">+{{ extra_items }} أخرى</li>
-    {% endif %}
-  </ul>
-{% endif %}
-
-{% if notes %}
-  <div class="thin"></div>
-  <div class="notes">{{ notes }}</div>
-{% endif %}
-
-<footer>
-  <div class="sign">
-    <div class="label">توقيع المستلم · Received by</div>
-    <div class="label">التاريخ · Date</div>
-  </div>
-</footer>
-
+{% for label in labels %}
+  <div class="sheet">{% with %}{% include "_label.html" with context %}{% endwith %}</div>
+{% endfor %}
 </body>
 </html>
