@@ -97,6 +97,28 @@ class CarrierSpec:
     is_default: bool = False
     #: False hides it from the hub while keeping shipments resolvable.
     is_selectable: bool = True
+    #: Header the carrier signs its webhooks with.
+    webhook_signature_header: str | None = None
+    #: Turns a raw webhook body into a WebhookEvent. Lazily imported for
+    #: the same reason as ``provider_cls_loader``.
+    webhook_parser_loader: Callable[[], Callable] | None = None
+
+    def parse_webhook(self, data: dict[str, Any]) -> Any:
+        """Normalise a raw webhook body, or None if unparseable.
+
+        Fills in ``status`` from this carrier's status map so callers
+        never see the carrier's private vocabulary.
+        """
+        if self.webhook_parser_loader is None:
+            return None
+        parser = self.webhook_parser_loader()
+        event = parser(data)
+        if event is None:
+            return None
+        # dataclass is frozen; rebuild with the mapped status.
+        from dataclasses import replace
+
+        return replace(event, status=self.map_status(event.raw_status))
 
     def provider_class(self) -> type:
         """Import and return the provider class.
@@ -193,6 +215,17 @@ def _jt_cls() -> type:
     return JTShippingService
 
 
+def _parser(slug: str):
+    """Lazily fetch a carrier's webhook parser."""
+
+    def _load():
+        from src.infrastructure.webhooks.carrier_parsers import PARSERS
+
+        return PARSERS[slug]
+
+    return _load
+
+
 # ── Shared credential shapes ────────────────────────────────────────
 
 _WEBHOOK_SECRET = CredentialField(
@@ -229,6 +262,8 @@ CARRIERS: dict[str, CarrierSpec] = {
         ),
         factory=_bosta_factory,
         provider_cls_loader=_bosta_cls,
+        webhook_signature_header="x-bosta-signature",
+        webhook_parser_loader=_parser("bosta"),
         tracking_url_template=(
             "https://bosta.co/tracking-shipment/?tracking_number={tracking_number}"
         ),
@@ -272,6 +307,8 @@ CARRIERS: dict[str, CarrierSpec] = {
         ),
         factory=_mylerz_factory,
         provider_cls_loader=_mylerz_cls,
+        webhook_signature_header="x-mylerz-signature",
+        webhook_parser_loader=_parser("mylerz"),
         tracking_url_template="https://mylerz.com/track/{tracking_number}",
         credential_fields=(
             CredentialField(
@@ -308,6 +345,8 @@ CARRIERS: dict[str, CarrierSpec] = {
         ),
         factory=_jt_factory,
         provider_cls_loader=_jt_cls,
+        webhook_signature_header="x-jt-signature",
+        webhook_parser_loader=_parser("jt"),
         tracking_url_template=(
             "https://www.jtexpress-eg.com/trajectoryQuery?waybillNo={tracking_number}"
         ),
@@ -437,6 +476,16 @@ def validate_registry() -> None:
             if not any(f.key == "webhook_secret" for f in spec.credential_fields):
                 raise AssertionError(
                     f"Carrier '{slug}' claims webhooks but has no webhook_secret field"
+                )
+            # Without these the generic route silently ignores every
+            # callback from this carrier — a failure mode with no error.
+            if spec.webhook_parser_loader is None:
+                raise AssertionError(
+                    f"Carrier '{slug}' claims webhooks but has no payload parser"
+                )
+            if not spec.webhook_signature_header:
+                raise AssertionError(
+                    f"Carrier '{slug}' claims webhooks but has no signature header"
                 )
 
         keys = [f.key for f in spec.credential_fields]
