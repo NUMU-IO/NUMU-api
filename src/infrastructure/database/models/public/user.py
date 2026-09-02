@@ -64,6 +64,14 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
     # registering (payg / starter / pro). payg auto-activates at store
     # creation; paid intents are kept for attribution.
     plan_intent: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # When that intent was acted on. This used to be recorded by nulling
+    # plan_intent, which destroyed the only acquisition signal we had the
+    # moment it became useful. The timestamp is the re-run guard now, so
+    # the intent itself is kept forever.
+    plan_applied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     auth_provider: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
     )

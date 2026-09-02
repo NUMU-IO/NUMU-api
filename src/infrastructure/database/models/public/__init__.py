@@ -17,6 +17,7 @@ from src.infrastructure.database.models.public.customizer_undo_entry import (
     CustomizerUndoEntryModel,
 )
 from src.infrastructure.database.models.public.feedback import FeedbackModel
+from src.infrastructure.database.models.public.merchant_lead import MerchantLeadModel
 from src.infrastructure.database.models.public.omnichannel import (
     CapiEventModel,
     CatalogMappingModel,
@@ -73,6 +74,7 @@ __all__ = [
     "ThemeAdminConfigModel",
     "TwoFactorAuthModel",
     "UserModel",
+    "MerchantLeadModel",
     "WaitlistModel",
     # Merchant wallet (pay-as-you-go)
     "MerchantWalletModel",

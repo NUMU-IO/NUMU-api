@@ -116,6 +116,12 @@ class ConvertDemoUseCase:
         validate_password(password)
 
         # ─── 5. Create new real user ──────────────────────────────────
+        # The demo door requires a WhatsApp number, so this tenant already
+        # carries one. Fall back to it when the conversion form does not
+        # resend a phone: converting a demo is the one path that could
+        # otherwise turn a merchant we can reach into a permanent account
+        # nobody can call.
+        resolved_phone = phone or tenant.demo_whatsapp
         hashed_password = self.password_service.hash_password(password)
         new_user = User(
             email=new_email,
@@ -124,7 +130,7 @@ class ConvertDemoUseCase:
             last_name=last_name,
             role=UserRole.STORE_OWNER,
             status=UserStatus.PENDING_VERIFICATION,
-            phone=phone,
+            phone=resolved_phone,
             trial_ends_at=datetime.now(UTC) + timedelta(days=30),
         )
         created_user = await user_repo.create(new_user)

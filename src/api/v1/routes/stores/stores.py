@@ -280,14 +280,22 @@ async def create_store(
     # is not unique for multi-store owners and would raise
     # MultipleResultsFound on the second store.
     try:
-        if user and user.plan_intent == "payg" and result.tenant_id is not None:
+        if (
+            user
+            and user.plan_intent == "payg"
+            # The re-run guard used to be "null the intent once applied",
+            # which threw away the only acquisition signal we capture.
+            # A timestamp does the same job and keeps the intent.
+            and user.plan_applied_at is None
+            and result.tenant_id is not None
+        ):
             from src.application.use_cases.billing.subscribe import (
                 SubscribeUseCase,
             )
 
             await SubscribeUseCase(db).execute(tenant_id=result.tenant_id, plan="payg")
-            user.plan_intent = None  # applied — don't re-run on store #2
-            # Make the clear part of the pending statements now rather
+            user.plan_applied_at = datetime.now(UTC)
+            # Make the stamp part of the pending statements now rather
             # than relying on request-teardown autoflush semantics.
             await db.flush()
     except Exception:
@@ -296,6 +304,18 @@ async def create_store(
         # inside the try: an attribute regression here once 500'd every
         # payg-intent signup on prod (StoreDTO had no tenant_id).
         logger.warning("payg_intent_activation_failed", exc_info=True)
+
+    # Link the store back to the lead this merchant came in as, so the
+    # funnel column in admin moves without anyone having to join on email.
+    from src.application.services.merchant_leads import attach_tenant_to_lead
+
+    if result.tenant_id is not None:
+        await attach_tenant_to_lead(
+            db,
+            user_id=user_id,
+            tenant_id=result.tenant_id,
+            subdomain=result.subdomain,
+        )
 
     if result.subdomain:
         await cloudflare_dns_service.ensure_store_subdomain(result.subdomain)

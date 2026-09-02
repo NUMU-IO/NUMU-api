@@ -22,6 +22,7 @@ from src.api.dependencies.services import (
 )
 from src.api.responses import SuccessResponse
 from src.api.utils.cookies import set_auth_cookies
+from src.api.utils.signup_guard import guard_public_signup
 from src.api.v1.schemas.public.demo import StartDemoRequest, StartDemoResponse
 from src.application.dto.auth import PasswordResetRequestDTO
 from src.application.use_cases.auth import ForgotPasswordUseCase
@@ -36,48 +37,6 @@ from src.infrastructure.tenancy.service import TenantService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-_DISPOSABLE_DOMAINS = {
-    "mailinator.com",
-    "tempmail.com",
-    "10minutemail.com",
-    "guerrillamail.com",
-    "throwaway.email",
-    "yopmail.com",
-    "trashmail.com",
-    "sharklasers.com",
-    "getnada.com",
-    "fakeinbox.com",
-}
-
-
-def _is_disposable_email(email: str) -> bool:
-    domain = email.lower().split("@")[-1] if "@" in email else ""
-    return domain in _DISPOSABLE_DOMAINS
-
-
-async def _verify_turnstile_token(token: str | None, remote_ip: str | None) -> bool:
-    secret = getattr(settings, "turnstile_secret_key", None)
-    if not secret:
-        return True  # dev mode — no secret configured
-    if not token:
-        return False
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(
-                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                data={
-                    "secret": secret,
-                    "response": token,
-                    **({"remoteip": remote_ip} if remote_ip else {}),
-                },
-            )
-        return bool(resp.json().get("success"))
-    except Exception:
-        logger.exception("turnstile_verify_failed")
-        return False
 
 
 @router.post(
@@ -102,22 +61,14 @@ async def start_demo(
     email_service: Annotated[object, Depends(get_email_service)],
 ):
     """Provision a fresh demo tenant and return an authenticated session."""
-    # 1. Disposable email check
-    if _is_disposable_email(request.email):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Please use a real email address.",
-        )
+    # 1. Bot + throwaway-inbox checks, shared with the register endpoint.
+    await guard_public_signup(
+        email=request.email,
+        turnstile_token=request.turnstile_token,
+        http_request=http_request,
+    )
 
-    # 2. Turnstile verification
-    remote_ip = http_request.client.host if http_request.client else None
-    if not await _verify_turnstile_token(request.turnstile_token, remote_ip):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Bot verification failed. Please try again.",
-        )
-
-    # 3. If email already belongs to a real account, send a magic login link
+    # 2. If email already belongs to a real account, send a magic login link
     #    instead of provisioning another demo. Constant-time delay inside the
     #    forgot-password use case prevents enumeration timing attacks.
     existing_user = await user_repo.get_by_email_str(request.email)
@@ -136,7 +87,7 @@ async def start_demo(
             message="Existing account detected \u2014 magic login link sent",
         )
 
-    # 4. Wire up use case
+    # 3. Wire up use case
     tenant_service = TenantService(db)
     seed_use_case = SeedDemoTenantUseCase(db)
     use_case = StartDemoUseCase(
@@ -153,7 +104,7 @@ async def start_demo(
         ),
     )
 
-    # 5. Provision
+    # 4. Provision
     try:
         result = await use_case.execute(
             captured_email=request.email,
@@ -161,6 +112,7 @@ async def start_demo(
             captured_whatsapp=request.whatsapp,
             language=request.language,
             niche=request.niche,
+            attribution=request.attribution,
         )
     except Exception:
         logger.exception("demo_start_failed")
@@ -170,7 +122,7 @@ async def start_demo(
             detail="Could not start demo. Please try again in a moment.",
         )
 
-    # 6. Set cross-domain auth cookies
+    # 5. Set cross-domain auth cookies
     set_auth_cookies(response, result.access_token, result.refresh_token)
 
     return SuccessResponse(

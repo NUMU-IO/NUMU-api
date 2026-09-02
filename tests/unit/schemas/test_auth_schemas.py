@@ -24,6 +24,7 @@ class TestRegisterRequest:
             "password": "SecurePass123!",
             "first_name": "John",
             "last_name": "Doe",
+            "phone": "+201234567890",
         }
         request = RegisterRequest(**data)
 
@@ -31,20 +32,41 @@ class TestRegisterRequest:
         assert request.password == "SecurePass123!"
         assert request.first_name == "John"
         assert request.last_name == "Doe"
-        assert request.phone is None
+        assert request.phone == "+201234567890"
 
-    def test_valid_registration_with_phone(self):
-        """Test registration with optional phone."""
+    def test_local_phone_is_normalised_to_e164(self):
+        """A merchant types the number the way they say it out loud."""
+        request = RegisterRequest(
+            email="user@example.com",
+            password="SecurePass123!",
+            first_name="John",
+            last_name="Doe",
+            phone="01234567890",
+        )
+
+        assert request.phone == "+201234567890"
+
+    @pytest.mark.parametrize("missing", [None, "", "   "])
+    def test_registration_without_a_phone_is_rejected(self, missing):
+        """Phone is required at this door as of the intake redesign.
+
+        It was optional, and the result was a platform that could not
+        reach most of its own merchants: wallet warnings are email-only,
+        and in this market WhatsApp is the channel that gets read. Blank
+        and whitespace are rejected alongside a missing key — otherwise
+        " " satisfies the required check and lands as NULL.
+        """
         data = {
             "email": "user@example.com",
             "password": "SecurePass123!",
             "first_name": "John",
             "last_name": "Doe",
-            "phone": "+201234567890",
         }
-        request = RegisterRequest(**data)
+        if missing is not None:
+            data["phone"] = missing
 
-        assert request.phone == "+201234567890"
+        with pytest.raises(ValidationError):
+            RegisterRequest(**data)
 
     def test_invalid_email(self):
         """Test validation fails for invalid email."""

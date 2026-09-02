@@ -380,6 +380,11 @@ class Settings(BaseSettings):
     # Test keys (always pass): site=1x00000000000000000000AA, secret=1x0000000000000000000000000000000AA
     turnstile_site_key: str | None = None
     turnstile_secret_key: str | None = None
+    # Turnstile on POST /auth/register, off by default. The check itself
+    # is deploy-ready, but the landing's signup modal has to be shipping
+    # a token before this is flipped on — otherwise every registration
+    # 422s the moment a secret exists. Turn on after the landing deploy.
+    ff_register_turnstile: bool = False
     # Where storefronts live ("{subdomain}.{base}"). Demo storefronts use the same.
     storefront_base_domain: str = "numueg.app"
     # Where the merchant hub is hosted. Used to build the demo redirect URL.

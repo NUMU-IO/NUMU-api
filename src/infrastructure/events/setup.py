@@ -70,6 +70,9 @@ from src.infrastructure.events.handlers.instapay_notification_handler import (
 from src.infrastructure.events.handlers.invoice_on_paid_handler import (
     handle_invoice_on_order_paid,
 )
+from src.infrastructure.events.handlers.lead_activation_handler import (
+    handle_lead_activation_on_order_paid,
+)
 from src.infrastructure.events.handlers.merchant_notification_handler import (
     handle_merchant_order_notification,
 )
@@ -241,6 +244,10 @@ def create_event_bus() -> EventBus:
     # when an order is paid; reverse it on a full refund. Missed events are
     # healed by the daily wallet_reconciliation_task.
     bus.subscribe(OrderPaidEvent, handle_commission_charge_on_order_paid)
+    # Stamp the activation milestone on the merchant lead. This is the
+    # only writer of `first_order_at` / status `activated` — the admin
+    # funnel's last column was always zero without it.
+    bus.subscribe(OrderPaidEvent, handle_lead_activation_on_order_paid)
     bus.subscribe(OrderStatusChangedEvent, handle_commission_reversal_on_refund)
     # Un-mark-paid: reverse what mark-paid did (commission, invoice,
     # timeline, feed). Customer messages already sent are not recalled.

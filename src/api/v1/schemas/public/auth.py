@@ -6,7 +6,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
 
 from src.api.dependencies.sanitization import SanitizedStr
-from src.application.dto.phone_field import PhoneField
+from src.api.v1.schemas.public.attribution import AttributionPayload
+from src.application.dto.phone_field import PhoneField, RequiredPhoneField
 from src.config import settings as _app_settings
 
 # Special-use TLDs (RFC 2606 / RFC 6761) that pydantic's EmailStr rejects by default.
@@ -58,12 +59,13 @@ class RegisterRequest(BaseModel):
     last_name: SanitizedStr = Field(
         ..., min_length=1, max_length=100, description="Last name"
     )
-    phone: PhoneField = Field(
-        None,
+    phone: RequiredPhoneField = Field(
         description=(
             "Phone number. Accepts E.164 (e.g. '+201001234567') or an "
             "object {'country_code': 'EG', 'local': '01001234567'}. "
-            "Always stored as E.164."
+            "Always stored as E.164. Required: a merchant we cannot reach "
+            "on WhatsApp cannot be warned about a low wallet, chased when "
+            "setup stalls, or recovered when they lose their password."
         ),
     )
     plan_intent: Literal["payg", "starter", "pro"] | None = Field(
@@ -72,6 +74,22 @@ class RegisterRequest(BaseModel):
             "Which pricing card the visitor clicked on the landing before "
             "registering. 'payg' auto-activates Pay as you Grow at store "
             "creation; paid intents are recorded for attribution."
+        ),
+    )
+    attribution: AttributionPayload | None = Field(
+        None,
+        description=(
+            "UTM parameters, referrer and landing path from the marketing "
+            "site. Recorded on the merchant lead so acquisition cost can be "
+            "attributed to a channel."
+        ),
+    )
+    turnstile_token: str | None = Field(
+        None,
+        max_length=2048,
+        description=(
+            "Cloudflare Turnstile token. Only enforced when "
+            "FF_REGISTER_TURNSTILE is on — see settings."
         ),
     )
 
