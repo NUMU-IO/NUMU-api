@@ -171,10 +171,31 @@ class TestCapabilityGuard:
 
     @pytest.mark.asyncio
     async def test_all_carriers_support_the_base_contract(self):
+        """Base contract = book, track, check serviceability. Nothing else.
+
+        `get_rates` is deliberately NOT here: P1 gates it behind
+        `supports_live_rates`, and Mylerz/J&T declare False because their
+        `get_rates` returns hardcoded `_default_rates` guesses rather than
+        real carrier quotes. Presenting a guess as a quote is worse than
+        admitting we can't quote.
+        """
         for slug in SUPPORTED_CARRIERS:
             service = await service_for_carrier(slug, {})
-            for operation in ("create_shipment", "track_shipment", "get_rates"):
+            for operation in ("create_shipment", "track_shipment", "validate_address"):
                 assert capability(service, operation, slug) is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("slug", ["mylerz", "jt"])
+    async def test_thin_carriers_do_not_offer_invented_rates(self, slug):
+        """Regression: they must not present `_default_rates` as quotes."""
+        service = await service_for_carrier(slug, {})
+        with pytest.raises(CarrierCapabilityError):
+            capability(service, "get_rates", slug)
+
+    @pytest.mark.asyncio
+    async def test_bosta_does_offer_live_rates(self):
+        service = await service_for_carrier("bosta", {})
+        assert capability(service, "get_rates", "bosta") is not None
 
 
 class TestInvariants:

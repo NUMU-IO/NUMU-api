@@ -435,15 +435,22 @@ async def get_cod_summary(
 async def list_shipment_carriers(
     store: Annotated[Store, Depends(get_current_store)],
 ):
-    """Supported carriers with bilingual names and supported operations.
+    """The carrier catalog: names, tier, capabilities, credential fields.
 
-    Lets the hub disable the actions a carrier can't do instead of letting
-    merchants find out by clicking and getting a 501. Mylerz and J&T
-    implement only 4 of the 20 operations Bosta does — before P0 those
+    Registry-backed — adding a carrier to ``CARRIERS`` makes it appear
+    here, and in the hub, with no further code change. This is what lets
+    the hub render the carrier list and generate connect-forms instead of
+    hardcoding a panel per carrier (P3 consumes it).
+
+    Also lets the hub disable the actions a carrier can't do rather than
+    letting merchants find out by clicking and getting a 501: Mylerz and
+    J&T implement 4 of the 20 operations Bosta does. Before P0 those
     clicks silently called Bosta instead of failing.
 
+    Answers from the registry alone — no credentials, no network — so it
+    works for a store that has connected nothing.
+
     Read-only and store-scoped for auth; the catalog itself is global.
-    Superseded by P1.3's registry-backed ``GET /shipping/carriers``.
     """
     _ = store
     return SuccessResponse(data=carrier_catalog(), message="Carriers retrieved")

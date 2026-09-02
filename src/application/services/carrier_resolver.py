@@ -6,63 +6,56 @@ operation — cancel, return, AWB, pickups, cities — called Bosta
 unconditionally. Cancelling a Mylerz shipment issued a request to
 Bosta's API. See ``docs/Plans/Shipping/SHIPPING-UNIFIED-LAYER.md`` § P0.
 
-Two rules this module exists to enforce:
+Two rules this module enforces:
 
 1. **Dispatch on the shipment's own carrier**, never on a default.
 2. **Never silently fall back to Bosta.** An unknown carrier is an error,
    not a Bosta shipment; an unknown tracking URL is ``None``, not a Bosta
    link.
 
-This is deliberately a small dispatch table, not an abstraction. **P1
-replaces its guts with the carrier registry** (`CARRIERS: dict[str,
-CarrierSpec]`), at which point ``SUPPORTED_CARRIERS``,
-``_TRACKING_URL_TEMPLATES`` and ``capability`` all come from the spec
-instead of being hand-maintained here. Keep it boring until then.
+P1 update: the hand-maintained tables that used to live here (slugs,
+names, tracking templates, provider imports) now come from
+:mod:`src.application.services.carrier_registry`. This module keeps only
+*behaviour* — resolve, validate, capability-check, bilingual errors —
+and the registry holds the *data*. The public API is unchanged so the
+call sites from P0 did not have to churn.
 """
 
 from typing import Any
 
+from src.application.services.carrier_registry import (
+    CARRIERS,
+    CarrierSpec,
+    carrier_slugs,
+    catalog,
+    default_carrier,
+    get_spec,
+)
 from src.core.exceptions import DomainException, ValidationError
 
-# Carrier slugs with a working provider implementation.
-#
-# ``jt`` is creatable here but is NOT present in the shipping-settings
-# route (`routes/stores/settings.py`), which still hardcodes
-# ("aramex", "bosta", "mylerz", "manual"). That inconsistency is real and
-# is fixed in P1.6 — don't "fix" it by removing J&T from this tuple.
-SUPPORTED_CARRIERS: tuple[str, ...] = ("bosta", "mylerz", "jt")
-
-DEFAULT_CARRIER = "bosta"
-
-# Merchant-facing carrier names. Arabic is Egyptian colloquial per
-# DESIGN.md; the Latin slug itself stays LTR wherever it's rendered.
-CARRIER_NAMES: dict[str, dict[str, str]] = {
-    "bosta": {"en": "Bosta", "ar": "بوسطة"},
-    "mylerz": {"en": "Mylerz", "ar": "مايلرز"},
-    "jt": {"en": "J&T Express", "ar": "جيه آند تي"},
-}
+# Backwards-compatible aliases. These are now *derived from* the
+# registry rather than hand-maintained — adding a carrier there is
+# enough. Kept as module constants because callers import them.
+SUPPORTED_CARRIERS: tuple[str, ...] = carrier_slugs()
+DEFAULT_CARRIER: str = default_carrier()
 
 
 def carrier_name(carrier: str, lang: str = "en") -> str:
     """Display name for a carrier, falling back to the raw slug."""
-    return CARRIER_NAMES.get(carrier, {}).get(lang, carrier)
-
-
-# Public shopper-facing tracking pages, keyed by carrier slug.
-# A carrier missing from this map yields None — see _tracking_url_for.
-_TRACKING_URL_TEMPLATES: dict[str, str] = {
-    "bosta": "https://bosta.co/tracking-shipment/?tracking_number={tracking_number}",
-    "mylerz": "https://mylerz.com/track/{tracking_number}",
-    "jt": "https://www.jtexpress-eg.com/trajectoryQuery?waybillNo={tracking_number}",
-}
+    spec = get_spec(carrier)
+    if spec is None:
+        return carrier
+    return spec.name_ar if lang == "ar" else spec.name_en
 
 
 # Merchant-facing operation labels, for error copy. Arabic is Egyptian
-# colloquial per DESIGN.md § Arabic rules.
+# colloquial per DESIGN.md § Arabic rules. Keyed by provider method name
+# because that is what a route asks for.
 OPERATION_LABELS: dict[str, dict[str, str]] = {
     "cancel_shipment": {"en": "cancelling shipments", "ar": "إلغاء الشحنات"},
     "request_return": {"en": "return shipments", "ar": "شحنات المرتجعات"},
     "print_awb": {"en": "printing waybills", "ar": "طباعة البوليصة"},
+    "get_label": {"en": "printing waybills", "ar": "طباعة البوليصة"},
     "update_delivery": {"en": "editing a delivery", "ar": "تعديل الشحنة"},
     "get_delivery": {"en": "delivery details", "ar": "تفاصيل الشحنة"},
     "create_pickup": {"en": "scheduling pickups", "ar": "حجز استلام"},
@@ -73,21 +66,46 @@ OPERATION_LABELS: dict[str, dict[str, str]] = {
     "get_pickup_locations": {"en": "pickup locations", "ar": "أماكن الاستلام"},
     "get_cities": {"en": "city lookup", "ar": "قائمة المدن"},
     "get_city_zones": {"en": "zone lookup", "ar": "قائمة المناطق"},
+    "get_rates": {"en": "live rates", "ar": "أسعار الشحن المباشرة"},
 }
 
-# Every operation the routes in this layer may ask a provider for.
-# Used to answer "what can this carrier do?" without calling it.
+# Which declared capability each provider method needs. A method with no
+# entry here is part of the base contract every carrier implements.
+#
+# This is the P1 replacement for `hasattr` introspection: capability is
+# now *declared* in the registry, and the registry's own test asserts the
+# declaration matches what the provider class really implements, so the
+# two cannot drift.
+OPERATION_CAPABILITY: dict[str, str] = {
+    "cancel_shipment": "supports_cancel",
+    "request_return": "supports_return",
+    "print_awb": "supports_labels",
+    "get_label": "supports_labels",
+    "update_delivery": "supports_delivery_update",
+    "get_delivery": "supports_delivery_update",
+    "create_pickup": "supports_pickup",
+    "list_pickups": "supports_pickup",
+    "get_pickup": "supports_pickup",
+    "update_pickup": "supports_pickup",
+    "delete_pickup": "supports_pickup",
+    "get_pickup_locations": "supports_pickup",
+    "get_cities": "supports_city_lookup",
+    "get_city_zones": "supports_city_lookup",
+    "get_rates": "supports_live_rates",
+    "track_shipment": "supports_tracking",
+}
+
+#: Every operation the route layer may ask a provider for.
 KNOWN_OPERATIONS: tuple[str, ...] = (
     "create_shipment",
     "track_shipment",
-    "get_rates",
     "validate_address",
-    *OPERATION_LABELS.keys(),
+    *OPERATION_CAPABILITY.keys(),
 )
 
 
 class UnknownCarrierError(ValidationError):
-    """Raised when a carrier slug has no provider implementation.
+    """Raised when a carrier slug has no registry entry.
 
     Subclasses ValidationError so existing 400-mapping handlers catch it.
     """
@@ -119,11 +137,8 @@ class UnknownCarrierError(ValidationError):
 class CarrierCapabilityError(DomainException):
     """Raised when a carrier cannot perform the requested operation.
 
-    Distinct from UnknownCarrierError: the carrier is valid, but this
-    provider does not implement this operation. Routes map it to 501.
-
-    P1 replaces the method-presence check with declared
-    ``ProviderCapabilities``.
+    Distinct from UnknownCarrierError: the carrier is valid, but its
+    registry entry does not declare this capability. Routes map it to 501.
     """
 
     def __init__(self, carrier: str, operation: str) -> None:
@@ -142,15 +157,16 @@ class CarrierCapabilityError(DomainException):
         localize and branch on the code instead of surfacing raw English
         to an Arabic-speaking merchant.
         """
+        labels = OPERATION_LABELS.get(self.operation, {})
         return {
             "code": "CARRIER_OPERATION_UNSUPPORTED",
             "message_en": (
                 f"{carrier_name(self.carrier, 'en')} does not support "
-                f"{OPERATION_LABELS.get(self.operation, {}).get('en', self.operation)}."
+                f"{labels.get('en', self.operation)}."
             ),
             "message_ar": (
                 f"{carrier_name(self.carrier, 'ar')} مش بيدعم "
-                f"{OPERATION_LABELS.get(self.operation, {}).get('ar', self.operation)}."
+                f"{labels.get('ar', self.operation)}."
             ),
             "carrier": self.carrier,
             "operation": self.operation,
@@ -166,12 +182,18 @@ def validate_carrier(carrier: str | None) -> str:
     Never defaults. Passing an unrecognised slug used to silently book a
     real Bosta shipment; now it raises.
     """
-    if not carrier:
-        raise UnknownCarrierError(str(carrier))
-    slug = carrier.strip().lower()
-    if slug not in SUPPORTED_CARRIERS:
-        raise UnknownCarrierError(carrier)
-    return slug
+    spec = get_spec(carrier)
+    if spec is None:
+        raise UnknownCarrierError(str(carrier) if carrier else "")
+    return spec.slug
+
+
+def spec_for(carrier: str | None) -> CarrierSpec:
+    """Registry entry for a slug, or raise UnknownCarrierError."""
+    spec = get_spec(carrier)
+    if spec is None:
+        raise UnknownCarrierError(str(carrier) if carrier else "")
+    return spec
 
 
 def tracking_url_for(carrier: str, tracking_number: str | None) -> str | None:
@@ -182,40 +204,28 @@ def tracking_url_for(carrier: str, tracking_number: str | None) -> str | None:
     worse than no link — it sends the shopper somewhere that will never
     recognise their number.
     """
-    if not tracking_number:
+    spec = get_spec(carrier)
+    if spec is None:
         return None
-    template = _TRACKING_URL_TEMPLATES.get(carrier)
-    if not template:
+    return spec.tracking_url(tracking_number)
+
+
+def map_carrier_status(carrier: str, raw_status: str | None) -> Any:
+    """Carrier's own status string → NUMU's ShipmentStatus, or None."""
+    spec = get_spec(carrier)
+    if spec is None:
         return None
-    return template.format(tracking_number=tracking_number)
+    return spec.map_status(raw_status)
 
 
 async def service_for_carrier(carrier: str, store_settings: dict | None) -> Any:
     """Resolve the provider for a carrier slug.
 
     Raises:
-        UnknownCarrierError: the slug has no provider.
+        UnknownCarrierError: the slug has no registry entry.
     """
-    slug = validate_carrier(carrier)
-    settings = store_settings or {}
-
-    if slug == "mylerz":
-        from src.infrastructure.external_services.mylerz import (
-            get_mylerz_service_for_store,
-        )
-
-        return await get_mylerz_service_for_store(settings)
-
-    if slug == "jt":
-        from src.infrastructure.external_services.jt import get_jt_service_for_store
-
-        return await get_jt_service_for_store(settings)
-
-    from src.infrastructure.external_services.bosta.shipping_service import (
-        get_bosta_service_for_store,
-    )
-
-    return await get_bosta_service_for_store(settings)
+    spec = spec_for(carrier)
+    return await spec.factory(store_settings or {})
 
 
 async def service_for_shipment(shipment: Any, store_settings: dict | None) -> Any:
@@ -227,70 +237,78 @@ async def service_for_shipment(shipment: Any, store_settings: dict | None) -> An
     return await service_for_carrier(shipment.carrier, store_settings)
 
 
+def supports(carrier: str, operation: str) -> bool:
+    """Whether a carrier declares the capability an operation needs."""
+    spec = get_spec(carrier)
+    if spec is None:
+        return False
+    required = OPERATION_CAPABILITY.get(operation)
+    if required is None:
+        return True  # base contract — every carrier has it
+    return bool(getattr(spec.capabilities, required, False))
+
+
 def supported_operations(carrier: str) -> list[str]:
-    """Which operations this carrier's provider actually implements.
+    """Which operations this carrier declares it can do.
 
     Answers "what can this carrier do?" **without** constructing a client
-    or making a call, by inspecting the provider class. Mylerz and J&T
-    implement only the four base methods; Bosta implements twenty.
+    or making a call, so the hub can render shipping settings for a store
+    that has not connected anything yet.
 
-    This exists so the hub can disable the actions a carrier can't do
-    rather than letting merchants discover each one by clicking it and
-    getting a 501. Before P0 those clicks silently hit Bosta instead.
-
-    P1 replaces class introspection with declared ProviderCapabilities.
+    Exists so the hub disables the actions a carrier can't do rather than
+    letting merchants discover each one by clicking it and getting a 501.
+    Before P0 those clicks silently hit Bosta instead.
     """
-    try:
-        slug = validate_carrier(carrier)
-    except UnknownCarrierError:
+    if get_spec(carrier) is None:
         return []
-
-    if slug == "mylerz":
-        from src.infrastructure.external_services.mylerz.shipping_service import (
-            MylerzShippingService as cls,
-        )
-    elif slug == "jt":
-        from src.infrastructure.external_services.jt.shipping_service import (
-            JTShippingService as cls,
-        )
-    else:
-        from src.infrastructure.external_services.bosta.shipping_service import (
-            BostaShippingService as cls,
-        )
-
-    return [op for op in KNOWN_OPERATIONS if callable(getattr(cls, op, None))]
+    return [op for op in KNOWN_OPERATIONS if supports(carrier, op)]
 
 
 def carrier_catalog() -> list[dict[str, Any]]:
-    """Every supported carrier with its display names and capabilities.
+    """Every selectable carrier, with names, capabilities and credentials.
 
-    Minimal precursor to P1.3's ``GET /shipping/carriers`` registry
-    endpoint — same intent, hand-maintained until the registry lands.
+    Registry-backed: adding a carrier to ``CARRIERS`` makes it appear
+    here, and in the hub, with no further code change.
     """
-    return [
-        {
-            "slug": slug,
-            "name_en": carrier_name(slug, "en"),
-            "name_ar": carrier_name(slug, "ar"),
-            "is_default": slug == DEFAULT_CARRIER,
-            "tracking_url_template": _TRACKING_URL_TEMPLATES.get(slug),
-            "supported_operations": supported_operations(slug),
-        }
-        for slug in SUPPORTED_CARRIERS
-    ]
+    entries = catalog()
+    for entry in entries:
+        entry["supported_operations"] = supported_operations(entry["slug"])
+    return entries
 
 
 def capability(service: Any, operation: str, carrier: str) -> Any:
-    """Return a provider method, or raise if the provider lacks it.
+    """Return a provider method, or raise if the carrier can't do it.
 
-    Mylerz and J&T implement only the four base interface methods, so
-    calling ``print_awb`` or ``create_pickup`` on them would raise
-    AttributeError deep in a route. This turns that into an explicit,
-    translatable domain error at the call site.
-
-    P1 replaces method presence with declared ProviderCapabilities.
+    Checks the **declared** capability first, so a carrier that has a
+    method but hasn't been verified against the live API is still gated.
+    The attribute check stays as a backstop for the base contract.
     """
+    if not supports(carrier, operation):
+        raise CarrierCapabilityError(carrier, operation)
     fn = getattr(service, operation, None)
     if fn is None or not callable(fn):
         raise CarrierCapabilityError(carrier, operation)
     return fn
+
+
+__all__ = [
+    "CARRIERS",
+    "DEFAULT_CARRIER",
+    "KNOWN_OPERATIONS",
+    "OPERATION_CAPABILITY",
+    "OPERATION_LABELS",
+    "SUPPORTED_CARRIERS",
+    "CarrierCapabilityError",
+    "UnknownCarrierError",
+    "capability",
+    "carrier_catalog",
+    "carrier_name",
+    "map_carrier_status",
+    "service_for_carrier",
+    "service_for_shipment",
+    "spec_for",
+    "supported_operations",
+    "supports",
+    "tracking_url_for",
+    "validate_carrier",
+]
