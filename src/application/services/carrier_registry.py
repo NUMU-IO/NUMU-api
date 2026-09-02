@@ -63,6 +63,40 @@ class CredentialField:
         }
 
 
+# Which declared capability each provider method needs. A method with no
+# entry here is part of the base contract every carrier implements.
+#
+# This is the P1 replacement for `hasattr` introspection: capability is
+# now *declared* in the registry, and the registry's own test asserts the
+# declaration matches what the provider class really implements, so the
+# two cannot drift.
+OPERATION_CAPABILITY: dict[str, str] = {
+    "cancel_shipment": "supports_cancel",
+    "request_return": "supports_return",
+    "print_awb": "supports_labels",
+    "get_label": "supports_labels",
+    "update_delivery": "supports_delivery_update",
+    "get_delivery": "supports_delivery_update",
+    "create_pickup": "supports_pickup",
+    "list_pickups": "supports_pickup",
+    "get_pickup": "supports_pickup",
+    "update_pickup": "supports_pickup",
+    "delete_pickup": "supports_pickup",
+    "get_pickup_locations": "supports_pickup",
+    "get_cities": "supports_city_lookup",
+    "get_city_zones": "supports_city_lookup",
+    "get_rates": "supports_live_rates",
+    "track_shipment": "supports_tracking",
+}
+
+#: Every operation the route layer may ask a provider for.
+KNOWN_OPERATIONS: tuple[str, ...] = (
+    "create_shipment",
+    "track_shipment",
+    "validate_address",
+    *OPERATION_CAPABILITY.keys(),
+)
+
 # ── Carrier spec ────────────────────────────────────────────────────
 
 #: Tier 1 native API, Tier 2 aggregator, Tier 3 manual/offline.
@@ -196,6 +230,14 @@ async def _mylerz_factory(store_settings: dict) -> Any:
     return await get_mylerz_service_for_store(store_settings)
 
 
+async def _manual_factory(store_settings: dict) -> Any:
+    from src.infrastructure.external_services.manual import (
+        get_manual_service_for_store,
+    )
+
+    return await get_manual_service_for_store(store_settings)
+
+
 async def _jt_factory(store_settings: dict) -> Any:
     from src.infrastructure.external_services.jt import get_jt_service_for_store
 
@@ -216,6 +258,14 @@ def _mylerz_cls() -> type:
     )
 
     return MylerzShippingService
+
+
+def _manual_cls() -> type:
+    from src.infrastructure.external_services.manual.shipping_service import (
+        ManualShippingService,
+    )
+
+    return ManualShippingService
 
 
 def _jt_cls() -> type:
@@ -302,6 +352,30 @@ CARRIERS: dict[str, CarrierSpec] = {
             "CANCELLED": ShipmentStatus.CANCELLED,
             "DELIVERY_FAILED": ShipmentStatus.FAILED,
         },
+    ),
+    "manual": CarrierSpec(
+        slug="manual",
+        name_en="My own courier",
+        name_ar="مندوب خاص",
+        tier="manual",
+        brand_color="#71717A",
+        # Tier 3 by definition: NUMU issues the waybill and the tracking
+        # number because the courier has no API to issue either. COD is
+        # supported because the courier collects cash — that is the whole
+        # point — but nothing here can be booked, cancelled or quoted
+        # electronically, so everything else stays False and the routes
+        # return 501 rather than pretending.
+        capabilities=ProviderCapabilities(
+            supports_cod=True,
+            supports_labels=True,
+        ),
+        factory=_manual_factory,
+        provider_cls_loader=_manual_cls,
+        # NUMU-issued numbers have no public tracking page; the shopper
+        # tracking page (P10) becomes this.
+        tracking_url_template=None,
+        credential_fields=(),
+        status_map={},
     ),
     "mylerz": CarrierSpec(
         slug="mylerz",
@@ -501,10 +575,6 @@ def validate_registry() -> None:
                 )
 
         if spec.verification_operation:
-            from src.application.services.carrier_resolver import (
-                KNOWN_OPERATIONS,
-            )
-
             if spec.verification_operation not in KNOWN_OPERATIONS:
                 raise AssertionError(
                     f"Carrier '{slug}' verifies with unknown operation "

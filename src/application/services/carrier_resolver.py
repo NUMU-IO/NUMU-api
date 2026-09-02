@@ -25,6 +25,8 @@ from typing import Any
 
 from src.application.services.carrier_registry import (
     CARRIERS,
+    KNOWN_OPERATIONS,
+    OPERATION_CAPABILITY,
     CarrierSpec,
     carrier_slugs,
     catalog,
@@ -68,40 +70,6 @@ OPERATION_LABELS: dict[str, dict[str, str]] = {
     "get_city_zones": {"en": "zone lookup", "ar": "قائمة المناطق"},
     "get_rates": {"en": "live rates", "ar": "أسعار الشحن المباشرة"},
 }
-
-# Which declared capability each provider method needs. A method with no
-# entry here is part of the base contract every carrier implements.
-#
-# This is the P1 replacement for `hasattr` introspection: capability is
-# now *declared* in the registry, and the registry's own test asserts the
-# declaration matches what the provider class really implements, so the
-# two cannot drift.
-OPERATION_CAPABILITY: dict[str, str] = {
-    "cancel_shipment": "supports_cancel",
-    "request_return": "supports_return",
-    "print_awb": "supports_labels",
-    "get_label": "supports_labels",
-    "update_delivery": "supports_delivery_update",
-    "get_delivery": "supports_delivery_update",
-    "create_pickup": "supports_pickup",
-    "list_pickups": "supports_pickup",
-    "get_pickup": "supports_pickup",
-    "update_pickup": "supports_pickup",
-    "delete_pickup": "supports_pickup",
-    "get_pickup_locations": "supports_pickup",
-    "get_cities": "supports_city_lookup",
-    "get_city_zones": "supports_city_lookup",
-    "get_rates": "supports_live_rates",
-    "track_shipment": "supports_tracking",
-}
-
-#: Every operation the route layer may ask a provider for.
-KNOWN_OPERATIONS: tuple[str, ...] = (
-    "create_shipment",
-    "track_shipment",
-    "validate_address",
-    *OPERATION_CAPABILITY.keys(),
-)
 
 
 class UnknownCarrierError(ValidationError):

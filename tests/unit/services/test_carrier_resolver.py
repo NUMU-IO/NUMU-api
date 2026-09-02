@@ -23,6 +23,7 @@ from src.application.services.carrier_resolver import (
     capability,
     service_for_carrier,
     service_for_shipment,
+    supports,
     tracking_url_for,
     validate_carrier,
 )
@@ -171,18 +172,30 @@ class TestCapabilityGuard:
 
     @pytest.mark.asyncio
     async def test_all_carriers_support_the_base_contract(self):
-        """Base contract = book, track, check serviceability. Nothing else.
+        """Base contract = book a parcel and check serviceability.
 
-        `get_rates` is deliberately NOT here: P1 gates it behind
+        `get_rates` is deliberately NOT here: it's gated behind
         `supports_live_rates`, and Mylerz/J&T declare False because their
         `get_rates` returns hardcoded `_default_rates` guesses rather than
         real carrier quotes. Presenting a guess as a quote is worse than
         admitting we can't quote.
+
+        `track_shipment` isn't here either, for the same kind of reason:
+        a Tier 3 courier has no carrier to ask. Its status lives in the
+        shipment's own history, which the route already returns.
         """
         for slug in SUPPORTED_CARRIERS:
             service = await service_for_carrier(slug, {})
-            for operation in ("create_shipment", "track_shipment", "validate_address"):
+            for operation in ("create_shipment", "validate_address"):
                 assert capability(service, operation, slug) is not None
+
+    @pytest.mark.asyncio
+    async def test_carriers_claiming_tracking_can_actually_track(self):
+        for slug in SUPPORTED_CARRIERS:
+            if not supports(slug, "track_shipment"):
+                continue
+            service = await service_for_carrier(slug, {})
+            assert capability(service, "track_shipment", slug) is not None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("slug", ["mylerz", "jt"])
@@ -204,12 +217,25 @@ class TestInvariants:
     def test_default_carrier_is_supported(self):
         assert DEFAULT_CARRIER in SUPPORTED_CARRIERS
 
-    def test_every_supported_carrier_has_a_tracking_url(self):
+    def test_carriers_claiming_tracking_have_somewhere_to_send_shoppers(self):
+        """A carrier that advertises tracking must have a page for it.
+
+        Scoped to carriers that *declare* tracking. A Tier 3 courier
+        genuinely has no public tracking page — NUMU issues the number
+        itself — so requiring one of every carrier would force us either
+        to invent a URL or to stop supporting couriers without an API.
+        """
         for slug in SUPPORTED_CARRIERS:
+            if not supports(slug, "track_shipment"):
+                continue
             assert tracking_url_for(slug, "X") is not None, (
-                f"{slug} has no tracking URL template — it would silently "
-                f"return None to shoppers"
+                f"{slug} claims tracking but has no tracking URL template — "
+                f"it would silently return None to shoppers"
             )
+
+    def test_a_carrier_without_tracking_returns_none_not_a_wrong_url(self):
+        """The manual carrier must not borrow someone else's page."""
+        assert tracking_url_for("manual", "NM1") is None
 
     def test_jt_is_supported_here(self):
         """J&T is creatable but missing from the settings route (P1.6).

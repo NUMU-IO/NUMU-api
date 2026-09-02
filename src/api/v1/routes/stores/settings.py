@@ -144,17 +144,25 @@ def _get_default_payment_settings() -> dict:
 
 # Carriers that live in store settings but have no registry entry.
 #
-# ``manual`` is a merchant-managed courier with no API — P2 turns it into
-# a real Tier 3 provider with carrier profiles. It defaults to enabled,
-# so **every existing store already has it on**; do not change that
-# default without a migration.
-#
 # ``aramex`` has a settings toggle and a hub card but no provider behind
 # it. Kept so existing stores' stored values survive; see decision D2
 # (likely answer: Aramex arrives via an aggregator, never as a native
 # adapter). Do not add it to the registry until it has a provider.
+#
+# ``manual`` used to live here too. It is a real registry carrier as of
+# P2 — see ``_CARRIER_DEFAULT_OVERRIDES`` for why its default survives.
 _NON_REGISTRY_CARRIERS: dict[str, dict] = {
     "aramex": {"enabled": False, "is_configured": False, "last_configured": None},
+}
+
+# Carriers whose stored default is not "off".
+#
+# 🔴 ``manual`` ships enabled on every store, including both live ones.
+# The registry loop below would otherwise generate `enabled: False` for
+# it and silently switch manual shipping off for every existing merchant
+# the next time their settings were defaulted. Do not remove this without
+# a migration.
+_CARRIER_DEFAULT_OVERRIDES: dict[str, dict] = {
     "manual": {"enabled": True, "is_configured": True, "last_configured": None},
 }
 
@@ -181,7 +189,12 @@ def _get_default_shipping_settings() -> dict:
     from src.application.services.carrier_registry import carrier_slugs
 
     carriers: dict = {
-        slug: {"enabled": False, "is_configured": False, "last_configured": None}
+        slug: dict(
+            _CARRIER_DEFAULT_OVERRIDES.get(
+                slug,
+                {"enabled": False, "is_configured": False, "last_configured": None},
+            )
+        )
         for slug in carrier_slugs()
     }
     carriers.update({k: dict(v) for k, v in _NON_REGISTRY_CARRIERS.items()})
