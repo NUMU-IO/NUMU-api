@@ -37,6 +37,10 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # The number the merchant actually reads messages on. NULL means
+    # "same as phone"; resolve with COALESCE(whatsapp_phone, phone)
+    # rather than branching at every call site.
+    whatsapp_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="userrole", schema="public"),
@@ -64,6 +68,14 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
     # registering (payg / starter / pro). payg auto-activates at store
     # creation; paid intents are kept for attribution.
     plan_intent: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # When that intent was acted on. This used to be recorded by nulling
+    # plan_intent, which destroyed the only acquisition signal we had the
+    # moment it became useful. The timestamp is the re-run guard now, so
+    # the intent itself is kept forever.
+    plan_applied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     auth_provider: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
     )

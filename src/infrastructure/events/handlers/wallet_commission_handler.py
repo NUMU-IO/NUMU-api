@@ -133,6 +133,21 @@ async def handle_commission_charge_on_order_paid(event: OrderPaidEvent) -> None:
                 if tx is None:
                     return  # duplicate delivery — already charged
 
+                # First time this merchant paid us anything. Stamped in a
+                # savepoint so a lead-tracking failure rolls back only
+                # itself — the charge above is money the merchant owes and
+                # must survive a bookkeeping problem.
+                from src.infrastructure.events.handlers.lead_milestone_handler import (
+                    stamp_lead_milestone,
+                )
+
+                try:
+                    await stamp_lead_milestone(
+                        session, tenant_id=tenant_id, field="first_commission_at"
+                    )
+                except Exception:
+                    log.warning("lead_first_commission_failed", exc_info=True)
+
                 balance_after = tx.balance_after_cents
                 wallet = await service.get_or_create_wallet(tenant_id)
                 notify_level = service.bump_warning_level(wallet)

@@ -17,6 +17,7 @@ from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.token_service import ITokenService
 from src.core.logging import get_logger
 from src.core.value_objects.email import Email
+from src.core.value_objects.phone import InvalidPhoneError, PhoneNumber
 
 logger = get_logger(__name__)
 
@@ -32,11 +33,22 @@ class GoogleOAuthUseCase:
         self.user_repository = user_repository
         self.token_service = token_service
 
-    async def execute(self, id_token_str: str) -> AuthResponseDTO:
+    async def execute(
+        self, id_token_str: str, phone: str | None = None
+    ) -> AuthResponseDTO:
         """Verify Google ID token and return auth response.
 
         If the user doesn't exist, creates a new account (auto-verified).
         If the user exists (by google_id or email), logs them in.
+
+        *phone* is whatever the client managed to collect before handing
+        off to Google. Google itself never returns a number, so unlike the
+        other two signup doors this one cannot demand it — an account
+        created here may legitimately have ``phone`` unset, and
+        ``users.phone IS NULL`` is the flag the hub uses to collect it
+        later. A number is only ever written when the user has none: a
+        merchant who set their number in the hub does not get it silently
+        replaced by whatever a landing form happened to be holding.
         """
         log = logger.bind(provider="google")
 
@@ -68,6 +80,15 @@ class GoogleOAuthUseCase:
 
         log = log.bind(email=email_str, google_sub=google_sub)
 
+        # A malformed number is not worth failing a sign-in over: this is
+        # a best-effort capture, and the hub asks again when it is unset.
+        parsed_phone: PhoneNumber | None = None
+        if phone:
+            try:
+                parsed_phone = PhoneNumber.parse(phone)
+            except InvalidPhoneError:
+                log.warning("google_oauth_phone_unparseable")
+
         # 3. Find existing user by google_id
         user = await self.user_repository.get_by_google_id(google_sub)
 
@@ -81,6 +102,8 @@ class GoogleOAuthUseCase:
                 user.auth_provider = user.auth_provider or "google"
                 if avatar_url and not user.avatar_url:
                     user.avatar_url = avatar_url
+                if parsed_phone and not user.phone:
+                    user.phone = parsed_phone
                 if not user.is_verified:
                     user.verify_email()
                 user.update_last_login()
@@ -97,6 +120,7 @@ class GoogleOAuthUseCase:
                     status=UserStatus.ACTIVE,  # Auto-verified via Google
                     email_verified_at=datetime.now(UTC),
                     avatar_url=avatar_url,
+                    phone=parsed_phone,
                     trial_ends_at=datetime.now(UTC) + timedelta(days=14),
                     auth_provider="google",
                     google_id=google_sub,
@@ -107,6 +131,8 @@ class GoogleOAuthUseCase:
             # Existing Google user — just login
             if avatar_url and not user.avatar_url:
                 user.avatar_url = avatar_url
+            if parsed_phone and not user.phone:
+                user.phone = parsed_phone
             user.update_last_login()
             await self.user_repository.update(user)
             log.info("google_oauth_login", user_id=str(user.id))
