@@ -27,6 +27,7 @@ from src.api.dependencies.services import (
 )
 from src.api.responses import SuccessResponse
 from src.api.utils.cookies import clear_auth_cookies, set_auth_cookies
+from src.api.utils.signup_guard import guard_public_signup
 from src.api.v1.schemas import (
     AuthResponse,
     ChangePasswordRequest,
@@ -225,6 +226,7 @@ async def token_handoff(
 )
 async def register(
     request: RegisterRequest,
+    http_request: Request,
     response: Response,
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
@@ -241,6 +243,17 @@ async def register(
     # the platform settings page. Check this BEFORE we do any work so we
     # fail fast with a clear message.
     from src.api.v1.routes.admin.platform_settings import get_platform_settings
+    from src.config import settings as app_settings
+
+    # Bot + throwaway-inbox checks, shared with /public/demo/start. This
+    # endpoint used to have neither, despite being the one that mints a
+    # permanent tenant, a subdomain and a Cloudflare DNS record.
+    await guard_public_signup(
+        email=str(request.email),
+        turnstile_token=request.turnstile_token,
+        http_request=http_request,
+        require_turnstile=app_settings.ff_register_turnstile,
+    )
 
     platform = await get_platform_settings(db)
     if not platform.get("enable_new_merchant_signups", True):
@@ -283,11 +296,52 @@ async def register(
         if signup.trial_enabled
         else None
     )
+    # NULL whenever the merchant reads WhatsApp on their signup number,
+    # which is the common case. Every consumer resolves the destination as
+    # COALESCE(whatsapp_phone, phone), so absence is the answer rather than
+    # a duplicate of the number already in the row.
+    divergent_whatsapp = (
+        request.whatsapp_phone
+        if not request.whatsapp_same_as_phone
+        and request.whatsapp_phone
+        and request.whatsapp_phone != request.phone
+        else None
+    )
     await db.execute(
         sa_update(UserModel)
         .where(UserModel.id == result.user.id)
-        .values(trial_ends_at=trial_ends, plan_intent=request.plan_intent)
+        .values(
+            trial_ends_at=trial_ends,
+            plan_intent=request.plan_intent,
+            whatsapp_phone=divergent_whatsapp,
+        )
     )
+
+    # Record the lead before committing, so it shares this transaction:
+    # a registration that rolls back must not leave a lead behind for an
+    # account that does not exist.
+    from src.application.services.merchant_leads import Attribution, record_lead
+
+    await record_lead(
+        db,
+        email=str(result.user.email),
+        source="signup",
+        name=f"{result.user.first_name} {result.user.last_name}".strip(),
+        phone=request.phone,
+        # Only stored when it actually differs — NULL means "same as
+        # phone", so writing the same number twice would turn a tick
+        # into two values that can later disagree.
+        whatsapp_phone=divergent_whatsapp,
+        language=request.language,
+        plan_intent=request.plan_intent,
+        attribution=Attribution(**request.attribution.model_dump())
+        if request.attribution is not None
+        else None,
+        user_id=result.user.id,
+        status="registered",
+        registered_at=datetime.now(UTC),
+    )
+
     await db.commit()
     # Keep the response honest: the use case stamped the legacy 30-day
     # constant on the domain entity; reflect the admin-configured value
@@ -330,12 +384,20 @@ async def google_oauth(
     response: Response,
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Authenticate or register a user via Google ID token.
 
-    Expects JSON body: { "id_token": "..." }
-    If the user doesn't exist, creates a new auto-verified account.
-    If the user exists (by Google ID or email), logs them in.
+    Expects JSON body: { "id_token": "...", "phone": "...", "attribution": {...} }
+    Only ``id_token`` is required. If the user doesn't exist, creates a new
+    auto-verified account. If the user exists (by Google ID or email), logs
+    them in.
+
+    ``phone`` is optional here and required at the other two signup doors.
+    That is not an oversight: Google's ID token carries no phone number, so
+    demanding one would mean the client collecting it *before* the popup —
+    which is no longer one-click, the only reason this door exists. Accounts
+    born here can have no number, and the hub collects it on first run.
     """
     from src.application.use_cases.auth.google_oauth import GoogleOAuthUseCase
 
@@ -353,12 +415,47 @@ async def google_oauth(
     )
 
     try:
-        result = await use_case.execute(id_token_str)
+        result = await use_case.execute(
+            id_token_str,
+            phone=body.get("phone") if isinstance(body.get("phone"), str) else None,
+        )
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
         ) from e
+
+    # Record the lead. This door produced no lead row at all before, which
+    # meant every Google signup was invisible to the funnel — the door with
+    # the least friction was the one we could measure least. Safe to call on
+    # a returning user too: one row per email, blank values never overwrite
+    # stored ones, and status only ever moves forward.
+    from datetime import UTC, datetime
+
+    from src.application.services.merchant_leads import Attribution, record_lead
+
+    raw_attr = body.get("attribution")
+    await record_lead(
+        db,
+        email=str(result.user.email),
+        source="signup",
+        name=f"{result.user.first_name} {result.user.last_name}".strip(),
+        phone=result.user.phone,
+        user_id=result.user.id,
+        status="registered",
+        registered_at=datetime.now(UTC),
+        attribution=Attribution(
+            utm_source=raw_attr.get("utm_source"),
+            utm_medium=raw_attr.get("utm_medium"),
+            utm_campaign=raw_attr.get("utm_campaign"),
+            utm_content=raw_attr.get("utm_content"),
+            referrer=raw_attr.get("referrer"),
+            landing_path=raw_attr.get("landing_path"),
+        )
+        if isinstance(raw_attr, dict)
+        else None,
+    )
+    await db.commit()
 
     # Set auth cookies
     set_auth_cookies(

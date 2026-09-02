@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.merchant_leads import Attribution, record_lead
 from src.application.use_cases.demo.seed_demo_tenant import SeedDemoTenantUseCase
 from src.core.entities.store import Store, StoreStatus
 from src.core.entities.user import User, UserRole, UserStatus
@@ -72,6 +73,7 @@ class StartDemoUseCase:
         captured_whatsapp: str | None = None,
         language: str = "ar",
         niche: str = "fashion",
+        attribution=None,
     ) -> DemoCreationResult:
         logger.info(
             "demo_start_attempt", extra={"email_hash": _hash_email(captured_email)}
@@ -126,7 +128,27 @@ class StartDemoUseCase:
         except Exception:
             logger.warning("demo_seed_failed", exc_info=True)
 
-        # 7. Issue tenant-scoped tokens
+        # 7. Record the lead. This row is the reason the merchant is not
+        #    lost when demo_cleanup_task hard-deletes this tenant in seven
+        #    days — it lives in its own table with no FK back to here.
+        await record_lead(
+            self.db,
+            email=captured_email,
+            source="demo",
+            name=captured_name,
+            phone=captured_whatsapp,
+            language=language,
+            attribution=Attribution(**attribution.model_dump())
+            if attribution is not None
+            else None,
+            tenant_id=tenant.id,
+            user_id=user.id,
+            store_subdomain=subdomain,
+            status="demo_started",
+            demo_started_at=now,
+        )
+
+        # 8. Issue tenant-scoped tokens
         access_token = self.token_service.create_access_token(user, tenant_id=tenant.id)
         refresh_token = self.token_service.create_refresh_token(
             user, tenant_id=tenant.id

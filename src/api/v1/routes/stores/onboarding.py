@@ -14,8 +14,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_store_repository, verify_store_ownership
+from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
     get_onboarding_repository,
     get_order_repository,
@@ -289,6 +291,26 @@ class WizardConfigRequest(BaseModel):
     payment_methods: list[str] = Field(..., description="e.g. ['cod', 'paymob_card']")
     store_language: str = Field(default="ar", description="ar or en")
 
+    # ── Qualification ─────────────────────────────────────────────
+    # Recorded on the merchant lead, not applied to the store. These
+    # decide whether a human should call this merchant and which pitch
+    # they get; they do not change a single store setting. Optional on
+    # the wire so an older hub bundle keeps configuring stores through
+    # the rollout.
+    sells_where_today: str | None = Field(
+        None,
+        max_length=32,
+        description=(
+            "instagram, shopify, zid, salla, own_site, offline, nowhere, other"
+        ),
+    )
+    monthly_orders_band: str | None = Field(
+        None,
+        max_length=20,
+        description="0, 1-50, 51-200, 201-1000, 1000+",
+    )
+    city: str | None = Field(None, max_length=80)
+
 
 class WizardConfigResponse(BaseModel):
     """Result of auto-configuration."""
@@ -310,11 +332,13 @@ async def configure_from_wizard(
     onboarding_repo: Annotated[
         OnboardingRepository, Depends(get_onboarding_repository)
     ],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Auto-configure store based on onboarding wizard answers.
 
     Sets currency, payment methods, shipping zones, language,
-    and theme based on the merchant's business type and location.
+    and theme based on the merchant's business type and location, and
+    records the qualification answers on the merchant lead.
     """
     settings_applied: list[str] = []
     settings = store.settings or {}
@@ -473,6 +497,22 @@ async def configure_from_wizard(
     await try_complete_onboarding_step(
         onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
     )
+
+    # ── 8. Qualification onto the merchant lead ──
+    # Separate from the store config on purpose: this is who the merchant
+    # is, not how their store behaves. `business_type` was already being
+    # asked and then discarded once it had picked a theme.
+    from src.application.services.merchant_leads import record_qualification
+
+    await record_qualification(
+        db,
+        tenant_id=store.tenant_id,
+        sells_what=request.business_type,
+        sells_where_today=request.sells_where_today,
+        monthly_orders_band=request.monthly_orders_band,
+        city=request.city,
+    )
+    await db.commit()
 
     return SuccessResponse(
         data=WizardConfigResponse(

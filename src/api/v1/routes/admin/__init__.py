@@ -25,6 +25,7 @@ from src.api.v1.routes.admin.demos import router as demos_router
 from src.api.v1.routes.admin.email_templates import router as email_templates_router
 from src.api.v1.routes.admin.feedback import router as feedback_router
 from src.api.v1.routes.admin.landing_page import router as landing_page_router
+from src.api.v1.routes.admin.leads import router as leads_router
 from src.api.v1.routes.admin.merchant_hub_nav import (
     router as merchant_hub_nav_router,
 )
@@ -59,6 +60,7 @@ router = APIRouter()
 
 router.include_router(waitlist_router, prefix="/waitlist", tags=["Admin - Waitlist"])
 router.include_router(demos_router, prefix="/demos", tags=["Admin - Demos"])
+router.include_router(leads_router, prefix="/leads", tags=["Admin - Leads"])
 router.include_router(feedback_router, prefix="/feedback", tags=["Admin - Feedback"])
 router.include_router(orders_router, prefix="/orders", tags=["Admin - Orders"])
 router.include_router(customers_router, prefix="/customers", tags=["Admin - Customers"])

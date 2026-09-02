@@ -73,3 +73,24 @@ def _coerce_to_e164(value: Any) -> Any:
 # can legitimately return ``None`` (e.g. when the wire value was ``""``)
 # without Pydantic complaining that ``None`` isn't a valid ``str``.
 PhoneField = Annotated[str | None, BeforeValidator(_coerce_to_e164)]
+
+
+def _coerce_required_e164(value: Any) -> Any:
+    """Normalise like :func:`_coerce_to_e164`, but refuse a blank.
+
+    ``PhoneField`` deliberately maps ``""`` and ``None`` to ``None`` so an
+    optional field can be left empty. A required field has to refuse both,
+    and refuse them *after* coercion — otherwise a payload of ``" "``
+    satisfies Pydantic's required-field check and lands as ``None`` in the
+    database, which is the exact hole this type exists to close.
+    """
+    coerced = _coerce_to_e164(value)
+    if coerced is None:
+        raise InvalidPhoneError("A phone number is required.")
+    return coerced
+
+
+# Required counterpart to ``PhoneField``. Declare with no default —
+# ``phone: RequiredPhoneField`` — so a missing key is caught by Pydantic
+# and an empty or null one by the validator above. Both surface as 422.
+RequiredPhoneField = Annotated[str, BeforeValidator(_coerce_required_e164)]
