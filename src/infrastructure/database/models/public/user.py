@@ -37,6 +37,10 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # The number the merchant actually reads messages on. NULL means
+    # "same as phone"; resolve with COALESCE(whatsapp_phone, phone)
+    # rather than branching at every call site.
+    whatsapp_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="userrole", schema="public"),

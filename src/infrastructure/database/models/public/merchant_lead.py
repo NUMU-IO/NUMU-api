@@ -75,6 +75,10 @@ class MerchantLeadModel(Base, UUIDMixin, TimestampMixin):
     # endpoint uses, so a lead's number is dialable without cleanup.
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     language: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    # NULL means "same as phone" — the signup form's one-tick answer,
+    # stored as absence rather than as a second boolean that could
+    # disagree with the number beside it.
+    whatsapp_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # ── Acquisition ───────────────────────────────────────────────
     source: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -119,7 +123,14 @@ class MerchantLeadModel(Base, UUIDMixin, TimestampMixin):
     store_created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    first_product_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     first_order_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The merchant started paying us. The north-star conversion event.
+    first_commission_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(

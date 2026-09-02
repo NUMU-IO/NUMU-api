@@ -76,6 +76,29 @@ class RegisterRequest(BaseModel):
             "creation; paid intents are recorded for attribution."
         ),
     )
+    whatsapp_same_as_phone: bool = Field(
+        True,
+        description=(
+            "Whether the merchant reads WhatsApp on the number above. True "
+            "for most, so it is one tick rather than a second field. When "
+            "false, send `whatsapp_phone`."
+        ),
+    )
+    whatsapp_phone: PhoneField = Field(
+        None,
+        description=(
+            "The WhatsApp number, when it differs from `phone`. Ignored "
+            "unless `whatsapp_same_as_phone` is false."
+        ),
+    )
+    language: Literal["ar", "en"] = Field(
+        "ar",
+        description=(
+            "Merchant's preferred language, taken from the signup page's "
+            "locale. Decides which template every merchant-facing message "
+            "renders in."
+        ),
+    )
     attribution: AttributionPayload | None = Field(
         None,
         description=(

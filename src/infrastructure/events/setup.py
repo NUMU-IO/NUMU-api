@@ -73,6 +73,9 @@ from src.infrastructure.events.handlers.invoice_on_paid_handler import (
 from src.infrastructure.events.handlers.lead_activation_handler import (
     handle_lead_activation_on_order_paid,
 )
+from src.infrastructure.events.handlers.lead_milestone_handler import (
+    handle_lead_first_product,
+)
 from src.infrastructure.events.handlers.merchant_notification_handler import (
     handle_merchant_order_notification,
 )
@@ -271,6 +274,9 @@ def create_event_bus() -> EventBus:
 
     # Product webhooks
     bus.subscribe(ProductCreatedEvent, handle_webhook_product_created)
+    # Stamp `first_product_at` on the merchant lead — the moment the
+    # merchant put something real in their store.
+    bus.subscribe(ProductCreatedEvent, handle_lead_first_product)
     bus.subscribe(ProductUpdatedEvent, handle_webhook_product_updated)
     bus.subscribe(ProductDeletedEvent, handle_webhook_product_deleted)
 

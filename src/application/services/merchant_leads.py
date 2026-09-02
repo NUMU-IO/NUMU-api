@@ -40,6 +40,7 @@ _LIMITS = {
     "email": 255,
     "name": 160,
     "phone": 20,
+    "whatsapp_phone": 20,
     "language": 5,
     "source": 32,
     "plan_intent": 20,
@@ -113,6 +114,7 @@ async def record_lead(
     source: str,
     name: str | None = None,
     phone: str | None = None,
+    whatsapp_phone: str | None = None,
     language: str | None = None,
     plan_intent: str | None = None,
     attribution: Attribution | None = None,
@@ -172,6 +174,7 @@ async def record_lead(
         # ── Additive fields ───────────────────────────────────────
         _merge(lead, "name", _clip("name", name))
         _merge(lead, "phone", _clip("phone", phone))
+        _merge(lead, "whatsapp_phone", _clip("whatsapp_phone", whatsapp_phone))
         _merge(lead, "language", _clip("language", language))
         _merge(lead, "plan_intent", _clip("plan_intent", plan_intent))
         _merge(lead, "tenant_id", tenant_id)

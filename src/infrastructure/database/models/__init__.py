@@ -30,6 +30,7 @@ from src.infrastructure.database.models.public import (
     ChannelConnectionModel,
     ChannelMessageModel,
     FeedbackModel,
+    MerchantBusinessProfileModel,
     MerchantLeadModel,
     MerchantWalletModel,
     MessageThreadModel,
@@ -119,6 +120,7 @@ __all__ = [
     "TenantModel",
     "UserModel",
     "WaitlistModel",
+    "MerchantBusinessProfileModel",
     "MerchantLeadModel",
     "WhatsAppAccessRequestModel",
     # Merchant wallet (payg)

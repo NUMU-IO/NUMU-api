@@ -296,10 +296,25 @@ async def register(
         if signup.trial_enabled
         else None
     )
+    # NULL whenever the merchant reads WhatsApp on their signup number,
+    # which is the common case. Every consumer resolves the destination as
+    # COALESCE(whatsapp_phone, phone), so absence is the answer rather than
+    # a duplicate of the number already in the row.
+    divergent_whatsapp = (
+        request.whatsapp_phone
+        if not request.whatsapp_same_as_phone
+        and request.whatsapp_phone
+        and request.whatsapp_phone != request.phone
+        else None
+    )
     await db.execute(
         sa_update(UserModel)
         .where(UserModel.id == result.user.id)
-        .values(trial_ends_at=trial_ends, plan_intent=request.plan_intent)
+        .values(
+            trial_ends_at=trial_ends,
+            plan_intent=request.plan_intent,
+            whatsapp_phone=divergent_whatsapp,
+        )
     )
 
     # Record the lead before committing, so it shares this transaction:
@@ -313,6 +328,11 @@ async def register(
         source="signup",
         name=f"{result.user.first_name} {result.user.last_name}".strip(),
         phone=request.phone,
+        # Only stored when it actually differs — NULL means "same as
+        # phone", so writing the same number twice would turn a tick
+        # into two values that can later disagree.
+        whatsapp_phone=divergent_whatsapp,
+        language=request.language,
         plan_intent=request.plan_intent,
         attribution=Attribution(**request.attribution.model_dump())
         if request.attribution is not None
