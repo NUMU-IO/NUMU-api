@@ -73,6 +73,50 @@ class TestVerificationHonesty:
         assert await _run_verification("bosta", {}) == (True, None)
 
     @pytest.mark.asyncio
+    async def test_a_carrier_outage_is_unknown_not_rejected(self, monkeypatch):
+        """🔴 A timeout must not read as "your keys are wrong".
+
+        Verification fails for reasons that have nothing to do with the
+        credentials — a carrier outage, or Cloudflare 403ing a non-browser
+        user agent, which this platform already sees on api.numueg.app.
+        """
+        import httpx
+
+        import src.api.v1.routes.stores.carriers as mod
+
+        class _Svc:
+            @staticmethod
+            async def get_cities():
+                raise httpx.ConnectTimeout("timed out")
+
+        async def _factory(slug, settings):
+            return _Svc()
+
+        monkeypatch.setattr(mod, "service_for_carrier", _factory)
+        verified, error = await _run_verification("bosta", {})
+        assert verified is None, "an outage is 'could not check', not 'rejected'"
+        assert "reach" in error
+
+    def test_verification_never_disables_a_carrier(self):
+        """🔴 Disabling is destructive and belongs to the merchant.
+
+        An earlier version disabled on a failed check. A merchant who
+        re-saved their key during a carrier blip would have found their
+        shipping switched off — worse than the false-green badge it
+        replaced.
+        """
+        import inspect
+
+        from src.api.v1.routes.stores import carriers, settings
+
+        for source in (
+            inspect.getsource(carriers.verify_carrier_credentials),
+            inspect.getsource(carriers.save_carrier_credentials),
+            inspect.getsource(settings.save_bosta_credentials),
+        ):
+            assert 'entry["enabled"] = False' not in source
+
+    @pytest.mark.asyncio
     async def test_error_message_is_truncated(self, monkeypatch):
         """Carrier errors can be whole HTML pages; don't store one."""
 

@@ -1914,12 +1914,12 @@ async def save_bosta_credentials(
     entry["verified"] = verified
     entry["verified_at"] = datetime.now(UTC).isoformat() if verified else None
     entry["verification_error"] = verification_error
-    # Preserve any prior explicit enable; never enable as a side effect of
-    # saving, and never leave a rejected credential enabled.
-    if verified is False:
-        entry["enabled"] = False
-    else:
-        entry.setdefault("enabled", False)
+    # Never enable as a side effect of saving, and never disable as a side
+    # effect of a failed check — verification fails for carrier outages too,
+    # and switching a live store's shipping off over a timeout is worse than
+    # the false-green badge this replaced. Enabling stays the merchant's
+    # explicit action in shipping settings.
+    entry.setdefault("enabled", False)
     store.settings = settings
     await store_repo.update(store)
 

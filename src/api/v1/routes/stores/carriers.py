@@ -25,6 +25,7 @@ See ``docs/Plans/Shipping/SHIPPING-UNIFIED-LAYER.md`` § P3.
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
@@ -228,8 +229,15 @@ async def _run_verification(
     except CarrierCapabilityError as e:
         return None, str(e)
     except Exception as e:
-        # Any failure to reach the carrier means unverified. The message is
-        # kept so support can tell a wrong key from an outage.
+        # Could not reach the carrier at all — a timeout, a DNS failure, or
+        # Cloudflare 403'ing a non-browser user agent, which this platform
+        # already sees on api.numueg.app. That is "we could not check",
+        # not "the carrier rejected these keys", and reporting it as a
+        # rejection would blame the merchant for an outage.
+        if isinstance(e, httpx.TimeoutException | httpx.TransportError):
+            logger.info("carrier_verification_unreachable", carrier=slug, error=str(e))
+            return None, f"Could not reach the carrier: {str(e)[:400]}"
+
         logger.info("carrier_verification_failed", carrier=slug, error=str(e))
         return False, str(e)[:500]
 
@@ -283,10 +291,15 @@ async def verify_carrier_credentials(
     entry["verified"] = verified
     entry["verified_at"] = datetime.now(UTC).isoformat() if verified else None
     entry["verification_error"] = error
-    # A carrier that fails verification must not stay enabled — it would
-    # keep being offered at checkout while every booking fails.
-    if verified is False:
-        entry["enabled"] = False
+    # Deliberately does NOT disable the carrier.
+    #
+    # An earlier version did, reasoning that a carrier whose credentials
+    # fail would fail every booking anyway. But verification fails for
+    # reasons that have nothing to do with the credentials — a carrier
+    # outage, a timeout, Cloudflare blocking us — and a merchant who
+    # re-saved their key during a blip would have found their shipping
+    # switched off. Disabling is destructive and the merchant's call; the
+    # badge going red and naming the error is what this owes them.
     shipping[spec.slug] = entry
     settings["shipping"] = shipping
 
