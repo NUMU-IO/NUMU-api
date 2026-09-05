@@ -154,6 +154,7 @@ async def get_shipping_options(
                 )
                 for o in result.options
             ],
+            unavailable_reason=result.unavailable_reason,
             free_shipping_progress=(
                 FreeShippingProgressResponse(
                     current_cents=result.free_shipping_progress.current_cents,

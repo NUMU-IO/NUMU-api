@@ -72,6 +72,12 @@ class ResolverOutput:
 
     options: list[ResolvedOption]
     free_shipping_progress: FreeShippingProgress | None
+    #: Why the list is empty, when it is. ``cod_unavailable`` means the
+    #: merchant disabled COD for this governorate — the address is fine,
+    #: the payment method is not, and a shopper told "no shipping options
+    #: for this address" would change their address instead of their
+    #: payment method and still fail. None when options were returned.
+    unavailable_reason: str | None = None
 
 
 # Synthetic shipping rate surfaced when a store has not configured any
@@ -194,13 +200,23 @@ class ShippingResolver:
         if not options and not restrict_to_zones and not cod_blocked_by_zone:
             options.append(self._default_ships_everywhere_option())
 
+        unavailable_reason: str | None = None
+        if not options:
+            unavailable_reason = (
+                "cod_unavailable" if cod_blocked_by_zone else "not_covered"
+            )
+
         progress: FreeShippingProgress | None = None
         if lowest_free_over_threshold is not None:
             progress = FreeShippingProgress(
                 current_cents=max(0, cart_subtotal_cents),
                 threshold_cents=lowest_free_over_threshold,
             )
-        return ResolverOutput(options=options, free_shipping_progress=progress)
+        return ResolverOutput(
+            options=options,
+            free_shipping_progress=progress,
+            unavailable_reason=unavailable_reason,
+        )
 
     def _default_ships_everywhere_option(self) -> ResolvedOption:
         """A free 'ships everywhere' option for a store with no zones yet.
