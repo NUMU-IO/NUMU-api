@@ -91,7 +91,7 @@ def _store(store_id):
     )
 
 
-def _repos(*, order, store, customer=None):
+def _repos(*, order, store, customer=None, shipments=None):
     """Repos wired so `get_by_order_number` only answers for the store it
     was seeded with — mirroring the real WHERE store_id AND order_number."""
     order_repo = AsyncMock()
@@ -110,13 +110,15 @@ def _repos(*, order, store, customer=None):
     product_repo.get_by_ids = AsyncMock(return_value=[])
     customer_repo = AsyncMock()
     customer_repo.get_by_id = AsyncMock(return_value=customer)
-    return order_repo, store_repo, product_repo, customer_repo
+    shipment_repo = AsyncMock()
+    shipment_repo.get_by_order = AsyncMock(return_value=shipments or [])
+    return order_repo, store_repo, product_repo, shipment_repo, customer_repo
 
 
 async def _lookup(sid, payload, repos):
-    order_repo, store_repo, product_repo, customer_repo = repos
+    order_repo, store_repo, product_repo, shipment_repo, customer_repo = repos
     return await lookup_order_for_tracking(
-        sid, payload, order_repo, store_repo, product_repo, customer_repo
+        sid, payload, order_repo, store_repo, product_repo, shipment_repo, customer_repo
     )
 
 
@@ -482,10 +484,10 @@ async def test_budgets_are_spent_before_any_repository_read(monkeypatch):
     keeps the 429 independent of whether the order exists."""
     _use_fake_redis(monkeypatch)
     sid = uuid4()
-    order_repo, store_repo, product_repo, customer_repo = _repos(
+    order_repo, store_repo, product_repo, shipment_repo, customer_repo = _repos(
         order=_order(store_id=sid, customer_id=uuid4()), store=_store(sid)
     )
-    repos = (order_repo, store_repo, product_repo, customer_repo)
+    repos = (order_repo, store_repo, product_repo, shipment_repo, customer_repo)
     payload = OrderLookupRequest(order_number="ORD-1042", phone="01098433918")
 
     for _ in range(TRACK_LOOKUP_PER_ORDER_PER_MINUTE + 1):
@@ -650,19 +652,134 @@ async def test_lookup_and_uuid_route_share_one_response_builder():
 
     sid, cid = uuid4(), uuid4()
     order = _order(store_id=sid, customer_id=cid)
-    order_repo, store_repo, product_repo, customer_repo = _repos(
+    order_repo, store_repo, product_repo, shipment_repo, customer_repo = _repos(
         order=order, store=_store(sid)
     )
     order_repo.get_by_id = AsyncMock(return_value=order)
 
-    via_uuid = await track_order(order.id, order_repo, store_repo, product_repo)
+    via_uuid = await track_order(
+        order.id, order_repo, store_repo, product_repo, shipment_repo
+    )
     via_lookup = await lookup_order_for_tracking(
         sid,
         OrderLookupRequest(order_number="ORD-1042", phone="01098433918"),
         order_repo,
         store_repo,
         product_repo,
+        shipment_repo,
         customer_repo,
     )
 
     assert via_uuid.data.model_dump() == via_lookup.data.model_dump()
+
+
+# ------------------------------------------------------------------ #
+# The parcel's own journey (P10)
+# ------------------------------------------------------------------ #
+
+
+def _shipment(sid, oid, *, carrier="manual", stype="forward", history=None):
+    from src.core.entities.shipment import Shipment, ShipmentStatus
+
+    return Shipment(
+        store_id=sid,
+        tenant_id=uuid4(),
+        order_id=oid,
+        carrier=carrier,
+        tracking_number="NM7NA2ZQKG2C",
+        shipment_type=stype,
+        status=ShipmentStatus.IN_TRANSIT,
+        cod_amount=65000,
+        status_history=history
+        or [
+            {
+                "to": "created",
+                "description": "Cancelled: customer was rude on the phone",
+                "timestamp": "2026-09-01T09:00:00+00:00",
+            },
+            {
+                "to": "in_transit",
+                "description": "Synced from bosta API: IN_WAREHOUSE",
+                "timestamp": "2026-09-02T09:00:00+00:00",
+            },
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_tracking_shows_the_parcel_journey(monkeypatch):
+    _use_fake_redis(monkeypatch)
+    sid = uuid4()
+    order = _order(store_id=sid, customer_id=uuid4())
+    repos = _repos(order=order, store=_store(sid), shipments=[_shipment(sid, order.id)])
+    payload = OrderLookupRequest(order_number="ORD-1042", phone="01098433918")
+
+    data = (await _lookup(sid, payload, repos)).data
+    assert data.shipment is not None
+    assert data.shipment.tracking_number == "NM7NA2ZQKG2C"
+    # Manual courier: NUMU issued the number, so there is no carrier site.
+    assert data.shipment.tracking_url is None
+    assert [e.status for e in data.shipment.events] == ["created", "in_transit"]
+
+
+@pytest.mark.asyncio
+async def test_internal_status_text_never_reaches_the_public_payload(monkeypatch):
+    """`status_history[].description` carries raw carrier errors and the
+    merchant's own words. This endpoint is keyed on a guessable order
+    number."""
+    _use_fake_redis(monkeypatch)
+    sid = uuid4()
+    order = _order(store_id=sid, customer_id=uuid4())
+    repos = _repos(order=order, store=_store(sid), shipments=[_shipment(sid, order.id)])
+    payload = OrderLookupRequest(order_number="ORD-1042", phone="01098433918")
+
+    blob = json.dumps(
+        (await _lookup(sid, payload, repos)).data.model_dump(), default=str
+    )
+    for secret in ("rude on the phone", "IN_WAREHOUSE", "65000"):
+        assert secret not in blob, secret
+
+
+@pytest.mark.asyncio
+async def test_a_return_leg_is_not_shown_as_the_customers_parcel(monkeypatch):
+    _use_fake_redis(monkeypatch)
+    sid = uuid4()
+    order = _order(store_id=sid, customer_id=uuid4())
+    repos = _repos(
+        order=order,
+        store=_store(sid),
+        shipments=[_shipment(sid, order.id, stype="return")],
+    )
+    payload = OrderLookupRequest(order_number="ORD-1042", phone="01098433918")
+    assert (await _lookup(sid, payload, repos)).data.shipment is None
+
+
+@pytest.mark.asyncio
+async def test_a_shipment_lookup_failure_still_renders_the_page(monkeypatch):
+    """A customer chasing a parcel must not meet an error page."""
+    _use_fake_redis(monkeypatch)
+    sid = uuid4()
+    order = _order(store_id=sid, customer_id=uuid4())
+    repos = _repos(order=order, store=_store(sid))
+    repos[3].get_by_order = AsyncMock(side_effect=RuntimeError("db down"))
+    payload = OrderLookupRequest(order_number="ORD-1042", phone="01098433918")
+
+    data = (await _lookup(sid, payload, repos)).data
+    assert data.shipment is None
+    assert data.order_number == "ORD-1042"
+
+
+@pytest.mark.asyncio
+async def test_a_carrier_with_a_site_gets_a_tracking_link(monkeypatch):
+    _use_fake_redis(monkeypatch)
+    sid = uuid4()
+    order = _order(store_id=sid, customer_id=uuid4())
+    repos = _repos(
+        order=order,
+        store=_store(sid),
+        shipments=[_shipment(sid, order.id, carrier="bosta")],
+    )
+    payload = OrderLookupRequest(order_number="ORD-1042", phone="01098433918")
+
+    url = (await _lookup(sid, payload, repos)).data.shipment.tracking_url
+    assert url and "NM7NA2ZQKG2C" in url

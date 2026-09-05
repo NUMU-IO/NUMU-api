@@ -41,16 +41,23 @@ from src.api.dependencies.repositories import (
     get_customer_repository,
     get_order_repository,
     get_product_repository,
+    get_shipment_repository,
     get_store_repository,
 )
 from src.api.middleware.rate_limit import enforce_track_lookup_budgets
 from src.api.responses import SuccessResponse
+from src.application.services.carrier_resolver import tracking_url_for
+from src.application.services.shipment_public_view import public_shipment
 from src.core.entities.order import Order
 from src.core.entities.store import Store
+from src.core.logging import get_logger
 from src.infrastructure.repositories.customer_repository import CustomerRepository
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
+from src.infrastructure.repositories.shipment_repository import ShipmentRepository
 from src.infrastructure.repositories.store_repository import StoreRepository
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -115,6 +122,35 @@ class TrackingTimeline(BaseModel):
     cancelled_at: datetime | None = None
 
 
+class TrackingShipmentEvent(BaseModel):
+    """One step of the parcel's journey.
+
+    Status and timestamp only. The internal description is never exposed
+    — it carries raw carrier errors and merchant-written reasons, and
+    these endpoints are public.
+    """
+
+    status: str
+    label_en: str
+    label_ar: str
+    occurred_at: datetime | None = None
+
+
+class TrackingShipment(BaseModel):
+    """The parcel, as a customer may see it."""
+
+    carrier: str | None = None
+    tracking_number: str | None = None
+    #: None for a manual courier — NUMU issued the number and there is no
+    #: carrier site to link to. This page is the tracking page.
+    tracking_url: str | None = None
+    status: str | None = None
+    status_label_en: str | None = None
+    status_label_ar: str | None = None
+    delivered_at: datetime | None = None
+    events: list[TrackingShipmentEvent] = Field(default_factory=list)
+
+
 class OrderTrackingResponse(BaseModel):
     order_id: str
     order_number: str
@@ -135,6 +171,9 @@ class OrderTrackingResponse(BaseModel):
     tracking_url: str | None = None
     shipping_method: str | None = None
     timeline: TrackingTimeline
+    #: The parcel's own progress. None when nothing has been shipped
+    #: yet — the order timeline above still applies.
+    shipment: TrackingShipment | None = None
     store: TrackingStore
 
 
@@ -264,6 +303,7 @@ async def _build_tracking_response(
     order: Order,
     store: Store,
     product_repo: ProductRepository,
+    shipment_repo: ShipmentRepository | None = None,
 ) -> SuccessResponse[OrderTrackingResponse]:
     """Assemble the sanitised tracking payload.
 
@@ -272,6 +312,30 @@ async def _build_tracking_response(
     """
     ship = order.shipping_address
     customer_name = f"{ship.first_name or ''} {ship.last_name or ''}".strip() or None
+
+    # The parcel's own journey. Until now these endpoints never read the
+    # shipment at all, so a customer saw "shipped" and a bare number —
+    # and for a manual courier, a number with nowhere to go.
+    shipment_view: TrackingShipment | None = None
+    if shipment_repo is not None:
+        try:
+            shipments = await shipment_repo.get_by_order(order.id)
+            forward = [s for s in shipments if s.shipment_type == "forward"]
+            if forward:
+                latest = forward[-1]
+                shipment_view = TrackingShipment(
+                    **public_shipment(
+                        latest,
+                        tracking_url=tracking_url_for(
+                            latest.carrier, latest.tracking_number
+                        ),
+                    )
+                )
+        except Exception:
+            # Tracking must still render if the shipment lookup fails —
+            # the order timeline is the fallback, and a customer chasing
+            # a parcel should not meet an error page.
+            logger.warning("tracking_shipment_lookup_failed", order_id=str(order.id))
 
     # Order line items don't snapshot the product image, so resolve the
     # current primary image (absolute CDN URL) by product_id in one batch.
@@ -345,6 +409,7 @@ async def _build_tracking_response(
             tracking_number=order.tracking_number,
             tracking_url=order.tracking_url,
             shipping_method=order.shipping_method,
+            shipment=shipment_view,
             timeline=TrackingTimeline(
                 placed_at=order.created_at,
                 paid_at=order.paid_at,
@@ -382,6 +447,7 @@ async def track_order(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
     expected_store: Annotated[
         str | None,
         Query(
@@ -423,7 +489,7 @@ async def track_order(
         }:
             raise _order_not_found()
 
-    return await _build_tracking_response(order, store, product_repo)
+    return await _build_tracking_response(order, store, product_repo, shipment_repo)
 
 
 @lookup_router.post(
@@ -440,6 +506,7 @@ async def lookup_order_for_tracking(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
+    shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
 ) -> SuccessResponse[OrderTrackingResponse] | JSONResponse:
     """Resolve an order from its number plus one verification key, for the
@@ -493,4 +560,4 @@ async def lookup_order_for_tracking(
         if not supplied_email or str(customer.email).strip().lower() != supplied_email:
             raise _order_not_found()
 
-    return await _build_tracking_response(order, store, product_repo)
+    return await _build_tracking_response(order, store, product_repo, shipment_repo)
