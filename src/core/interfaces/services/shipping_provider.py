@@ -42,6 +42,7 @@ from src.core.interfaces.services.shipping_service import (
 )
 
 __all__ = [
+    "CarrierApiError",
     "NotSupportedByCarrier",
     "Parcel",
     "PickupRequest",
@@ -53,6 +54,36 @@ __all__ = [
     "TrackingInfo",
     "WebhookEvent",
 ]
+
+
+class CarrierApiError(ValueError):
+    """A carrier answered, but not with success.
+
+    Carries the HTTP status, because *why* a call failed decides who is at
+    fault. A 401 means the merchant's credentials are wrong; a 503 means
+    the carrier is having a bad day. Providers used to raise a bare
+    ``ValueError("Failed to get cities")``, which threw that distinction
+    away — and credential verification then reported a carrier outage as
+    "your keys were rejected".
+
+    Subclasses ``ValueError`` so every existing ``except ValueError``
+    keeps working.
+    """
+
+    def __init__(self, status_code: int, message: str = "", carrier: str = "") -> None:
+        self.status_code = status_code
+        self.carrier = carrier
+        super().__init__(message or f"Carrier returned HTTP {status_code}")
+
+    @property
+    def is_auth_failure(self) -> bool:
+        """Whether this is the merchant's credentials, rather than the carrier."""
+        return self.status_code in (401, 403)
+
+    @property
+    def is_carrier_side(self) -> bool:
+        """Rate limiting or an outage — nothing the merchant can fix."""
+        return self.status_code == 429 or self.status_code >= 500
 
 
 class NotSupportedByCarrier(DomainException):

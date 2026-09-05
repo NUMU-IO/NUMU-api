@@ -34,20 +34,21 @@ class TestVerificationHonesty:
         assert get_spec("bosta").verification_operation == "get_cities"
 
     @pytest.mark.asyncio
-    async def test_a_failing_probe_is_false_with_a_reason(self, monkeypatch):
-        """A wrong key must read as unverified, and say why.
+    async def test_a_rejected_key_is_false_with_a_reason(self, monkeypatch):
+        """A wrong key must read as rejected, and say why.
 
-        The reason matters: support needs to tell a bad key from a Bosta
-        outage.
+        Raised as a CarrierApiError carrying the status, because that is
+        what separates a bad key from an outage. An exception without a
+        status is covered separately and must NOT be blamed on the
+        merchant.
         """
-
-        async def _boom(*args, **kwargs):
-            raise RuntimeError("401 Unauthorized")
-
         import src.api.v1.routes.stores.carriers as mod
+        from src.core.interfaces.services.shipping_provider import CarrierApiError
 
         class _Svc:
-            get_cities = staticmethod(_boom)
+            @staticmethod
+            async def get_cities():
+                raise CarrierApiError(401, carrier="bosta")
 
         async def _factory(slug, settings):
             return _Svc()
@@ -96,6 +97,76 @@ class TestVerificationHonesty:
         verified, error = await _run_verification("bosta", {})
         assert verified is None, "an outage is 'could not check', not 'rejected'"
         assert "reach" in error
+
+    @pytest.mark.parametrize(
+        ("status", "expected", "who"),
+        [
+            (401, False, "the merchant's credentials"),
+            (403, False, "the merchant's credentials"),
+            (429, None, "rate limiting"),
+            (500, None, "a carrier outage"),
+            (503, None, "a carrier outage"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_http_status_decides_who_is_at_fault(
+        self, monkeypatch, status, expected, who
+    ):
+        """🔴 A carrier answering 503 is not the merchant's keys being wrong.
+
+        An earlier version classified only transport failures, so any
+        non-2xx — including 429 and every 5xx — fell through to "rejected"
+        and told a merchant to fix credentials that were fine. They would
+        have gone and changed working keys during an outage.
+        """
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        import src.api.v1.routes.stores.carriers as mod
+        from src.infrastructure.external_services.bosta.shipping_service import (
+            BostaShippingService,
+        )
+
+        response = MagicMock()
+        response.status_code = status
+        response.text = f"HTTP {status}"
+        client = MagicMock()
+        client.get = AsyncMock(return_value=response)
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=client)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+
+        async def _factory(slug, settings):
+            return BostaShippingService(
+                api_key="k", business_id="b", base_url="https://x"
+            )
+
+        monkeypatch.setattr(mod, "service_for_carrier", _factory)
+        with patch("httpx.AsyncClient", return_value=ctx):
+            verified, error = await _run_verification("bosta", {})
+
+        assert verified is expected, f"HTTP {status} should not be blamed on {who}"
+        # The status is in the message either way, so support can tell
+        # a rejection from an outage without reading logs.
+        assert str(status) in error
+
+    @pytest.mark.asyncio
+    async def test_an_unexpected_error_is_not_evidence_about_credentials(
+        self, monkeypatch
+    ):
+        """A bug in our own code must not read as "your keys are wrong"."""
+        import src.api.v1.routes.stores.carriers as mod
+
+        class _Svc:
+            @staticmethod
+            async def get_cities():
+                raise RuntimeError("something in our code broke")
+
+        async def _factory(slug, settings):
+            return _Svc()
+
+        monkeypatch.setattr(mod, "service_for_carrier", _factory)
+        verified, _ = await _run_verification("bosta", {})
+        assert verified is None
 
     def test_verification_never_disables_a_carrier(self):
         """🔴 Disabling is destructive and belongs to the merchant.

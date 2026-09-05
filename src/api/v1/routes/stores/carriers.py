@@ -49,6 +49,7 @@ from src.application.services.carrier_resolver import (
     spec_for,
 )
 from src.core.entities.store import Store
+from src.core.interfaces.services.shipping_provider import CarrierApiError
 from src.core.logging import get_logger
 from src.infrastructure.repositories import StoreRepository
 
@@ -228,18 +229,46 @@ async def _run_verification(
         await probe()
     except CarrierCapabilityError as e:
         return None, str(e)
+    except CarrierApiError as e:
+        # The carrier answered, so *why* decides who is at fault.
+        if e.is_auth_failure:
+            logger.info(
+                "carrier_verification_rejected",
+                carrier=slug,
+                status=e.status_code,
+            )
+            return (
+                False,
+                f"The carrier rejected these credentials (HTTP {e.status_code}).",
+            )
+
+        # Rate limiting, an outage, or anything else we cannot attribute
+        # to the credentials. Reporting this as a rejection would tell a
+        # merchant their keys are wrong because the carrier is having a
+        # bad day — and they would go and change working keys.
+        logger.info(
+            "carrier_verification_inconclusive",
+            carrier=slug,
+            status=e.status_code,
+        )
+        return None, (
+            f"The carrier is not answering right now (HTTP {e.status_code}). "
+            f"Your credentials have not been checked."
+        )
+
     except Exception as e:
-        # Could not reach the carrier at all — a timeout, a DNS failure, or
+        # Never reached the carrier at all — a timeout, a DNS failure, or
         # Cloudflare 403'ing a non-browser user agent, which this platform
-        # already sees on api.numueg.app. That is "we could not check",
-        # not "the carrier rejected these keys", and reporting it as a
-        # rejection would blame the merchant for an outage.
+        # already sees on api.numueg.app. "We could not check", not "the
+        # carrier rejected these keys".
         if isinstance(e, httpx.TimeoutException | httpx.TransportError):
             logger.info("carrier_verification_unreachable", carrier=slug, error=str(e))
             return None, f"Could not reach the carrier: {str(e)[:400]}"
 
-        logger.info("carrier_verification_failed", carrier=slug, error=str(e))
-        return False, str(e)[:500]
+        # An unexpected failure in our own code is not evidence about the
+        # merchant's credentials either.
+        logger.warning("carrier_verification_errored", carrier=slug, error=str(e))
+        return None, f"Could not check the credentials: {str(e)[:400]}"
 
     return True, None
 
