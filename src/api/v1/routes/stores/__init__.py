@@ -84,6 +84,7 @@ from src.api.v1.routes.stores import returns as returns_module
 from src.api.v1.routes.stores import settings as settings_module
 from src.api.v1.routes.stores import shipments as shipments_module
 from src.api.v1.routes.stores import shipping as shipping_module
+from src.api.v1.routes.stores import shipping_docs as shipping_docs_module
 from src.api.v1.routes.stores import social as social_module
 from src.api.v1.routes.stores import (
     storefront_validation as storefront_validation_module,
@@ -195,6 +196,10 @@ router.include_router(reconciliation_module.router, tags=["Store Reconciliation"
 # Registered before shipments: /shipments/carriers/{slug}/... must not be
 # matched by the shipments router's /{shipment_id} path parameter.
 router.include_router(carriers_module.router, tags=["Store Carriers"])
+# Also before shipments: /manifest, /waybills and /status-import are
+# single-segment literals that GET /{shipment_id} would swallow —
+# exactly how GET /pickups became unreachable.
+router.include_router(shipping_docs_module.router, tags=["Store Shipping Docs"])
 router.include_router(shipments_module.router, tags=["Store Shipments"])
 router.include_router(shipping_module.router, tags=["Store Shipping"])
 router.include_router(payments_module.router, tags=["Store Payments"])

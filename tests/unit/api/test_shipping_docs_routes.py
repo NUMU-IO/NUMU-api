@@ -1,0 +1,212 @@
+"""Route-level tests for manual-carrier paperwork.
+
+The services these wrap are already covered; what is tested here is the
+wiring — that each endpoint is reachable, that the ones carrying
+single-segment literals are not swallowed by ``GET /{shipment_id}``, and
+that the two rules with money or data behind them hold at the route
+boundary:
+
+* the status import **applies nothing** on preview;
+* applying re-resolves every row against *this* store rather than
+  trusting the request.
+"""
+
+import pytest
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
+
+
+@pytest.fixture(scope="module")
+def stores_app() -> FastAPI:
+    from src.api.v1.routes.stores import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return app
+
+
+def _routes(app: FastAPI) -> list[APIRoute]:
+    return [r for r in app.routes if isinstance(r, APIRoute)]
+
+
+UUID_ = "11111111-1111-1111-1111-111111111111"
+
+
+class TestEveryEndpointIsReachable:
+    """A route that exists but is shadowed is worse than a missing one."""
+
+    @pytest.mark.parametrize(
+        ("method", "suffix"),
+        [
+            ("GET", "/shipments/couriers"),
+            ("POST", "/shipments/couriers"),
+            ("GET", "/shipments/couriers/seeds"),
+            ("GET", "/shipments/manifest"),
+            ("POST", "/shipments/waybills"),
+            ("POST", "/shipments/status-import"),
+            ("POST", "/shipments/status-import/apply"),
+        ],
+    )
+    def test_literal_paths_are_not_swallowed(self, stores_app, method, suffix):
+        """`GET /{shipment_id}` matches any single segment.
+
+        This is how `GET /pickups` became unreachable — it 422'd trying to
+        parse "pickups" as a UUID.
+        """
+        target = f"/{UUID_}{suffix}"
+        winner = next(
+            (
+                r
+                for r in _routes(stores_app)
+                if method in r.methods and r.path_regex.match(target)
+            ),
+            None,
+        )
+        assert winner is not None, f"{method} {suffix} matches nothing"
+        assert winner.path.endswith(suffix.split("/")[-1]), (
+            f"{method} {suffix} is served by {winner.path}"
+        )
+
+    def test_per_shipment_waybill_is_reachable(self, stores_app):
+        target = f"/{UUID_}/shipments/{UUID_}/waybill"
+        winner = next(
+            r
+            for r in _routes(stores_app)
+            if "GET" in r.methods and r.path_regex.match(target)
+        )
+        assert winner.path.endswith("/waybill")
+
+    def test_shipping_operation_ids_are_unique(self, stores_app):
+        """Scoped to shipping routes on purpose.
+
+        The store tree already has pre-existing duplicates in the settings
+        and WhatsApp routes, which `test_openapi_spec` covers (and
+        currently fails on). Repeating that here would add a second
+        failing test for a known problem rather than catching a new one.
+        """
+        ids = [
+            r.operation_id
+            for r in _routes(stores_app)
+            if r.operation_id and "/shipments" in r.path
+        ]
+        duplicates = {i for i in ids if ids.count(i) > 1}
+        assert not duplicates, f"Duplicate shipping operation ids: {duplicates}"
+
+
+class TestStatusImportSafety:
+    """The two rules that protect a merchant's parcels."""
+
+    def test_preview_and_apply_are_separate_endpoints(self, stores_app):
+        """Parsing a file must never move a parcel by itself."""
+        paths = {r.path for r in _routes(stores_app) if "status-import" in r.path}
+        assert any(p.endswith("/status-import") for p in paths)
+        assert any(p.endswith("/status-import/apply") for p in paths)
+
+    def test_preview_does_not_touch_the_shipment_repository(self):
+        """A preview that could write is not a preview.
+
+        Asserted on the handler's signature: it takes no shipment
+        repository, so it has nothing to write with.
+        """
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import preview_status_import
+
+        params = inspect.signature(preview_status_import).parameters
+        assert "shipment_repo" not in params
+        assert "file" in params
+
+    def test_apply_reresolves_rows_against_the_store(self):
+        """The preview is advisory. A tracking number in the request that
+        isn't ours must not move anything, so the handler looks each one
+        up and checks store ownership rather than trusting the payload.
+        """
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import apply_status_import
+
+        source = inspect.getsource(apply_status_import)
+        assert "get_by_tracking_number" in source
+        assert "store_id != store.id" in source
+
+    def test_apply_reports_skipped_rows(self):
+        """Silently dropping rows is how a merchant loses parcels."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import apply_status_import
+
+        assert "skipped" in inspect.getsource(apply_status_import)
+
+
+class TestWaybillRoutes:
+    def test_batch_size_is_bounded(self):
+        from src.api.v1.routes.stores.shipping_docs import MAX_LABELS_PER_JOB
+
+        assert 0 < MAX_LABELS_PER_JOB <= 1000
+
+    def test_both_print_formats_are_offered(self):
+        """Roll for thermal, sheet for an office printer."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import print_waybills
+
+        source = inspect.getsource(print_waybills)
+        assert "generate_waybill_sheet_pdf" in source
+        assert "generate_waybill_batch_pdf" in source
+
+    def test_missing_renderer_is_a_503_not_a_500(self):
+        """Local Windows has no cairo; that is unavailable, not broken."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import print_waybills
+
+        assert "503" in inspect.getsource(print_waybills)
+
+
+class TestManifestExport:
+    def test_returns_csv_not_json(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        source = inspect.getsource(export_shipment_manifest)
+        assert "text/csv" in source
+        assert "attachment" in source
+
+    def test_uses_the_bom_writer(self):
+        """Excel needs the BOM to read Arabic — see shipment_csv."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        assert "build_manifest_csv" in inspect.getsource(export_shipment_manifest)
+
+
+class TestCourierProfileRoutes:
+    def test_patch_merges_rather_than_replaces(self):
+        """A merchant editing one field must not blank the others."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import update_courier_profile
+
+        assert "exclude_unset=True" in inspect.getsource(update_courier_profile)
+
+    def test_seed_values_are_overridable(self):
+        """Starting from a seed is a convenience, not a constraint."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import create_courier_profile
+
+        source = inspect.getsource(create_courier_profile)
+        assert "to_profile_values()" in source
+        # Merchant-supplied values applied after the seed's.
+        assert "**{k: v for k, v in values.items() if v}" in source
+
+    def test_unknown_seed_is_a_bilingual_400(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import create_courier_profile
+
+        source = inspect.getsource(create_courier_profile)
+        assert "message_ar" in source
+        assert "UNKNOWN_COURIER_SEED" in source
