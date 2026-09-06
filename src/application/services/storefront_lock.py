@@ -61,6 +61,51 @@ def lock_reason(tenant) -> str | None:
     )
 
 
+async def resolve_lock_reason(session, tenant) -> str | None:
+    """:func:`lock_reason`, plus the PAYG funding check that needs a query.
+
+    A PAYG signup never sees a trial: store creation redeems the intent
+    through ``SubscribeUseCase(plan="payg")``, which puts the tenant
+    straight into ``active``. So the lifecycle alone would never lock a
+    PAYG merchant, and one who never funded their wallet would sell with
+    nothing behind the commission. Their storefront stays gated until the
+    first top-up is credited.
+
+    Only the FIRST top-up matters. A merchant who later spends down to
+    zero keeps their storefront — the wallet checkout gate already stops
+    orders it cannot charge, and closing a working shop over a temporary
+    empty balance is a harsher answer than the problem asks for.
+    """
+    if tenant is None:
+        return None
+    if not tenant.is_writable:
+        return lock_reason(tenant)
+    if (tenant.plan or "").lower() != "payg":
+        return None
+    return None if await payg_ever_funded(session, tenant.id) else AWAITING_TOPUP
+
+
+async def payg_ever_funded(session, tenant_id: UUID) -> bool:
+    """Whether any top-up was ever credited to this tenant's wallet."""
+    from sqlalchemy import exists, select
+
+    from src.core.entities.wallet import WalletTransactionKind
+    from src.infrastructure.database.models.public.wallet import (
+        WalletTransactionModel,
+    )
+
+    return bool(
+        await session.scalar(
+            select(
+                exists().where(
+                    WalletTransactionModel.tenant_id == tenant_id,
+                    WalletTransactionModel.kind == WalletTransactionKind.TOPUP,
+                )
+            )
+        )
+    )
+
+
 def lock_password(store_id: UUID | str) -> str:
     """The password that opens a billing-locked storefront.
 

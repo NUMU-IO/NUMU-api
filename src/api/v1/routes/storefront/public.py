@@ -830,7 +830,7 @@ async def storefront_billing_lock_reason(session, store) -> str | None:
     """
     from sqlalchemy import select
 
-    from src.application.services.storefront_lock import lock_reason
+    from src.application.services.storefront_lock import resolve_lock_reason
     from src.infrastructure.database.models.public.tenant import TenantModel
 
     tenant = (
@@ -838,7 +838,7 @@ async def storefront_billing_lock_reason(session, store) -> str | None:
             select(TenantModel).where(TenantModel.id == store.tenant_id)
         )
     ).scalar_one_or_none()
-    return lock_reason(tenant)
+    return await resolve_lock_reason(session, tenant)
 
 
 def _serialize_public_store(
