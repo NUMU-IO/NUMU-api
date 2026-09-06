@@ -12,14 +12,14 @@ What gets seeded:
       - "Classic T-Shirt" / "تي شيرت كلاسيكي"             50.00 EGP
       - "Canvas Tote Bag" / "حقيبة قماشية"                75.00 EGP
       - "Ceramic Mug" / "كوب سيراميك"                     40.00 EGP
-      - "Vinyl Sticker Pack" / "حزمة ملصقات فينيل"        25.00 EGP
+      - "Everyday Backpack" / "شنطة ظهر يومية"             25.00 EGP
       - "Hooded Sweatshirt" / "هودي بقلنسوة"             120.00 EGP
 
 All seeded products have:
   - status=ACTIVE (visible in the storefront immediately)
   - quantity=10 (in stock)
   - tag "demo" (so merchants can bulk-delete easily)
-  - a placeholder image URL pointing at a stock CDN
+  - a stock image served by the storefront from /demo/
 
 The merchant can edit/delete any of these via the normal Products
 list. Bulk delete via:
@@ -45,11 +45,22 @@ from src.core.value_objects.money import Currency, Money
 logger = logging.getLogger(__name__)
 
 
-# Stock product images. CDN-hosted; the merchant replaces them with
-# their own as they edit each product. We use a single Cloudflare
-# Images base because it's where merchant uploads land too — keeps
-# the storefront image-host allowlist (Phase 4.2) covering both.
-_STOCK_IMAGE_BASE = "https://imagedelivery.net/numu-demo-seed"
+# Stock product images, served by the storefront itself from
+# `public/demo/` (numu-storefront). They used to point at
+# `imagedelivery.net/numu-demo-seed`, a Cloudflare Images account that
+# does not exist — every seeded product rendered as a broken image.
+#
+# Relative, not absolute: the path resolves against whichever
+# `<subdomain>.numueg.app` is serving, and next/image skips the
+# remote-host allowlist entirely for same-origin paths. An absolute URL
+# would have to name a host on that allowlist (`**.numueg.app`,
+# `**.r2.dev`), which means uploading these to R2 first.
+#
+# ponytail: the hub renders product images from the same field against
+# its own origin, so these thumbnails 404 in the Products list. Upload
+# the five to R2 and switch this to an absolute cdn URL when that
+# matters.
+_STOCK_IMAGE_BASE = "/demo"
 
 # (en_name, ar_name, en_desc, ar_desc, price_cents, image_slug)
 _DEMO_PRODUCTS: list[tuple[str, str, str, str, int, str]] = [
@@ -78,12 +89,12 @@ _DEMO_PRODUCTS: list[tuple[str, str, str, str, int, str]] = [
         "mug",
     ),
     (
-        "Vinyl Sticker Pack",
-        "حزمة ملصقات فينيل",
-        "Pack of 10 weatherproof vinyl stickers.",
-        "حزمة من 10 ملصقات فينيل مقاومة للماء.",
+        "Everyday Backpack",
+        "شنطة ظهر يومية",
+        "Roomy everyday backpack with a padded laptop sleeve.",
+        "شنطة ظهر واسعة بجيب مبطّن للابتوب.",
         2500,
-        "stickers",
+        "backpack",
     ),
     (
         "Hooded Sweatshirt",
@@ -203,7 +214,7 @@ async def seed_demo_catalog(
                 status=ProductStatus.ACTIVE,
                 price=Money(amount=Decimal(price_cents) / 100, currency=ccy),
                 quantity=10,
-                images=[f"{_STOCK_IMAGE_BASE}/{slug}/public"],
+                images=[f"{_STOCK_IMAGE_BASE}/{slug}.jpg"],
                 tags=["demo"],
                 category_id=collection.id,
                 attributes={
