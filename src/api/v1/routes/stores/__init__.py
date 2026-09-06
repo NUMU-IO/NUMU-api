@@ -12,6 +12,7 @@ Provides REST endpoints for store CRUD operations and nested resources:
 - /stores/{store_id}/settings - Store settings (payment, shipping, whatsapp)
 - /stores/{store_id}/categories - Category management
 - /stores/{store_id}/onboarding - Merchant onboarding progress
+- /stores/{store_id}/business-profile - Commercial details (collect only)
 - /stores/{store_id}/webhooks - Outgoing webhook subscriptions
 - /stores/{store_id}/upsells - Post-purchase upsell rules
 - /stores/{store_id}/bundles - Frequently Bought Together bundles
@@ -33,6 +34,7 @@ from src.api.v1.routes.stores import audit as audit_module
 from src.api.v1.routes.stores import blogs as blogs_module
 from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import carriers as carriers_module
+from src.api.v1.routes.stores import business_profile as business_profile_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
@@ -188,6 +190,7 @@ router.include_router(
     cod_trust_decisions_module.router, tags=["Store COD Trust Decisions"]
 )
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
+router.include_router(business_profile_module.router, tags=["Store Business Profile"])
 router.include_router(feedback_module.router, tags=["Store Feedback"])
 router.include_router(refunds_module.router, tags=["Store Refunds"])
 router.include_router(returns_module.router, tags=["Store Returns"])

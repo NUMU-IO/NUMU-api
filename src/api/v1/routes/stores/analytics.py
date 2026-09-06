@@ -3004,6 +3004,7 @@ class DigestContent(BaseModel):
     headline: str
     highlights: list[str]
     has_sales: bool
+    nudge: str | None = None
     period_start: str
     period_end: str
 
@@ -3087,6 +3088,7 @@ async def _compute_weekly_digest(
         headline=built["headline"],
         highlights=built["highlights"],
         has_sales=built["has_sales"],
+        nudge=built["nudge"],
         period_start=week_start.isoformat(),
         period_end=today.isoformat(),
     )

@@ -392,7 +392,28 @@ async def get_store_detail(
             "phone": owner.phone,
             "status": _enum(owner.status),
             "plan_intent": owner.plan_intent,
+            # The signup trial stamped on the USER row at registration,
+            # before any plan was chosen. It is never cleared, so on a
+            # tenant that has since converted — a pay-as-you-go merchant
+            # most obviously, who has no trial at all — it is a date that
+            # stopped meaning anything the moment they converted. Kept for
+            # the signup record it is, and paired with the authoritative
+            # answer below so admin stops reading one as the other.
             "trial_ends_at": _iso(owner.trial_ends_at),
+            # Whether this merchant is *actually* on trial right now. The
+            # tenant is the authority: SubscribeUseCase clears its
+            # lifecycle and expiry on conversion, and stamps
+            # trial_converted_at.
+            # `trial` only, not `demo`. The lifecycle column exists
+            # specifically so demo and trial can never both be true (see
+            # TenantLifecycleState), and the tenant block already reports
+            # is_demo separately. Folding them together here would put
+            # back the ambiguity that enum was created to remove.
+            "is_on_trial": (
+                tenant is not None
+                and _enum(tenant.lifecycle_state) == "trial"
+                and tenant.trial_converted_at is None
+            ),
             "last_login_at": _iso(owner.last_login_at),
             "created_at": _iso(owner.created_at),
         },

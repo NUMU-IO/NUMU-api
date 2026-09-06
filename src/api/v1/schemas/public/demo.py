@@ -6,18 +6,27 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
+from src.api.v1.schemas.public.attribution import AttributionPayload
+from src.application.dto.phone_field import RequiredPhoneField
+
 
 class StartDemoRequest(BaseModel):
-    # Name + email are both required so every demo is attributable to a
-    # person (sales follow-up), not just an inbox. WhatsApp is optional —
-    # it's the lead channel that actually converts in Egypt, but forcing
-    # it would cost top-of-funnel conversions.
+    # Name, email and WhatsApp are all required so every demo is
+    # attributable to a reachable person, not just an inbox. WhatsApp was
+    # optional here for exactly the reason you would expect — requiring it
+    # costs top-of-funnel conversions — and the result was a pile of demo
+    # tenants nobody could follow up on. In this market WhatsApp is the
+    # channel that gets read, so an unreachable lead is not a lead. Stored
+    # as E.164 by the same validator the register endpoint uses.
     name: str = Field(min_length=2, max_length=120)
     email: EmailStr
-    whatsapp: str | None = Field(None, max_length=20)
+    whatsapp: RequiredPhoneField
     language: Literal["ar", "en"] = "ar"
     turnstile_token: str | None = Field(None, max_length=2048)
     niche: Literal["fashion"] = "fashion"
+    # Where this visitor came from. Optional on the wire so an older
+    # cached landing bundle keeps working through the rollout.
+    attribution: AttributionPayload | None = None
 
 
 class StartDemoResponse(BaseModel):
