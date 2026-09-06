@@ -61,26 +61,24 @@ class MylerzShippingService(IShippingService):
             "Accept": "application/json",
         }
 
-    def _default_rates(self, to_address: ShippingAddress) -> list[ShippingRate]:
-        """Return default rates when API is unavailable."""
-        return [
-            ShippingRate(
-                carrier="mylerz",
-                service="standard",
-                rate_id="mylerz_standard",
-                amount=5000,  # 50 EGP default
-                currency="EGP",
-                estimated_days=3,
-            )
-        ]
-
     async def get_rates(
         self,
         from_address: ShippingAddress,
         to_address: ShippingAddress,
         parcel: Parcel,
     ) -> list[ShippingRate]:
-        """Get shipping rates from Mylerz."""
+        """Get shipping rates from Mylerz.
+
+        Returns **an empty list** when Mylerz does not answer. It used to
+        return a hardcoded 50 EGP as ``carrier="mylerz"`` — NUMU's own guess
+        presented to a merchant as the carrier's price. A carrier that
+        cannot quote says so: the registry declares
+        ``supports_live_rates=False``, so checkout never asks this carrier
+        for a price at all — it prices from the merchant's own zone rates,
+        which are numbers the merchant chose. Nothing in the codebase calls
+        this method today; when P7 wires live rates, an empty list must
+        mean "no quote", never "free".
+        """
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -98,7 +96,7 @@ class MylerzShippingService(IShippingService):
                     logger.warning(
                         "Mylerz rates failed: %s %s", resp.status_code, resp.text
                     )
-                    return self._default_rates(to_address)
+                    return []
 
                 data = resp.json()
                 rates = []
@@ -113,10 +111,10 @@ class MylerzShippingService(IShippingService):
                             estimated_days=rate.get("estimated_days", 3),
                         )
                     )
-                return rates or self._default_rates(to_address)
+                return rates
         except Exception as e:
             logger.warning("Mylerz get_rates error: %s", e)
-            return self._default_rates(to_address)
+            return []
 
     async def create_shipment(
         self,

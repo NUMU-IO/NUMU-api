@@ -306,35 +306,91 @@ class TestJT:
             JTShippingService(api_key="", base_url="https://x")._get_headers()
 
 
-class TestRatesAreNotPresentedAsQuotes:
-    """Both fall back to hardcoded `_default_rates` on any failure.
+class TestNeitherCarrierInventsAPrice:
+    """P4: `_default_rates` is gone.
 
-    That is why the registry declares `supports_live_rates=False` for
-    both: the numbers are guesses, and presenting a guess as a carrier
-    quote is worse than admitting we cannot quote. These tests pin the
-    behaviour so the fallback can't quietly start reaching checkout.
+    Both providers used to answer a failed quote with a hardcoded number —
+    50 EGP for Mylerz, 45 for J&T — returned as `carrier="mylerz"` /
+    `carrier="jt"`. A merchant reading that saw NUMU's guess wearing the
+    carrier's name, and at checkout a shopper would have been charged it.
+
+    A carrier that cannot quote returns nothing, and the resolver falls
+    back to the merchant's own configured rate — a number they chose.
     """
 
+    @pytest.mark.parametrize(
+        ("svc", "carrier"),
+        [
+            (
+                MylerzShippingService(
+                    api_key="k", merchant_id="m", base_url="https://x"
+                ),
+                "mylerz",
+            ),
+            (
+                JTShippingService(api_key="k", customer_code="c", base_url="https://x"),
+                "jt",
+            ),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_mylerz_falls_back_on_failure(self):
-        svc = MylerzShippingService(api_key="k", base_url="https://x")
+    async def test_a_failed_quote_returns_nothing(self, svc, carrier):
         with patch(
             "httpx.AsyncClient", return_value=_client(_response({}, status=500))
         ):
-            rates = await svc.get_rates(CAIRO, ALEX, PARCEL)
-        assert [r.rate_id for r in rates] == ["mylerz_standard"]
+            assert await svc.get_rates(CAIRO, ALEX, PARCEL) == []
+
+    @pytest.mark.parametrize(
+        "svc",
+        [
+            MylerzShippingService(api_key="k", merchant_id="m", base_url="https://x"),
+            JTShippingService(api_key="k", customer_code="c", base_url="https://x"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_a_transport_failure_returns_nothing(self, svc):
+        client = MagicMock()
+        client.post = AsyncMock(side_effect=OSError("no route to host"))
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=client)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        with patch("httpx.AsyncClient", return_value=ctx):
+            assert await svc.get_rates(CAIRO, ALEX, PARCEL) == []
 
     @pytest.mark.asyncio
-    async def test_jt_falls_back_on_failure(self):
+    async def test_jt_api_level_error_on_http_200_returns_nothing(self):
+        """J&T answers 200 with `code != "1"` on failure."""
         svc = JTShippingService(api_key="k", customer_code="c", base_url="https://x")
-        with patch(
-            "httpx.AsyncClient", return_value=_client(_response({}, status=500))
-        ):
-            rates = await svc.get_rates(CAIRO, ALEX, PARCEL)
-        assert [r.rate_id for r in rates] == ["jt_standard"]
+        resp = _response({"code": "0", "msg": "invalid customer"})
+        with patch("httpx.AsyncClient", return_value=_client(resp)):
+            assert await svc.get_rates(CAIRO, ALEX, PARCEL) == []
 
-    def test_registry_does_not_advertise_these_as_live_rates(self):
+    def test_the_fallback_is_gone_from_the_source(self):
+        import inspect
+
+        from src.infrastructure.external_services.jt import shipping_service as jt_mod
+        from src.infrastructure.external_services.mylerz import (
+            shipping_service as my_mod,
+        )
+
+        for mod in (jt_mod, my_mod):
+            assert "_default_rates" not in inspect.getsource(mod)
+
+    @pytest.mark.parametrize("slug", ["mylerz", "jt"])
+    def test_the_registry_agrees_they_cannot_quote(self, slug):
+        """The code and the declaration have to say the same thing, or the
+        resolver would call `get_rates` and get an empty list at checkout."""
         from src.application.services.carrier_registry import get_spec
 
-        for slug in ("mylerz", "jt"):
-            assert get_spec(slug).capabilities.supports_live_rates is False
+        assert get_spec(slug).capabilities.supports_live_rates is False
+
+    @pytest.mark.asyncio
+    async def test_a_real_quote_still_comes_through(self):
+        """Removing the fallback must not remove the feature."""
+        svc = MylerzShippingService(api_key="k", merchant_id="m", base_url="https://x")
+        resp = _response({"rates": [{"service_type": "express", "price": 72.5}]})
+        with patch("httpx.AsyncClient", return_value=_client(resp)):
+            rates = await svc.get_rates(CAIRO, ALEX, PARCEL)
+        assert len(rates) == 1
+        assert rates[0].amount == 7250  # major units → cents
+        assert rates[0].service == "express"

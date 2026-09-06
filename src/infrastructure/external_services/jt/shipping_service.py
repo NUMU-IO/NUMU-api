@@ -62,26 +62,21 @@ class JTShippingService(IShippingService):
             "digest": self.api_key,
         }
 
-    def _default_rates(self, to_address: ShippingAddress) -> list[ShippingRate]:
-        """Return default rates when API is unavailable."""
-        return [
-            ShippingRate(
-                carrier="jt",
-                service="standard",
-                rate_id="jt_standard",
-                amount=4500,  # 45 EGP default
-                currency="EGP",
-                estimated_days=3,
-            )
-        ]
-
     async def get_rates(
         self,
         from_address: ShippingAddress,
         to_address: ShippingAddress,
         parcel: Parcel,
     ) -> list[ShippingRate]:
-        """Get shipping rates from J&T Express."""
+        """Get shipping rates from J&T Express.
+
+        Returns **an empty list** when J&T does not answer. It used to
+        return a hardcoded 45 EGP as ``carrier="jt"`` — NUMU's own guess
+        presented to a merchant as the carrier's price. See the note on
+        the Mylerz provider: the registry declares
+        ``supports_live_rates=False`` for both, so checkout never asks
+        either of them for a price.
+        """
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -102,12 +97,12 @@ class JTShippingService(IShippingService):
                     logger.warning(
                         "J&T rates failed: %s %s", resp.status_code, resp.text
                     )
-                    return self._default_rates(to_address)
+                    return []
 
                 data = resp.json()
                 if data.get("code") != "1":
                     logger.warning("J&T rates API error: %s", data.get("msg"))
-                    return self._default_rates(to_address)
+                    return []
 
                 freight = data.get("data", {})
                 amount = int(float(freight.get("totalPrice", 45)) * 100)
@@ -123,7 +118,7 @@ class JTShippingService(IShippingService):
                 ]
         except Exception as e:
             logger.warning("J&T get_rates error: %s", e)
-            return self._default_rates(to_address)
+            return []
 
     async def create_shipment(
         self,
