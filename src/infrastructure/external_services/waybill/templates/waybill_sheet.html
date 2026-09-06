@@ -1,0 +1,52 @@
+<!doctype html>
+{# A4 output for a merchant without a thermal printer: the same label,
+   four to a page, cut along the guides.
+
+   Scaled 99%. Four 100x150mm labels tile to 200x300mm and A4 is 297mm
+   tall, so 1:1 overflows by 3mm. 99% brings it to exactly 297mm and is
+   imperceptible on a printed label — the QR stays well within scanning
+   tolerance. The roll output is never scaled. #}
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>{{ sheet_title }}</title>
+<link rel="stylesheet" href="label.css">
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+
+  .grid {
+    display: flex;
+    flex-wrap: wrap;
+    width: 200mm;
+    transform: scale({{ sheet_scale }});
+    transform-origin: top left;
+    break-after: page;
+  }
+  .grid:last-child { break-after: auto; }
+
+  /* Cut guides. A merchant with scissors needs to see where to cut; a
+     merchant with a guillotine needs the edges to line up. */
+  .cell {
+    width: 100mm; height: 150mm;
+    outline: 0.2mm dashed #B8C4D4;
+    outline-offset: -0.1mm;
+  }
+  /* An incomplete last page leaves blank cells rather than stretching
+     the labels that are there. */
+  .cell-empty { outline-style: none; }
+</style>
+</head>
+<body>
+{% for page in pages %}
+  <div class="grid">
+    {% for label in page %}
+      <div class="cell">{% with %}{% include "_label.html" with context %}{% endwith %}</div>
+    {% endfor %}
+    {% for _ in range(per_page - page|length) %}
+      <div class="cell cell-empty"></div>
+    {% endfor %}
+  </div>
+{% endfor %}
+</body>
+</html>

@@ -20,6 +20,7 @@ from src.api.v1.routes.webhooks.paymob_platform import (
     router as paymob_platform_router,
 )
 from src.api.v1.routes.webhooks.resend import router as resend_router
+from src.api.v1.routes.webhooks.shipping import router as shipping_router
 from src.api.v1.routes.webhooks.tiktok_shop import router as tiktok_shop_router
 from src.api.v1.routes.webhooks.whatsapp import router as whatsapp_router
 
@@ -38,6 +39,11 @@ router.include_router(instapay_router, prefix="/instapay", tags=["Webhooks - Ins
 router.include_router(bosta_router, prefix="/bosta", tags=["Webhooks - Bosta"])
 router.include_router(mylerz_router, prefix="/mylerz", tags=["Webhooks - Mylerz"])
 router.include_router(jt_router, prefix="/jt", tags=["Webhooks - J&T"])
+# Generic carrier webhook — POST /webhooks/shipping/{carrier}. A new
+# carrier needs a registry entry, not a new route file. The
+# per-carrier paths above stay for the URLs already configured in each
+# carrier's dashboard.
+router.include_router(shipping_router, prefix="/shipping", tags=["Webhooks - Shipping"])
 router.include_router(whatsapp_router, prefix="/whatsapp", tags=["Webhooks - WhatsApp"])
 # GOWA (unofficial WhatsApp Web transport). Separate handler from the Meta
 # callback: different signature scheme, and inbound replies are numbered text

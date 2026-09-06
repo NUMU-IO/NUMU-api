@@ -18,6 +18,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.carrier_registry import get_spec
 from src.application.services.funnel_emit_service import emit_order_delivered
 from src.config import settings
 from src.core.entities.order import OrderStatus
@@ -39,17 +40,11 @@ router = APIRouter()
 bosta_service = BostaShippingService()
 
 # Map Bosta states to ShipmentStatus
-BOSTA_STATE_MAP = {
-    "PENDING_PICKUP": ShipmentStatus.CREATED,
-    "PICKED_UP": ShipmentStatus.PICKED_UP,
-    "IN_WAREHOUSE": ShipmentStatus.IN_TRANSIT,
-    "IN_TRANSIT": ShipmentStatus.IN_TRANSIT,
-    "OUT_FOR_DELIVERY": ShipmentStatus.OUT_FOR_DELIVERY,
-    "DELIVERED": ShipmentStatus.DELIVERED,
-    "RETURNED": ShipmentStatus.RETURNED,
-    "CANCELLED": ShipmentStatus.CANCELLED,
-    "DELIVERY_FAILED": ShipmentStatus.FAILED,
-}
+# Carrier status vocabulary is declared once in the carrier registry
+# (application/services/carrier_registry.py). This module used to carry
+# its own copy; three copies had already drifted. Kept as a module
+# constant because existing code and tests reference it by name.
+BOSTA_STATE_MAP = dict(get_spec("bosta").status_map)
 
 
 async def _find_order(repo: OrderRepository, tracking_number: str, log):

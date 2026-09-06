@@ -11,6 +11,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     get_current_store,
@@ -19,6 +20,7 @@ from src.api.dependencies import (
     get_store_repository,
     get_storefront_cache_service,
 )
+from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
     BostaCredentialsResponse,
@@ -142,13 +144,65 @@ def _get_default_payment_settings() -> dict:
     }
 
 
+# Carriers that live in store settings but have no registry entry.
+#
+# ``aramex`` has a settings toggle and a hub card but no provider behind
+# it. Kept so existing stores' stored values survive; see decision D2
+# (likely answer: Aramex arrives via an aggregator, never as a native
+# adapter). Do not add it to the registry until it has a provider.
+#
+# ``manual`` used to live here too. It is a real registry carrier as of
+# P2 — see ``_CARRIER_DEFAULT_OVERRIDES`` for why its default survives.
+_NON_REGISTRY_CARRIERS: dict[str, dict] = {
+    "aramex": {"enabled": False, "is_configured": False, "last_configured": None},
+}
+
+# Carriers whose stored default is not "off".
+#
+# 🔴 ``manual`` ships enabled on every store, including both live ones.
+# The registry loop below would otherwise generate `enabled: False` for
+# it and silently switch manual shipping off for every existing merchant
+# the next time their settings were defaulted. Do not remove this without
+# a migration.
+_CARRIER_DEFAULT_OVERRIDES: dict[str, dict] = {
+    "manual": {"enabled": True, "is_configured": True, "last_configured": None},
+}
+
+
+def shipping_carrier_keys() -> list[str]:
+    """Every carrier slug that can appear in a store's shipping settings.
+
+    Registry carriers plus the non-registry ones above. Before this, four
+    surfaces in this file hardcoded ``("aramex","bosta","mylerz","manual")``
+    and **all four omitted J&T** — so a merchant could create J&T
+    shipments through the shipments route but never enable J&T here.
+    """
+    from src.application.services.carrier_registry import carrier_slugs
+
+    return [*carrier_slugs(), *_NON_REGISTRY_CARRIERS]
+
+
 def _get_default_shipping_settings() -> dict:
-    """Get default shipping settings."""
+    """Get default shipping settings.
+
+    Carrier entries are generated from the registry, so adding a carrier
+    there makes it configurable here with no change to this file.
+    """
+    from src.application.services.carrier_registry import carrier_slugs
+
+    carriers: dict = {
+        slug: dict(
+            _CARRIER_DEFAULT_OVERRIDES.get(
+                slug,
+                {"enabled": False, "is_configured": False, "last_configured": None},
+            )
+        )
+        for slug in carrier_slugs()
+    }
+    carriers.update({k: dict(v) for k, v in _NON_REGISTRY_CARRIERS.items()})
+
     return {
-        "aramex": {"enabled": False, "is_configured": False, "last_configured": None},
-        "bosta": {"enabled": False, "is_configured": False, "last_configured": None},
-        "mylerz": {"enabled": False, "is_configured": False, "last_configured": None},
-        "manual": {"enabled": True, "is_configured": True, "last_configured": None},
+        **carriers,
         "zones": [
             {
                 "id": str(uuid.uuid4()),
@@ -282,11 +336,26 @@ def _build_shipping_response(settings: dict) -> ShippingSettingsResponse:
 
     zones = [ShippingZone(**z) for z in merged.get("zones", defaults["zones"])]
 
+    def _status(slug: str) -> ShippingCarrierStatus:
+        raw = merged.get(slug) or defaults.get(slug) or {}
+        return ShippingCarrierStatus(**{
+            "enabled": bool(raw.get("enabled", False)),
+            "is_configured": bool(raw.get("is_configured", False)),
+            "last_configured": raw.get("last_configured"),
+        })
+
+    # `carriers` is the forward-looking shape: every carrier keyed by
+    # slug, generated from the registry, so a new carrier appears without
+    # touching this file. The four named fields below are kept for the
+    # hub's current reads and go away once P3 consumes `carriers`.
+    carriers = {slug: _status(slug) for slug in shipping_carrier_keys()}
+
     return ShippingSettingsResponse(
-        aramex=ShippingCarrierStatus(**merged.get("aramex", defaults["aramex"])),
-        bosta=ShippingCarrierStatus(**merged.get("bosta", defaults["bosta"])),
-        mylerz=ShippingCarrierStatus(**merged.get("mylerz", defaults["mylerz"])),
-        manual=ShippingCarrierStatus(**merged.get("manual", defaults["manual"])),
+        carriers=carriers,
+        aramex=carriers["aramex"],
+        bosta=carriers["bosta"],
+        mylerz=carriers["mylerz"],
+        manual=carriers["manual"],
         zones=zones,
         free_shipping_threshold=merged.get("free_shipping_threshold", 500),
         restrict_to_zones=bool(merged.get("restrict_to_zones", False)),
@@ -704,6 +773,13 @@ async def update_cod_autopilot_settings_endpoint(
 class StorefrontPasswordResponse(BaseModel):
     enabled: bool
     has_password: bool
+    # Platform billing lock — set when the tenant is read_only, cleared by a
+    # wallet top-up (PAYG) or an activated subscription. The merchant cannot
+    # turn it off from here, so the hub shows it as state, not a toggle. The
+    # password is returned so they can still open their own storefront.
+    billing_locked: bool = False
+    billing_lock_reason: str | None = None
+    billing_lock_password: str | None = None
 
 
 class UpdateStorefrontPasswordRequest(BaseModel):
@@ -726,13 +802,34 @@ def _password_protected(store_settings: dict | None) -> dict:
 )
 async def get_storefront_password(
     store: Annotated[Store, Depends(get_current_store)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Return whether the storefront is password-protected (never the hash)."""
+    """Return whether the storefront is password-protected (never the hash).
+
+    Also reports the platform billing lock, which gates the storefront while
+    the tenant sits in ``read_only``. That one is state rather than a switch:
+    only a top-up or a paid subscription clears it.
+    """
+    from sqlalchemy import select
+
+    from src.application.services.storefront_lock import lock_password, lock_reason
+    from src.infrastructure.database.models.public.tenant import TenantModel
+
     pp = _password_protected(store.settings)
+    tenant = (
+        await session.execute(
+            select(TenantModel).where(TenantModel.id == store.tenant_id)
+        )
+    ).scalar_one_or_none()
+    reason = lock_reason(tenant)
+
     return SuccessResponse(
         data=StorefrontPasswordResponse(
             enabled=bool(pp.get("enabled")),
             has_password=bool(pp.get("password_hash")),
+            billing_locked=reason is not None,
+            billing_lock_reason=reason,
+            billing_lock_password=lock_password(store.id) if reason else None,
         ),
         message="Storefront password status retrieved",
     )
@@ -1600,30 +1697,51 @@ async def update_shipping_settings(
     settings = store.settings or {}
     shipping_settings = settings.get("shipping", _get_default_shipping_settings())
 
-    # Update only provided fields
-    if request.aramex_enabled is not None:
-        if not shipping_settings["aramex"]["is_configured"]:
+    # Collect requested toggles from both shapes: the new carrier-keyed
+    # `carriers` map, and the legacy per-carrier fields the hub still
+    # sends. Legacy first so an explicit `carriers` entry wins.
+    requested: dict[str, bool] = {}
+    for slug in shipping_carrier_keys():
+        legacy = getattr(request, f"{slug}_enabled", None)
+        if legacy is not None:
+            requested[slug] = bool(legacy)
+    for slug, value in (request.carriers or {}).items():
+        if slug not in shipping_carrier_keys():
             raise HTTPException(
                 status_code=400,
-                detail="Aramex is not configured. Contact administrator.",
+                detail={
+                    "code": "UNKNOWN_CARRIER",
+                    "message_en": f"Unknown carrier '{slug}'.",
+                    "message_ar": f"شركة شحن غير معروفة '{slug}'.",
+                    "supported_carriers": shipping_carrier_keys(),
+                },
             )
-        shipping_settings["aramex"]["enabled"] = request.aramex_enabled
-    if request.bosta_enabled is not None:
-        if not shipping_settings["bosta"]["is_configured"]:
+        requested[slug] = bool(value)
+
+    from src.application.services.carrier_resolver import carrier_name
+
+    for slug, enabled in requested.items():
+        entry = shipping_settings.setdefault(
+            slug, {"enabled": False, "is_configured": False, "last_configured": None}
+        )
+        # `manual` needs no credentials, so it has no configured gate —
+        # preserved from the original behaviour.
+        if enabled and slug != "manual" and not entry.get("is_configured"):
             raise HTTPException(
                 status_code=400,
-                detail="Bosta is not configured. Contact administrator.",
+                detail={
+                    "code": "CARRIER_NOT_CONFIGURED",
+                    "message_en": (
+                        f"{carrier_name(slug, 'en')} is not configured. "
+                        f"Add its credentials first."
+                    ),
+                    "message_ar": (
+                        f"{carrier_name(slug, 'ar')} مش متظبط. ضيف بيانات الربط الأول."
+                    ),
+                    "carrier": slug,
+                },
             )
-        shipping_settings["bosta"]["enabled"] = request.bosta_enabled
-    if request.mylerz_enabled is not None:
-        if not shipping_settings["mylerz"]["is_configured"]:
-            raise HTTPException(
-                status_code=400,
-                detail="MylerZ is not configured. Contact administrator.",
-            )
-        shipping_settings["mylerz"]["enabled"] = request.mylerz_enabled
-    if request.manual_enabled is not None:
-        shipping_settings["manual"]["enabled"] = request.manual_enabled
+        entry["enabled"] = enabled
     if request.free_shipping_threshold is not None:
         shipping_settings["free_shipping_threshold"] = request.free_shipping_threshold
     if request.restrict_to_zones is not None:
@@ -1637,7 +1755,7 @@ async def update_shipping_settings(
     # Auto-complete add_shipping onboarding step when any carrier is enabled
     any_enabled = any(
         shipping_settings.get(c, {}).get("enabled", False)
-        for c in ("aramex", "bosta", "mylerz", "manual")
+        for c in shipping_carrier_keys()
     )
     if any_enabled:
         await try_complete_onboarding_step(
@@ -1789,36 +1907,49 @@ async def save_bosta_credentials(
     """Save or update Bosta shipping credentials for the store.
 
     Credentials are encrypted at rest using AES-128 (Fernet).
+
+    **Superseded by** ``PUT /shipments/carriers/{slug}/credentials``, which
+    works for every registered carrier. Kept because existing clients call
+    this path, but it now runs the same shared logic so both routes behave
+    identically.
+
+    Two behaviours changed here, deliberately:
+
+    * It used to set ``is_configured: True`` **without ever calling
+      Bosta**, so a typo'd API key showed a green "Live" badge. It now
+      verifies and persists the result.
+    * It used to set ``enabled: True``, silently switching the carrier on
+      as a side effect of saving a key. Enabling is an explicit action in
+      shipping settings; a carrier whose credentials Bosta rejects must
+      not be enabled at all.
     """
-    from src.infrastructure.external_services.secrets.secrets_manager import (
-        get_secrets_manager,
+    from src.api.v1.routes.stores.carriers import _run_verification
+    from src.application.services.carrier_credentials import store_credentials
+
+    settings = await store_credentials(
+        store.settings,
+        "bosta",
+        {
+            "api_key": request.api_key,
+            "business_id": request.business_id,
+            "webhook_secret": request.webhook_secret,
+        },
     )
+    shipping_settings = settings["shipping"]
+    entry = shipping_settings["bosta"]
+    entry["last_configured"] = datetime.now(UTC).isoformat()
+    entry["auto_create_shipment"] = request.auto_create_shipment
 
-    secrets = get_secrets_manager()
-    key_id = await secrets.get_current_key_id()
-
-    credential_data = {
-        "api_key": request.api_key,
-        "business_id": request.business_id,
-        "webhook_secret": request.webhook_secret,
-    }
-
-    encrypted = await secrets.encrypt(credential_data, key_id)
-    encrypted_b64 = base64.b64encode(encrypted).decode("ascii")
-
-    settings = store.settings or {}
-    shipping_settings = settings.get("shipping", _get_default_shipping_settings())
-
-    shipping_settings["bosta"] = {
-        "enabled": True,
-        "is_configured": True,
-        "last_configured": datetime.now(UTC).isoformat(),
-        "encrypted_credentials": encrypted_b64,
-        "encryption_key_id": key_id,
-        "auto_create_shipment": request.auto_create_shipment,
-    }
-
-    settings["shipping"] = shipping_settings
+    verified, verification_error = await _run_verification("bosta", settings)
+    entry["verified"] = verified
+    entry["verified_at"] = datetime.now(UTC).isoformat() if verified else None
+    entry["verification_error"] = verification_error
+    # Never enable as a side effect of saving, and never disable as a side
+    # effect of a failed check — verification fails for carrier outages too,
+    # and switching a live store's shipping off over a timeout is worse than
+    # the false-green badge this replaced. Enabling stays the merchant's
+    # explicit action in shipping settings.
+    entry.setdefault("enabled", False)
     store.settings = settings
     await store_repo.update(store)
 
@@ -1826,15 +1957,19 @@ async def save_bosta_credentials(
         onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
     )
 
-    logger.info(f"Bosta credentials saved for store {store.id}")
+    logger.info(f"Bosta credentials saved for store {store.id} (verified={verified})")
+
+    from src.infrastructure.external_services.secrets.secrets_manager import (
+        get_secrets_manager,
+    )
 
     return SuccessResponse(
         data=BostaCredentialsResponse(
             is_configured=True,
-            api_key_masked=secrets.mask_credential(request.api_key),
+            api_key_masked=get_secrets_manager().mask_credential(request.api_key),
             business_id=request.business_id,
             auto_create_shipment=request.auto_create_shipment,
-            last_configured=shipping_settings["bosta"]["last_configured"],
+            last_configured=entry["last_configured"],
         ),
         message="Bosta credentials saved successfully",
     )
@@ -1901,17 +2036,18 @@ async def delete_bosta_credentials(
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
-    """Remove Bosta credentials and disable Bosta shipping."""
-    settings = store.settings or {}
-    shipping_settings = settings.get("shipping", _get_default_shipping_settings())
+    """Remove Bosta credentials and disable Bosta shipping.
 
-    shipping_settings["bosta"] = {
-        "enabled": False,
-        "is_configured": False,
-        "last_configured": None,
-    }
+    Superseded by ``DELETE /shipments/carriers/{slug}/credentials``; shares
+    its implementation so the two paths cannot drift.
+    """
+    from src.application.services.carrier_credentials import clear_credentials
 
-    settings["shipping"] = shipping_settings
+    settings = clear_credentials(store.settings, "bosta")
+    entry = settings["shipping"]["bosta"]
+    entry["last_configured"] = None
+    for key in ("verified", "verified_at", "verification_error"):
+        entry.pop(key, None)
     store.settings = settings
     await store_repo.update(store)
 

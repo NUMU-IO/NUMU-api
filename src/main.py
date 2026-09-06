@@ -111,6 +111,19 @@ async def lifespan(app: FastAPI):
 
     validate_registry()
 
+    # Validate the carrier registry. A malformed entry must break boot,
+    # not surface when a merchant tries to book a shipment. (It also runs
+    # at import; this makes the startup contract explicit and logs it.)
+    from src.application.services.carrier_registry import (
+        carrier_slugs,
+    )
+    from src.application.services.carrier_registry import (
+        validate_registry as validate_carrier_registry,
+    )
+
+    validate_carrier_registry()
+    logger.info("carrier_registry_loaded", carriers=list(carrier_slugs()))
+
     # Load plan-limit overrides from DB so admin changes survive restarts.
     async def _load_plan_limits() -> None:
         from sqlalchemy import select as sa_select

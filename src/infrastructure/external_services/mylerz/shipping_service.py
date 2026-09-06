@@ -7,7 +7,6 @@ tracking, and rate calculation.
 API Documentation: https://api.mylerz.com/
 """
 
-import base64
 import hashlib
 import hmac
 import json
@@ -24,6 +23,7 @@ from src.core.interfaces.services.shipping_service import (
     ShippingRate,
     TrackingEvent,
     TrackingInfo,
+    parse_carrier_timestamp,
 )
 
 logger = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ class MylerzShippingService(IShippingService):
                         status=log_entry.get("Status", ""),
                         description=log_entry.get("Description", ""),
                         location=log_entry.get("Location"),
-                        timestamp=log_entry.get("Date", ""),
+                        timestamp=parse_carrier_timestamp(log_entry.get("Date", "")),
                     )
                 )
 
@@ -201,7 +201,11 @@ class MylerzShippingService(IShippingService):
                 tracking_number=tracking_number,
                 status=data.get("CurrentStatus", "unknown"),
                 events=events,
-                estimated_delivery=data.get("EstimatedDelivery"),
+                estimated_delivery=(
+                    parse_carrier_timestamp(data["EstimatedDelivery"])
+                    if data.get("EstimatedDelivery")
+                    else None
+                ),
             )
 
     async def validate_address(
@@ -237,24 +241,15 @@ async def get_mylerz_service_for_store(
 
     Falls back to global env vars if no per-store credentials are configured.
     """
-    if store_settings:
-        shipping = (store_settings or {}).get("shipping", {}).get("mylerz", {})
-        encrypted_creds = shipping.get("encrypted_credentials")
-        key_id = shipping.get("encryption_key_id")
-        if encrypted_creds and key_id:
-            from src.infrastructure.external_services.secrets.secrets_manager import (
-                get_secrets_manager,
-            )
+    from src.application.services.carrier_credentials import load_credentials
 
-            secrets_mgr = get_secrets_manager()
-            cred_data = await secrets_mgr.decrypt(
-                base64.b64decode(encrypted_creds), key_id
-            )
-            return MylerzShippingService(
-                api_key=cred_data.get("api_key"),
-                merchant_id=cred_data.get("merchant_id"),
-                webhook_secret=cred_data.get("webhook_secret"),
-                base_url=settings.mylerz_base_url,
-            )
+    creds = await load_credentials(store_settings, "mylerz")
+    if creds:
+        return MylerzShippingService(
+            api_key=creds.get("api_key"),
+            merchant_id=creds.get("merchant_id"),
+            webhook_secret=creds.get("webhook_secret"),
+            base_url=settings.mylerz_base_url,
+        )
     # Fallback to global settings
     return MylerzShippingService()

@@ -7,7 +7,6 @@ tracking, and rate calculation.
 API Documentation: https://openapi.jtexpress-eg.com/
 """
 
-import base64
 import hashlib
 import hmac
 import json
@@ -24,6 +23,7 @@ from src.core.interfaces.services.shipping_service import (
     ShippingRate,
     TrackingEvent,
     TrackingInfo,
+    parse_carrier_timestamp,
 )
 
 logger = logging.getLogger(__name__)
@@ -234,7 +234,7 @@ class JTShippingService(IShippingService):
                         status=detail.get("scanType", ""),
                         description=detail.get("desc", ""),
                         location=detail.get("scanCity"),
-                        timestamp=detail.get("scanTime", ""),
+                        timestamp=parse_carrier_timestamp(detail.get("scanTime", "")),
                     )
                 )
 
@@ -279,24 +279,15 @@ async def get_jt_service_for_store(
 
     Falls back to global env vars if no per-store credentials are configured.
     """
-    if store_settings:
-        shipping = (store_settings or {}).get("shipping", {}).get("jt", {})
-        encrypted_creds = shipping.get("encrypted_credentials")
-        key_id = shipping.get("encryption_key_id")
-        if encrypted_creds and key_id:
-            from src.infrastructure.external_services.secrets.secrets_manager import (
-                get_secrets_manager,
-            )
+    from src.application.services.carrier_credentials import load_credentials
 
-            secrets_mgr = get_secrets_manager()
-            cred_data = await secrets_mgr.decrypt(
-                base64.b64decode(encrypted_creds), key_id
-            )
-            return JTShippingService(
-                api_key=cred_data.get("api_key"),
-                customer_code=cred_data.get("customer_code"),
-                webhook_secret=cred_data.get("webhook_secret"),
-                base_url=settings.jt_base_url,
-            )
+    creds = await load_credentials(store_settings, "jt")
+    if creds:
+        return JTShippingService(
+            api_key=creds.get("api_key"),
+            customer_code=creds.get("customer_code"),
+            webhook_secret=creds.get("webhook_secret"),
+            base_url=settings.jt_base_url,
+        )
     # Fallback to global settings
     return JTShippingService()

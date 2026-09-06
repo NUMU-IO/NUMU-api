@@ -18,6 +18,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.carrier_registry import get_spec
 from src.application.services.funnel_emit_service import emit_order_delivered
 from src.config import settings
 from src.core.entities.order import OrderStatus
@@ -39,15 +40,11 @@ router = APIRouter()
 mylerz_service = MylerzShippingService()
 
 # Map Mylerz states to ShipmentStatus
-MYLERZ_STATE_MAP = {
-    "PICKED_UP": ShipmentStatus.PICKED_UP,
-    "IN_TRANSIT": ShipmentStatus.IN_TRANSIT,
-    "OUT_FOR_DELIVERY": ShipmentStatus.OUT_FOR_DELIVERY,
-    "DELIVERED": ShipmentStatus.DELIVERED,
-    "RETURNED": ShipmentStatus.RETURNED,
-    "FAILED": ShipmentStatus.FAILED,
-    "CANCELLED": ShipmentStatus.CANCELLED,
-}
+# Carrier status vocabulary is declared once in the carrier registry
+# (application/services/carrier_registry.py). This module used to carry
+# its own copy; three copies had already drifted. Kept as a module
+# constant because existing code and tests reference it by name.
+MYLERZ_STATE_MAP = dict(get_spec("mylerz").status_map)
 
 
 async def _find_order(repo: OrderRepository, tracking_number: str, log):

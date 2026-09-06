@@ -26,17 +26,52 @@ from src.api.v1.schemas.tenant.shipment import (
     ShipmentResponse,
     ShipmentStatsResponse,
 )
+from src.application.services.carrier_resolver import (
+    DEFAULT_CARRIER,
+    CarrierCapabilityError,
+    UnknownCarrierError,
+    capability,
+    service_for_carrier,
+    service_for_shipment,
+    tracking_url_for,
+)
 from src.core.entities.shipment import Shipment, ShipmentStatus
 from src.core.entities.store import Store
-from src.infrastructure.external_services.bosta.shipping_service import (
-    get_bosta_service_for_store,
-)
 from src.infrastructure.repositories import (
     OrderRepository,
     ShipmentRepository,
 )
 
 router = APIRouter(prefix="/{store_id}/shipments")
+
+
+async def _resolve_for_shipment(shipment: Shipment, store: Store, operation: str):
+    """Resolve the provider owning this shipment and assert it can do `operation`.
+
+    Every carrier action dispatches on ``shipment.carrier``. Before this
+    existed, all of them called Bosta unconditionally — cancelling a
+    Mylerz shipment hit Bosta's API.
+    """
+    try:
+        service = await service_for_shipment(shipment, store.settings or {})
+        return service, capability(service, operation, shipment.carrier)
+    except UnknownCarrierError as e:
+        # A shipment already persisted with a carrier we can no longer
+        # resolve — a data problem, not a client error.
+        raise HTTPException(status_code=409, detail=e.as_detail()) from e
+    except CarrierCapabilityError as e:
+        raise HTTPException(status_code=501, detail=e.as_detail()) from e
+
+
+async def _resolve_for_carrier(carrier: str, store: Store, operation: str):
+    """Resolve a provider by explicit carrier slug and assert `operation`."""
+    try:
+        service = await service_for_carrier(carrier, store.settings or {})
+        return service, capability(service, operation, carrier)
+    except UnknownCarrierError as e:
+        raise HTTPException(status_code=400, detail=e.as_detail()) from e
+    except CarrierCapabilityError as e:
+        raise HTTPException(status_code=501, detail=e.as_detail()) from e
 
 
 def _shipment_to_response(s: Shipment) -> ShipmentResponse:
@@ -92,7 +127,7 @@ async def _create_shipment_for_order(
     store: Store,
     order_repo: OrderRepository,
     shipment_repo: ShipmentRepository,
-    carrier: str = "bosta",
+    carrier: str = DEFAULT_CARRIER,
     shipping_method: str = "standard",
     notes: str | None = None,
 ) -> Shipment:
@@ -116,22 +151,15 @@ async def _create_shipment_for_order(
             detail=f"Order {order_id} already has an active shipment",
         )
 
-    # Select carrier service
-    if carrier == "mylerz":
-        from src.infrastructure.external_services.mylerz import (
-            get_mylerz_service_for_store,
-        )
-
-        shipping_service = await get_mylerz_service_for_store(store.settings or {})
-    elif carrier == "jt":
-        from src.infrastructure.external_services.jt import (
-            get_jt_service_for_store,
-        )
-
-        shipping_service = await get_jt_service_for_store(store.settings or {})
-    else:
-        carrier = "bosta"  # Normalize to bosta as default
-        shipping_service = await get_bosta_service_for_store(store.settings or {})
+    # Select carrier service.
+    #
+    # An unrecognised slug is a 400 — it must NEVER fall through to Bosta.
+    # This used to read `carrier = "bosta"  # Normalize to bosta as default`,
+    # so a typo'd carrier silently booked a real Bosta delivery.
+    try:
+        shipping_service = await service_for_carrier(carrier, store.settings or {})
+    except UnknownCarrierError as e:
+        raise HTTPException(status_code=400, detail=e.as_detail()) from e
 
     # Map order address to shipping address
     addr = order.shipping_address
@@ -176,16 +204,9 @@ async def _create_shipment_for_order(
         notes=notes,
     )
 
-    # Build tracking URL based on carrier
-    tracking_url_map = {
-        "bosta": f"https://bosta.co/tracking-shipment/?tracking_number={label.tracking_number}",
-        "mylerz": f"https://mylerz.com/track/{label.tracking_number}",
-        "jt": f"https://www.jtexpress-eg.com/trajectoryQuery?waybillNo={label.tracking_number}",
-    }
-    tracking_url = tracking_url_map.get(
-        carrier,
-        f"https://bosta.co/tracking-shipment/?tracking_number={label.tracking_number}",
-    )
+    # Build tracking URL based on carrier. Returns None for a carrier we
+    # have no tracking page for — never another carrier's URL.
+    tracking_url = tracking_url_for(carrier, label.tracking_number)
 
     # Create shipment entity
     shipment = Shipment(
@@ -389,6 +410,45 @@ async def get_cod_summary(
     )
 
 
+# ── Literal single-segment routes MUST be declared above `/{shipment_id}` ──
+#
+# FastAPI matches in declaration order, so a one-segment literal declared
+# after `/{shipment_id}` is unreachable: the path parameter matches first
+# and then 422s trying to parse the literal as a UUID.
+#
+# `GET /pickups` sat in the Pickup Management section below and was dead —
+# every call returned 422 "invalid UUID: pickups". `POST /pickups` was fine
+# only because no single-segment POST `/{shipment_id}` exists, and
+# `/pickups/{id}`, `/pickups/locations` and `/bosta/cities` are all
+# multi-segment, so they never collided.
+#
+# `test_no_shadowed_routes` in tests/unit/api/test_shipment_routes.py
+# guards this for every route in this router — add new literals here.
+
+
+# NOTE: `GET /carriers` lives in `stores/carriers.py`, which is registered
+# ahead of this router and serves the catalog *plus* this store's
+# connection state. It was briefly defined here too; that duplicate was
+# dead code shadowed by the other router.
+
+
+@router.get(
+    "/pickups",
+    summary="List pickups",
+    operation_id="list_pickups",
+)
+async def list_pickups(
+    store: Annotated[Store, Depends(get_current_store)],
+    page: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    carrier: str = Query(DEFAULT_CARRIER, description="Carrier slug"),
+):
+    """List all scheduled pickups for a carrier."""
+    _, list_all = await _resolve_for_carrier(carrier, store, "list_pickups")
+    result = await list_all(page=page, limit=limit)
+    return SuccessResponse(data=result, message="Pickups retrieved")
+
+
 @router.get(
     "/{shipment_id}",
     response_model=SuccessResponse[ShipmentResponse],
@@ -421,7 +481,7 @@ async def cancel_shipment(
     store: Annotated[Store, Depends(get_current_store)],
     shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
 ):
-    """Cancel a shipment via Bosta API."""
+    """Cancel a shipment with the carrier that owns it."""
     shipment = await shipment_repo.get_by_id(shipment_id)
     if not shipment or shipment.store_id != store.id:
         raise HTTPException(status_code=404, detail="Shipment not found")
@@ -430,10 +490,9 @@ async def cancel_shipment(
             status_code=409, detail="Shipment is already in a terminal state"
         )
 
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-
     if shipment.tracking_number:
-        cancelled = await bosta_service.cancel_shipment(shipment.tracking_number)
+        _, cancel = await _resolve_for_shipment(shipment, store, "cancel_shipment")
+        cancelled = await cancel(shipment.tracking_number)
         if not cancelled:
             raise HTTPException(
                 status_code=400, detail="Failed to cancel shipment with carrier"
@@ -465,22 +524,24 @@ async def request_return_shipment(
     if not shipment or shipment.store_id != store.id:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
+    _, request_return = await _resolve_for_shipment(shipment, store, "request_return")
 
-    return_tracking = await bosta_service.request_return(
+    return_tracking = await request_return(
         tracking_number=shipment.tracking_number,
         reason=reason,
     )
     if not return_tracking:
         raise HTTPException(status_code=400, detail="Failed to create return shipment")
 
+    # The return leg belongs to the same carrier as the forward leg — it
+    # used to be hardcoded to Bosta, mislabelling every non-Bosta return.
     return_shipment = Shipment(
         store_id=store.id,
         tenant_id=store.tenant_id,
         order_id=shipment.order_id,
-        carrier="bosta",
+        carrier=shipment.carrier,
         tracking_number=return_tracking,
-        tracking_url=f"https://bosta.co/tracking-shipment/?tracking_number={return_tracking}",
+        tracking_url=tracking_url_for(shipment.carrier, return_tracking),
         status=ShipmentStatus.CREATED,
         shipment_type="return",
         parent_shipment_id=shipment.id,
@@ -510,15 +571,16 @@ async def track_shipment_detail(
     store: Annotated[Store, Depends(get_current_store)],
     shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
 ):
-    """Get real-time tracking from Bosta API."""
+    """Get real-time tracking from the carrier that owns this shipment."""
     shipment = await shipment_repo.get_by_id(shipment_id)
     if not shipment or shipment.store_id != store.id:
         raise HTTPException(status_code=404, detail="Shipment not found")
     if not shipment.tracking_number:
         raise HTTPException(status_code=400, detail="Shipment has no tracking number")
 
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    tracking = await bosta_service.track_shipment("Bosta", shipment.tracking_number)
+    _, track = await _resolve_for_shipment(shipment, store, "track_shipment")
+    # Carrier arg was the literal "Bosta" regardless of the real carrier.
+    tracking = await track(shipment.carrier, shipment.tracking_number)
 
     return SuccessResponse(
         data={
@@ -560,7 +622,7 @@ async def update_shipment(
     receiver_first_name: str | None = None,
     receiver_last_name: str | None = None,
 ):
-    """Update a delivery on Bosta (receiver info, COD, notes)."""
+    """Update a delivery with the owning carrier (receiver info, COD, notes)."""
     shipment = await shipment_repo.get_by_id(shipment_id)
     if not shipment or shipment.store_id != store.id:
         raise HTTPException(status_code=404, detail="Shipment not found")
@@ -571,7 +633,8 @@ async def update_shipment(
             status_code=400, detail="Shipment has no tracking number to update"
         )
 
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
+    # Only Bosta implements update_delivery today; others get a clean 501.
+    _, update_delivery = await _resolve_for_shipment(shipment, store, "update_delivery")
 
     receiver = None
     if any([receiver_phone, receiver_first_name, receiver_last_name]):
@@ -583,7 +646,7 @@ async def update_shipment(
         if receiver_phone:
             receiver["phone"] = receiver_phone
 
-    await bosta_service.update_delivery(
+    await update_delivery(
         shipment.tracking_number,
         receiver=receiver,
         cod=cod_amount,
@@ -600,7 +663,7 @@ async def update_shipment(
 
     return SuccessResponse(
         data=_shipment_to_response(updated),
-        message="Shipment updated on Bosta",
+        message=f"Shipment updated with {shipment.carrier}",
     )
 
 
@@ -623,8 +686,8 @@ async def print_shipment_awb(
     if not shipment.tracking_number:
         raise HTTPException(status_code=400, detail="Shipment has no tracking number")
 
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    pdf_bytes = await bosta_service.print_awb(shipment.tracking_number)
+    _, print_awb = await _resolve_for_shipment(shipment, store, "print_awb")
+    pdf_bytes = await print_awb(shipment.tracking_number)
 
     return Response(
         content=pdf_bytes,
@@ -645,17 +708,25 @@ async def get_bosta_delivery_details(
     store: Annotated[Store, Depends(get_current_store)],
     shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
 ):
-    """Fetch full delivery details directly from Bosta API."""
+    """Fetch full delivery details from the carrier that owns this shipment.
+
+    Path stays ``/bosta-details`` for hub back-compat, but it now resolves
+    the shipment's real carrier — asking Bosta about a Mylerz waybill
+    returned nothing useful. Carriers without ``get_delivery`` return 501.
+    P1/P3 rename this to a carrier-neutral path.
+    """
     shipment = await shipment_repo.get_by_id(shipment_id)
     if not shipment or shipment.store_id != store.id:
         raise HTTPException(status_code=404, detail="Shipment not found")
     if not shipment.tracking_number:
         raise HTTPException(status_code=400, detail="Shipment has no tracking number")
 
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    details = await bosta_service.get_delivery(shipment.tracking_number)
+    _, get_delivery = await _resolve_for_shipment(shipment, store, "get_delivery")
+    details = await get_delivery(shipment.tracking_number)
 
-    return SuccessResponse(data=details, message="Bosta delivery details retrieved")
+    return SuccessResponse(
+        data=details, message=f"{shipment.carrier} delivery details retrieved"
+    )
 
 
 # ── Pickup Management ────────────────────────────────────────────
@@ -668,10 +739,19 @@ async def get_bosta_delivery_details(
 )
 async def get_pickup_locations(
     store: Annotated[Store, Depends(get_current_store)],
+    carrier: str = Query(DEFAULT_CARRIER, description="Carrier slug"),
 ):
-    """Get available pickup locations configured in Bosta dashboard."""
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    locations = await bosta_service.get_pickup_locations()
+    """Get pickup locations configured in the carrier's dashboard.
+
+    Pickup routes are store-scoped, so they take an explicit ``carrier``
+    rather than inferring one. Default stays "bosta" for back-compat;
+    carriers without pickup support return 501 instead of silently
+    querying Bosta.
+    """
+    _, get_locations = await _resolve_for_carrier(
+        carrier, store, "get_pickup_locations"
+    )
+    locations = await get_locations()
     return SuccessResponse(data=locations, message="Pickup locations retrieved")
 
 
@@ -690,9 +770,10 @@ async def create_pickup(
     contact_phone: str | None = None,
     contact_email: str | None = None,
     notes: str | None = None,
+    carrier: str = Query(DEFAULT_CARRIER, description="Carrier slug"),
 ):
     """Schedule a courier pickup from a business location."""
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
+    _, create = await _resolve_for_carrier(carrier, store, "create_pickup")
 
     contact_person = None
     if any([contact_name, contact_phone, contact_email]):
@@ -704,7 +785,7 @@ async def create_pickup(
         if contact_email:
             contact_person["email"] = contact_email
 
-    pickup = await bosta_service.create_pickup(
+    pickup = await create(
         business_location_id=business_location_id,
         scheduled_date=scheduled_date,
         scheduled_time_slot=scheduled_time_slot,
@@ -714,20 +795,9 @@ async def create_pickup(
     return SuccessResponse(data=pickup, message="Pickup scheduled")
 
 
-@router.get(
-    "/pickups",
-    summary="List pickups",
-    operation_id="list_pickups",
-)
-async def list_pickups(
-    store: Annotated[Store, Depends(get_current_store)],
-    page: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=100),
-):
-    """List all scheduled pickups from Bosta."""
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    result = await bosta_service.list_pickups(page=page, limit=limit)
-    return SuccessResponse(data=result, message="Pickups retrieved")
+# NOTE: `GET /pickups` is NOT declared here — a single-segment literal
+# would be shadowed by `GET /{shipment_id}` above. It lives with the other
+# literal-prefix routes near the top of this file. See the comment there.
 
 
 @router.get(
@@ -738,10 +808,11 @@ async def list_pickups(
 async def get_pickup(
     pickup_id: str,
     store: Annotated[Store, Depends(get_current_store)],
+    carrier: str = Query(DEFAULT_CARRIER, description="Carrier slug"),
 ):
     """Get details of a specific pickup."""
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    pickup = await bosta_service.get_pickup(pickup_id)
+    _, get_one = await _resolve_for_carrier(carrier, store, "get_pickup")
+    pickup = await get_one(pickup_id)
     return SuccessResponse(data=pickup, message="Pickup details retrieved")
 
 
@@ -758,9 +829,10 @@ async def update_pickup(
     contact_name: str | None = None,
     contact_phone: str | None = None,
     notes: str | None = None,
+    carrier: str = Query(DEFAULT_CARRIER, description="Carrier slug"),
 ):
     """Update a scheduled pickup."""
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
+    _, update = await _resolve_for_carrier(carrier, store, "update_pickup")
 
     contact_person = None
     if any([contact_name, contact_phone]):
@@ -770,7 +842,7 @@ async def update_pickup(
         if contact_phone:
             contact_person["phone"] = contact_phone
 
-    result = await bosta_service.update_pickup(
+    result = await update(
         pickup_id,
         scheduled_date=scheduled_date,
         scheduled_time_slot=scheduled_time_slot,
@@ -789,10 +861,11 @@ async def update_pickup(
 async def delete_pickup(
     pickup_id: str,
     store: Annotated[Store, Depends(get_current_store)],
+    carrier: str = Query(DEFAULT_CARRIER, description="Carrier slug"),
 ):
     """Cancel/delete a scheduled pickup."""
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    deleted = await bosta_service.delete_pickup(pickup_id)
+    _, delete = await _resolve_for_carrier(carrier, store, "delete_pickup")
+    deleted = await delete(pickup_id)
     if not deleted:
         raise HTTPException(status_code=400, detail="Failed to cancel pickup")
     return None
@@ -809,9 +882,15 @@ async def delete_pickup(
 async def get_bosta_cities(
     store: Annotated[Store, Depends(get_current_store)],
 ):
-    """Get all cities available for Bosta delivery."""
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    cities = await bosta_service.get_cities()
+    """Get all cities available for Bosta delivery.
+
+    Bosta-namespaced by URL contract — the hub's connection probe calls
+    ``getBostaCities``. The carrier is passed explicitly rather than
+    being an accidental default. P1/P3 generalise this to
+    ``/carriers/{slug}/cities``.
+    """
+    _, get_cities = await _resolve_for_carrier("bosta", store, "get_cities")
+    cities = await get_cities()
     return SuccessResponse(data=cities, message="Cities retrieved")
 
 
@@ -824,7 +903,10 @@ async def get_bosta_city_zones(
     city_id: str,
     store: Annotated[Store, Depends(get_current_store)],
 ):
-    """Get delivery zones within a specific city."""
-    bosta_service = await get_bosta_service_for_store(store.settings or {})
-    zones = await bosta_service.get_city_zones(city_id)
+    """Get delivery zones within a specific Bosta city.
+
+    Bosta-namespaced by URL contract; see get_bosta_cities.
+    """
+    _, get_city_zones = await _resolve_for_carrier("bosta", store, "get_city_zones")
+    zones = await get_city_zones(city_id)
     return SuccessResponse(data=zones, message="City zones retrieved")

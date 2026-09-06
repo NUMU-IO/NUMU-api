@@ -14,6 +14,7 @@ call :func:`notify_topup_credited` (cache invalidation + email enqueue).
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,40 @@ from src.infrastructure.database.models.public.wallet import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _convert_payg_tenant(session: AsyncSession, tenant_id: UUID) -> None:
+    """Move a read-only PAYG tenant back to active after a top-up.
+
+    No-op for every other plan and for tenants already writable, so it is
+    safe on the replay path and on ordinary top-ups by paying merchants.
+    """
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.public.tenant import (
+        TenantLifecycleState,
+        TenantModel,
+    )
+
+    tenant = (
+        await session.execute(select(TenantModel).where(TenantModel.id == tenant_id))
+    ).scalar_one_or_none()
+    if tenant is None or tenant.is_writable or (tenant.plan or "").lower() != "payg":
+        return
+
+    # Same fields SubscribeUseCase clears on reactivation. Leaving a stale
+    # delete_at behind would hand the purge task a tenant already past its
+    # deadline the moment this one lapsed again — deletion, not a lock.
+    tenant.lifecycle_state = TenantLifecycleState.ACTIVE
+    tenant.read_only_at = None
+    tenant.delete_at = None
+    if not tenant.trial_converted_at:
+        tenant.trial_converted_at = datetime.now(UTC)
+
+    logger.info(
+        "payg_tenant_reactivated_by_topup",
+        extra={"tenant_id": str(tenant_id)},
+    )
 
 
 async def credit_topup_intent(
@@ -70,6 +105,12 @@ async def credit_topup_intent(
 
     intent.status = TopupIntentStatus.SUCCEEDED.value
     intent.credited_transaction_id = tx.id
+
+    # A PAYG merchant funds the store from the wallet, never a subscription,
+    # so the top-up IS their conversion — nothing else would ever move them
+    # out of read_only and their storefront would stay locked forever. Paid
+    # plans need no equivalent here: SubscribeUseCase already does it.
+    await _convert_payg_tenant(session, intent.tenant_id)
 
     # A credit only raises the balance — sync the warning ladder down.
     wallet = await service.get_or_create_wallet(intent.tenant_id)

@@ -21,11 +21,9 @@ def _run_async(coro):
 
 async def _sync_shipments() -> dict:
     """Sync non-terminal shipments that haven't been updated recently."""
+    from src.application.services.carrier_resolver import service_for_carrier
     from src.core.entities.shipment import ShipmentStatus
     from src.infrastructure.database.connection import AsyncSessionLocal
-    from src.infrastructure.external_services.bosta.shipping_service import (
-        get_bosta_service_for_store,
-    )
     from src.infrastructure.repositories.shipment_repository import ShipmentRepository
     from src.infrastructure.repositories.store_repository import StoreRepository
 
@@ -39,28 +37,46 @@ async def _sync_shipments() -> dict:
         # Get non-terminal shipments, oldest updates first
         active = await shipment_repo.get_active_shipments()
 
-        # Group by store for credential efficiency
-        by_store: dict = {}
+        # Group by (store, carrier) for credential efficiency.
+        #
+        # This used to group by store alone and resolve a single Bosta
+        # client per store, then poll EVERY shipment through it — so a
+        # store with mixed carriers had its Mylerz and J&T shipments
+        # silently tracked against Bosta on every scheduled run.
+        by_store_carrier: dict = {}
         for s in active:
-            by_store.setdefault(s.store_id, []).append(s)
+            by_store_carrier.setdefault((s.store_id, s.carrier), []).append(s)
 
-        for store_id, shipments in by_store.items():
-            store = await store_repo.get_by_id(store_id)
+        store_cache: dict = {}
+
+        for (store_id, carrier), shipments in by_store_carrier.items():
+            if store_id not in store_cache:
+                store_cache[store_id] = await store_repo.get_by_id(store_id)
+            store = store_cache[store_id]
             if not store:
                 continue
 
             try:
-                bosta_service = await get_bosta_service_for_store(store.settings or {})
-            except Exception:
-                errors += 1
+                service = await service_for_carrier(carrier, store.settings or {})
+            except Exception as e:
+                # Unknown carrier or unusable credentials — count every
+                # shipment in the group, don't silently drop them.
+                logger.warning(
+                    "shipment_sync_carrier_unavailable",
+                    store_id=str(store_id),
+                    carrier=carrier,
+                    count=len(shipments),
+                    error=str(e),
+                )
+                errors += len(shipments)
                 continue
 
             for shipment in shipments:
                 if not shipment.tracking_number:
                     continue
                 try:
-                    tracking = await bosta_service.track_shipment(
-                        "Bosta", shipment.tracking_number
+                    tracking = await service.track_shipment(
+                        carrier, shipment.tracking_number
                     )
                     # Map tracking status to ShipmentStatus
                     status_map = {
@@ -78,7 +94,8 @@ async def _sync_shipments() -> dict:
                         else shipment.status
                     ):
                         shipment.update_status(
-                            new_status, f"Synced from Bosta API: {tracking.status}"
+                            new_status,
+                            f"Synced from {carrier} API: {tracking.status}",
                         )
 
                         if new_status == ShipmentStatus.DELIVERED:
@@ -174,7 +191,7 @@ async def _cod_reconciliation() -> dict:
     default_retry_delay=120,
 )
 def sync_shipment_statuses(self) -> dict:
-    """Sync non-terminal shipment statuses from Bosta API.
+    """Sync non-terminal shipment statuses from each shipment's own carrier.
 
     Scheduled every 30 minutes as fallback for missed webhooks.
     """
