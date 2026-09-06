@@ -55,6 +55,7 @@ async def _send_all() -> dict:
                 select(
                     StoreModel.id,
                     StoreModel.tenant_id,
+                    StoreModel.name,
                     StoreModel.settings,
                     StoreModel.default_currency,
                     StoreModel.default_language,
@@ -176,17 +177,85 @@ async def _send_one(row, channels: list[str]) -> None:
         metrics = await _week_metrics(session, row.id, tz_name)
 
     digest = build_weekly_digest(metrics, lang, _fmt)
-    subject = "ملخص متجرك الأسبوعي" if lang == "ar" else "Your weekly store summary"
+    subject = _subject(digest, row.name, lang)
     lines = [digest["headline"], "", *[f"• {h}" for h in digest["highlights"]]]
+    if digest.get("nudge"):
+        lines += ["", digest["nudge"]]
     body = "\n".join(lines)
 
     if "email" in channels:
-        await _send_email(row.owner_id, subject, body, digest)
+        await _send_email(row.owner_id, subject, body, digest, row.name, lang)
     if "whatsapp" in channels:
         await _send_whatsapp(row.id, row.tenant_id, body)
 
 
-async def _send_email(owner_id, subject: str, body: str, digest: dict) -> None:
+def _subject(digest: dict, store_name: str | None, lang: str) -> str:
+    """Lead the subject with the week's outcome, not a generic label."""
+    store = store_name or ("متجرك" if lang == "ar" else "your store")
+    if not digest["has_sales"]:
+        return (
+            f"{store}: مفيش مبيعات الأسبوع ده"
+            if lang == "ar"
+            else f"{store}: no sales this week"
+        )
+    return f"{store}: {digest['headline']}"
+
+
+def _digest_html(digest: dict, store_name: str | None, lang: str) -> str:
+    from src.config import settings
+
+    rtl = lang == "ar"
+    direction = "rtl" if rtl else "ltr"
+    align = "right" if rtl else "left"
+    pad = "0 20px 0 0" if rtl else "0 0 0 20px"
+    hub = (settings.merchant_hub_url or "https://numueg.app").rstrip("/")
+    cta = "افتح لوحة التحكم" if rtl else "Open your dashboard"
+    footer = (
+        "بتوصلك الرسالة دي كل أسبوع. تقدر توقفها من إعدادات المتجر."
+        if rtl
+        else "You get this every week. Turn it off in your store settings."
+    )
+    bullets = "".join(
+        f'<li style="margin:0 0 8px;">{h}</li>' for h in digest["highlights"]
+    )
+    nudge = (
+        f'<p style="margin:0 0 24px;padding:14px 16px;background:#f5f5f4;'
+        f'border-radius:10px;">{digest["nudge"]}</p>'
+        if digest.get("nudge")
+        else ""
+    )
+    return f"""<!doctype html>
+<html dir="{direction}" lang="{lang}">
+<body style="margin:0;padding:0;background:#f5f5f4;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f4;padding:24px 12px;">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:14px;padding:32px 28px;font-family:'Segoe UI',Tahoma,Arial,sans-serif;font-size:16px;line-height:1.8;color:#1c1917;direction:{direction};text-align:{align};">
+<tr><td>
+<p style="margin:0 0 6px;font-size:13px;color:#78716c;">{store_name or "NUMU"}</p>
+<h1 style="margin:0 0 20px;font-size:20px;line-height:1.5;font-weight:700;">{digest["headline"]}</h1>
+<ul style="margin:0 0 24px;padding:{pad};">{bullets}</ul>
+{nudge}
+<p style="margin:0 0 26px;">
+<a href="{hub}" style="display:inline-block;background:#1c1917;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;">{cta}</a>
+</p>
+<hr style="border:none;border-top:1px solid #e7e5e4;margin:0 0 14px;">
+<p style="margin:0;font-size:13px;color:#78716c;">{footer}</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+
+async def _send_email(
+    owner_id,
+    subject: str,
+    body: str,
+    digest: dict,
+    store_name: str | None = None,
+    lang: str = "en",
+) -> None:
     """Email the store owner. Fail-open; the Resend service already no-ops
     without an API key (dev)."""
     from sqlalchemy import select
@@ -205,11 +274,7 @@ async def _send_email(owner_id, subject: str, body: str, digest: dict) -> None:
     if not user or not user.email:
         return
 
-    html = (
-        f"<h2>{digest['headline']}</h2><ul>"
-        + "".join(f"<li>{h}</li>" for h in digest["highlights"])
-        + "</ul>"
-    )
+    html = _digest_html(digest, store_name, lang)
     service = ResendEmailService()
     await service.send_email(
         EmailMessage(
