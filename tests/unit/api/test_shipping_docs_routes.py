@@ -210,3 +210,80 @@ class TestCourierProfileRoutes:
         source = inspect.getsource(create_courier_profile)
         assert "message_ar" in source
         assert "UNKNOWN_COURIER_SEED" in source
+
+
+class TestWhatTheLiveRunCaught:
+    """Three defects that every unit test above was blind to, because each
+    one only appears when a real order, a real courier sheet and a real
+    browser are on the other end. Found by running the branch against a
+    live API; pinned here so they cannot come back."""
+
+    def test_the_label_reads_a_field_the_line_item_actually_has(self):
+        """`_label_context` read `li.name`. `OrderLineItem` has no `name`,
+        so **every** waybill print raised AttributeError → 500."""
+        from src.core.entities.order import OrderLineItem
+
+        fields = set(OrderLineItem.model_fields)
+        assert "name" not in fields
+        assert {"product_name", "variant_name", "quantity"} <= fields
+
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import _label_context
+
+        source = inspect.getsource(_label_context)
+        # The prose above mentions the old field, so match the code shape.
+        assert '"name": li.name' not in source
+        assert "li.product_name" in source
+
+    def test_the_import_resolves_the_sheets_words_not_the_carriers(self):
+        """A Tier 3 sheet is written by the merchant, and `manual` has an
+        empty carrier `status_map` by design — so routing the sheet
+        through `map_carrier_status` skipped every row as unmapped and the
+        CSV round-trip moved nothing."""
+        from src.application.services.carrier_registry import get_spec
+        from src.application.services.shipment_csv import resolve_status
+        from src.core.entities.shipment import ShipmentStatus
+
+        assert get_spec("manual").status_map == {}
+        assert resolve_status("delivered") is ShipmentStatus.DELIVERED
+        assert resolve_status("تم التسليم") is ShipmentStatus.DELIVERED
+
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import apply_status_import
+
+        source = inspect.getsource(apply_status_import)
+        assert "resolve_status(raw_status)" in source
+        assert "status=resolved" in source
+
+    def test_an_unresolvable_word_still_moves_nothing(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import apply_status_import
+
+        source = inspect.getsource(apply_status_import)
+        assert "unmapped" in source
+
+    def test_the_status_override_does_not_bypass_the_carrier_map(self):
+        """`status=` is an override for a caller with its own vocabulary,
+        not a way to skip mapping — omit it and the carrier map still
+        decides."""
+        import inspect
+
+        from src.application.services.shipment_status_sync import apply_carrier_status
+
+        source = inspect.getsource(apply_carrier_status)
+        assert "status or map_carrier_status(carrier, raw_status)" in source
+
+    def test_the_html_label_carries_its_own_stylesheet(self):
+        """The template links `label.css` relatively — WeasyPrint resolves
+        that against the template dir, a browser would resolve it against
+        the API host and 404, leaving an unstyled label."""
+        from src.api.v1.routes.stores.shipping_docs import _label_html_response
+
+        html = '<link rel="stylesheet" href="label.css"><div class="label"></div>'
+        out = _label_html_response(html).body.decode()
+        assert '<link rel="stylesheet"' not in out
+        assert "unicode-bidi: isolate" in out  # the LTR rule, inlined
+        assert "100mm 150mm" in out or "100mm" in out

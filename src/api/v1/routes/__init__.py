@@ -181,9 +181,6 @@ from src.api.v1.routes.storefront import (
     search_router as storefront_search_router,
 )
 from src.api.v1.routes.storefront import (
-    shipping_quote_router as storefront_shipping_quote_router,
-)
-from src.api.v1.routes.storefront import (
     shipping_router as storefront_shipping_router,
 )
 from src.api.v1.routes.storefront import (
@@ -530,13 +527,6 @@ api_router.include_router(
     storefront_theme_error_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Theme Errors"],
-)
-
-# Storefront - shipping rate quotes (public, scoped to store, legacy)
-api_router.include_router(
-    storefront_shipping_quote_router,
-    prefix="/storefront/store/{store_id}",
-    tags=["Storefront - Shipping"],
 )
 
 # Storefront - shipping governorates + options (public, scoped to store)

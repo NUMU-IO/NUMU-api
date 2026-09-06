@@ -55,7 +55,6 @@ from src.api.v1.routes.storefront.reviews import router as reviews_router
 from src.api.v1.routes.storefront.saved_cards import router as saved_cards_router
 from src.api.v1.routes.storefront.search import router as search_router
 from src.api.v1.routes.storefront.shipping import router as shipping_router
-from src.api.v1.routes.storefront.shipping_quote import router as shipping_quote_router
 from src.api.v1.routes.storefront.theme_error import router as theme_error_router
 from src.api.v1.routes.storefront.theme_resolution import (
     router as theme_resolution_router,
@@ -96,7 +95,6 @@ __all__ = [
     "order_lookup_router",
     "theme_error_router",
     "theme_resolution_router",
-    "shipping_quote_router",
     "shipping_router",
     "checkout_config_router",
     "checkout_session_router",

@@ -5,13 +5,22 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from src.application.services.carrier_resolver import (
+    DEFAULT_CARRIER,
+    SUPPORTED_CARRIERS,
+)
+
 
 class CreateShipmentRequest(BaseModel):
     """Create a shipment for an order."""
 
     order_id: UUID
+    #: A second hardcoded "bosta" was the bug P0 killed at the create route.
+    #: The default and the list of valid slugs both come from the registry,
+    #: so a carrier added there needs no change here.
     carrier: str = Field(
-        default="bosta", description="Shipping carrier: bosta, mylerz, jt"
+        default=DEFAULT_CARRIER,
+        description=f"Shipping carrier: {', '.join(SUPPORTED_CARRIERS)}",
     )
     shipping_method: str = "standard"
     notes: str | None = None

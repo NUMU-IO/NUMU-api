@@ -20,6 +20,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, UploadFile
 from fastapi import File as FileParam
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import get_current_store, get_order_repository
@@ -40,6 +41,7 @@ from src.application.services.shipment_csv import (
     CsvFormatError,
     build_manifest_csv,
     parse_status_sheet,
+    resolve_status,
 )
 from src.application.services.shipment_status_sync import apply_carrier_status
 from src.core.entities.store import Store
@@ -50,6 +52,11 @@ from src.infrastructure.external_services.waybill import (
     generate_waybill_batch_pdf,
     generate_waybill_pdf,
     generate_waybill_sheet_pdf,
+    render_html,
+    render_sheet_html,
+)
+from src.infrastructure.external_services.waybill.generator import (
+    TEMPLATE_DIR as WAYBILL_TEMPLATE_DIR,
 )
 from src.infrastructure.repositories import (
     OrderRepository,
@@ -261,10 +268,39 @@ async def _label_context(
             else None
         ),
         courier_name=courier_name,
+        # `OrderLineItem` has no `name` — this read `li.name` and 500'd
+        # every waybill print. The variant matters on a label: two sizes of
+        # the same product are indistinguishable to whoever packs the box.
         items=[
-            {"name": li.name, "quantity": li.quantity}
+            {
+                "name": " — ".join(p for p in (li.product_name, li.variant_name) if p),
+                "quantity": li.quantity,
+            }
             for li in (getattr(order, "line_items", None) or [])
         ],
+    )
+
+
+def _label_html_response(html: str) -> HTMLResponse:
+    """The same label, rendered by the browser instead of WeasyPrint.
+
+    WeasyPrint needs cairo/pango, which the Docker image has and a Windows
+    dev box does not — the 503 below used to tell merchants to "use the
+    HTML preview" when no such thing existed. It is also a real fallback:
+    the stylesheet sizes the page at 100×150mm, so Ctrl+P gives the same
+    label off any printer.
+
+    The template links `label.css` relatively, which WeasyPrint resolves
+    against the template directory. A browser would resolve it against the
+    API host and 404 — an unstyled label, which is worse than none. So the
+    stylesheet is inlined here and only here; the PDF path is untouched.
+    """
+    css = (WAYBILL_TEMPLATE_DIR / "label.css").read_text(encoding="utf-8")
+    return HTMLResponse(
+        content=html.replace(
+            '<link rel="stylesheet" href="label.css">',
+            f"<style>{css}</style>",
+        )
     )
 
 
@@ -278,6 +314,11 @@ async def print_waybills(
     store: Annotated[Store, Depends(get_current_store)],
     shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    as_html: bool = Query(
+        False,
+        alias="html",
+        description="Return the printable HTML instead of a PDF.",
+    ),
 ):
     """One PDF for the day's parcels.
 
@@ -303,6 +344,13 @@ async def print_waybills(
                 status_code=404, detail=f"Shipment {shipment_id} not found"
             )
         contexts.append(await _label_context(shipment, store, order_repo))
+
+    if as_html:
+        return _label_html_response(
+            render_sheet_html(contexts)
+            if request.format == "sheet"
+            else render_html(contexts)
+        )
 
     try:
         pdf = (
@@ -332,12 +380,20 @@ async def print_waybill(
     shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     shipment_id: Annotated[UUID, Path()],
+    as_html: bool = Query(
+        False,
+        alias="html",
+        description="Return the printable HTML instead of a PDF.",
+    ),
 ):
     shipment = await shipment_repo.get_by_id(shipment_id)
     if not shipment or shipment.store_id != store.id:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
     context = await _label_context(shipment, store, order_repo)
+    if as_html:
+        return _label_html_response(render_html([context]))
+
     try:
         pdf = generate_waybill_pdf(context)
     except WaybillRenderError as e:
@@ -475,6 +531,19 @@ async def apply_status_import(
             skipped.append({"tracking_number": tracking, "reason": "not this store"})
             continue
 
+        # Resolve through the sheet's vocabulary, the same one the preview
+        # showed the merchant — not the carrier's. A Tier 3 sheet is written
+        # by the merchant ("delivered", "تم التسليم"), and `manual` has an
+        # empty carrier status_map by design, so routing this through
+        # `map_carrier_status` skipped every row as unmapped.
+        resolved = resolve_status(raw_status)
+        if resolved is None:
+            skipped.append({
+                "tracking_number": tracking,
+                "reason": f"unmapped '{raw_status}'",
+            })
+            continue
+
         status = await apply_carrier_status(
             shipment=shipment,
             shipment_repo=shipment_repo,
@@ -482,6 +551,7 @@ async def apply_status_import(
             raw_status=raw_status,
             description=row.get("note") or "",
             cod_amount=row.get("cod_amount"),
+            status=resolved,
         )
         if status is None:
             skipped.append({
