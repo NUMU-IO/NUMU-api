@@ -1,0 +1,82 @@
+{# One waybill. Included by both the thermal wrapper and the A4 sheet, so
+   the two outputs can never drift. Carries no @page rule of its own. #}
+<div class="label">
+
+  <header>
+    <div class="store">
+      {% if label.store_logo_url %}
+        <img src="{{ label.store_logo_url }}" alt="">
+      {% else %}
+        {{ label.store_name }}
+      {% endif %}
+      <div class="by-numu">via NUMU</div>
+    </div>
+    <div class="courier">
+      {{ label.courier_name }}
+      {% if label.cutoff_time %}<div class="muted ltr">cut-off {{ label.cutoff_time }}</div>{% endif %}
+    </div>
+  </header>
+
+  <div class="rule"></div>
+
+  <div class="track">
+    <div class="qr"><img src="{{ label.qr_data_uri }}" alt=""></div>
+    <div class="grow">
+      <div class="field">رقم الشحنة · Tracking</div>
+      <div class="tracking-number ltr">{{ label.tracking_number }}</div>
+      {% if label.order_number %}
+        <div class="muted ltr" style="margin-top:1mm">Order {{ label.order_number }}</div>
+      {% endif %}
+      {% if label.created_at %}<div class="muted ltr">{{ label.created_at }}</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="field">المرسل إليه · Deliver to</div>
+  <div class="to-name">{{ label.recipient_name }}</div>
+  {% if label.recipient_phone %}
+    <div class="to-phone ltr">{{ label.recipient_phone }}</div>
+  {% endif %}
+  <div class="address">{{ label.address_line }}</div>
+  {% if label.governorate %}<div class="muted">{{ label.governorate }}</div>{% endif %}
+
+  {% if label.is_cod %}
+    <div class="cod">
+      <span class="field">مطلوب تحصيل · Collect</span>
+      <span class="cod-amount">{{ label.cod_display }}</span>
+    </div>
+  {% else %}
+    <div class="cod cod-none">
+      <span class="field">الدفع · Payment</span>
+      <span class="cod-amount">مدفوع · PAID</span>
+    </div>
+  {% endif %}
+
+  {% if label.line_items %}
+    <div class="thin"></div>
+    <div class="field">المحتويات · Contents</div>
+    <ul class="items">
+      {% for item in label.line_items %}
+        <li>{{ item.name }}{% if item.quantity and item.quantity != 1 %}
+          <span class="ltr">×{{ item.quantity }}</span>{% endif %}</li>
+      {% endfor %}
+      {% if label.extra_items %}
+        <li class="muted">+{{ label.extra_items }} أخرى</li>
+      {% endif %}
+    </ul>
+  {% endif %}
+
+  {% if label.notes %}
+    <div class="thin"></div>
+    <div class="notes">{{ label.notes }}</div>
+  {% endif %}
+
+  <footer>
+    <div class="sign">
+      <div class="field">توقيع المستلم · Received by</div>
+      <div class="field">التاريخ · Date</div>
+    </div>
+  </footer>
+
+</div>

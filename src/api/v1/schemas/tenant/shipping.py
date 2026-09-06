@@ -240,6 +240,16 @@ class FreeShippingProgressResponse(BaseModel):
 class ShippingOptionsResponse(BaseModel):
     options: list[ShippingOptionResponse]
     free_shipping_progress: FreeShippingProgressResponse | None = None
+    #: Why `options` is empty, when it is. Additive and optional, so an
+    #: existing client is unaffected.
+    #:
+    #: - ``cod_unavailable`` — the merchant switched COD off for this
+    #:   governorate. The **address is fine**; a shopper shown the generic
+    #:   "no options for this address" would change their address instead
+    #:   of their payment method and still fail.
+    #: - ``not_covered`` — the merchant restricted shipping to their zones
+    #:   and this destination is outside them.
+    unavailable_reason: str | None = None
 
 
 # ─── Merchant preview (for RateCalculator) ────────────────────────

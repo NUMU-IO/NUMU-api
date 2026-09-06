@@ -576,3 +576,57 @@ async def test_resolve_one_rejects_cod_for_cod_disabled_zone():
         cod_requested=True,
     )
     assert option is None
+
+
+@pytest.mark.asyncio
+async def test_cod_blocked_zone_says_why_it_returned_nothing():
+    """🔴 The shopper's address is fine — their payment method isn't.
+
+    Told the generic "no shipping options for this address", a shopper
+    changes their address and fails again. The reason lets the storefront
+    say "COD isn't available here, pay by card" instead.
+    """
+    zone = _zone(governorate_codes=["EG-ASN"], cod_enabled=False)
+    resolver = _resolver_with(zone, [_flat_rate(zone.id, amount=9000)])
+
+    result = await resolver.resolve_options(
+        store_id=STORE_ID,
+        governorate_code="EG-ASN",
+        cart_subtotal_cents=10000,
+        cart_weight_g=0,
+        cod_requested=True,
+    )
+    assert result.options == []
+    assert result.unavailable_reason == "cod_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_restricted_store_reports_not_covered():
+    zone = _zone(governorate_codes=["EG-C"], cod_enabled=True)
+    resolver = _resolver_with(zone, [_flat_rate(zone.id, amount=9000)])
+
+    result = await resolver.resolve_options(
+        store_id=STORE_ID,
+        governorate_code="EG-ASN",
+        cart_subtotal_cents=10000,
+        cart_weight_g=0,
+        restrict_to_zones=True,
+    )
+    assert result.options == []
+    assert result.unavailable_reason == "not_covered"
+
+
+@pytest.mark.asyncio
+async def test_no_reason_when_options_exist():
+    """The field is only meaningful when the list is empty."""
+    zone = _zone(governorate_codes=["EG-C"], cod_enabled=True)
+    resolver = _resolver_with(zone, [_flat_rate(zone.id, amount=5000)])
+
+    result = await resolver.resolve_options(
+        store_id=STORE_ID,
+        governorate_code="EG-C",
+        cart_subtotal_cents=10000,
+        cart_weight_g=0,
+    )
+    assert result.options
+    assert result.unavailable_reason is None

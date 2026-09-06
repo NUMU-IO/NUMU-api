@@ -1,0 +1,97 @@
+/* Waybill label styles — shared by both outputs.
+ *
+ * The label is authored once at 100×150mm. `waybill.html` prints it 1:1
+ * on a thermal roll; `waybill_sheet.html` tiles the same markup 4-up on
+ * A4. Nothing here knows which, so the two can never drift apart.
+ *
+ * No @page rule lives in this file — that belongs to whichever wrapper
+ * is printing.
+ */
+
+.label {
+  /* Authored size. The A4 sheet scales the whole box, so every measure
+     below stays relative to this one. */
+  width: 100mm;
+  height: 150mm;
+  box-sizing: border-box;
+  padding: 4mm;
+  overflow: hidden;
+
+  /* Noto Sans Arabic is installed in the image via docker/fonts and is
+     what the invoice generator already uses. The Latin fallback is not
+     optional: Noto Sans Arabic has no Latin glyphs, so tracking numbers
+     and digits would render as boxes without it. */
+  font-family: "Noto Sans Arabic", "DejaVu Sans", sans-serif;
+  color: #0F1624;
+  font-size: 9pt;
+  line-height: 1.35;
+  direction: rtl;
+  text-align: right;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Identifiers, money, phones and dates stay LTR inside an RTL label.
+   `direction` alone still lets neighbouring text reorder a run, so this
+   isolates as well — a bidi-reordered phone number is worse than useless
+   on a label a courier has to dial. */
+.ltr { direction: ltr; unicode-bidi: isolate; text-align: left; }
+
+.label .grow { flex: 1; min-width: 0; }
+.label .rule { border-top: 0.4mm solid #0F1624; margin: 2mm 0; }
+.label .thin { border-top: 0.2mm dashed #8AA5C2; margin: 1.6mm 0; }
+.label .muted { color: #55617A; font-size: 7.5pt; }
+.label .field { font-size: 7pt; color: #55617A; letter-spacing: .02em; }
+
+.label header { display: flex; align-items: center; justify-content: space-between; }
+.label .store { font-weight: 700; font-size: 11pt; }
+.label .store img { max-height: 9mm; max-width: 34mm; }
+.label .courier { text-align: left; direction: ltr; font-size: 8pt; font-weight: 700; }
+
+.label .track { display: flex; align-items: center; gap: 3mm; margin: 1mm 0; }
+.label .qr img { width: 22mm; height: 22mm; display: block; }
+.label .tracking-number {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 13pt; font-weight: 700; letter-spacing: .06em;
+}
+
+.label .to-name { font-weight: 700; font-size: 11pt; }
+.label .to-phone {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 12pt; font-weight: 700;
+}
+.label .address { font-size: 9.5pt; }
+
+/* The single most consequential number on the label. A courier
+   collecting the wrong amount is the most expensive mistake a manual
+   shipment can make, so it gets a box and the largest type. */
+.label .cod {
+  border: 0.6mm solid #0F1624; border-radius: 1.5mm;
+  padding: 1.5mm 2.5mm; margin: 2mm 0;
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.label .cod-amount {
+  direction: ltr; unicode-bidi: isolate;
+  font-size: 17pt; font-weight: 800; letter-spacing: -.01em;
+}
+.label .cod-none { border-style: dashed; }
+.label .cod-none .cod-amount { font-size: 11pt; font-weight: 700; }
+
+.label .items { font-size: 8pt; }
+.label .items li { margin-bottom: .4mm; }
+.label ul { margin: 0; padding-inline-start: 4mm; }
+
+.label .notes {
+  font-size: 8pt; background: #F5EFE6;
+  padding: 1.2mm 2mm; border-radius: 1mm;
+}
+.label footer { margin-top: 2mm; }
+.label .sign { display: flex; gap: 3mm; margin-top: 3mm; }
+.label .sign div { flex: 1; border-top: 0.3mm solid #0F1624; padding-top: 1mm; }
+
+/* The merchant's logo is what the label leads with — a courier needs to
+   know who a parcel goes back to, and the customer sees it. NUMU's mark
+   sits small underneath rather than competing with it. */
+.label .by-numu {
+  font-size: 6pt; color: #8AA5C2; letter-spacing: .04em;
+  direction: ltr; text-align: left; margin-top: .8mm;
+}

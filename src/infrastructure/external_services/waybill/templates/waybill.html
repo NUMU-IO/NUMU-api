@@ -1,0 +1,22 @@
+<!doctype html>
+{# Thermal roll output: one 100x150mm label per page, printed 1:1.
+   Never scaled — a thermal printer feeds a fixed-width roll, and scaling
+   would shrink the label off its own stock. #}
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>{{ labels[0].tracking_number if labels else '' }}</title>
+<link rel="stylesheet" href="label.css">
+<style>
+  @page { size: {{ page_size }}; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  .sheet { break-after: page; }
+  .sheet:last-child { break-after: auto; }
+</style>
+</head>
+<body>
+{% for label in labels %}
+  <div class="sheet">{% with %}{% include "_label.html" with context %}{% endwith %}</div>
+{% endfor %}
+</body>
+</html>

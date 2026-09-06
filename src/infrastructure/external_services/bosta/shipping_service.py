@@ -7,7 +7,6 @@ for shipment creation, tracking, and rate calculation.
 API Documentation: https://developers.bosta.co/
 """
 
-import base64
 import hashlib
 import hmac
 import logging
@@ -17,6 +16,7 @@ from typing import Any
 import httpx
 
 from src.config import settings
+from src.core.interfaces.services.shipping_provider import CarrierApiError
 from src.core.interfaces.services.shipping_service import (
     IShippingService,
     Parcel,
@@ -25,6 +25,7 @@ from src.core.interfaces.services.shipping_service import (
     ShippingRate,
     TrackingEvent,
     TrackingInfo,
+    parse_carrier_timestamp,
 )
 from src.infrastructure.external_services.bosta.governorates import (
     ShippingZone,
@@ -303,7 +304,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code not in (200, 201):
                 logger.error(f"Bosta shipment creation failed: {response.text}")
-                raise ValueError(f"Failed to create Bosta shipment: {response.text}")
+                raise CarrierApiError(
+                    response.status_code,
+                    f"Failed to create Bosta shipment: {response.text}",
+                    carrier="bosta",
+                )
 
             data = response.json()
             delivery = data.get("data", data)
@@ -344,7 +349,9 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta tracking failed: {response.text}")
-                raise ValueError("Failed to track shipment")
+                raise CarrierApiError(
+                    response.status_code, "Failed to track shipment", carrier="bosta"
+                )
 
             data = response.json()
             delivery = data.get("data", data)
@@ -357,11 +364,7 @@ class BostaShippingService(IShippingService):
                         status=log.get("state", ""),
                         description=log.get("description", ""),
                         location=log.get("location", None),
-                        timestamp=datetime.fromisoformat(
-                            log.get("timestamp", datetime.utcnow().isoformat()).replace(
-                                "Z", "+00:00"
-                            )
-                        ),
+                        timestamp=parse_carrier_timestamp(log.get("timestamp")),
                     )
                 )
 
@@ -533,7 +536,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta get delivery failed: {response.text}")
-                raise ValueError(f"Failed to get delivery: {response.text}")
+                raise CarrierApiError(
+                    response.status_code,
+                    f"Failed to get delivery: {response.text}",
+                    carrier="bosta",
+                )
 
             data = response.json()
             return data.get("data", data)
@@ -561,7 +568,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta list deliveries failed: {response.text}")
-                raise ValueError(f"Failed to list deliveries: {response.text}")
+                raise CarrierApiError(
+                    response.status_code,
+                    f"Failed to list deliveries: {response.text}",
+                    carrier="bosta",
+                )
 
             return response.json()
 
@@ -617,7 +628,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code not in (200, 201):
                 logger.error(f"Bosta update delivery failed: {response.text}")
-                raise ValueError(f"Failed to update delivery: {response.text}")
+                raise CarrierApiError(
+                    response.status_code,
+                    f"Failed to update delivery: {response.text}",
+                    carrier="bosta",
+                )
 
             data = response.json()
             return data.get("data", data)
@@ -643,7 +658,9 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta AWB print failed: {response.text}")
-                raise ValueError("Failed to print AWB")
+                raise CarrierApiError(
+                    response.status_code, "Failed to print AWB", carrier="bosta"
+                )
 
             return response.content
 
@@ -692,7 +709,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code not in (200, 201):
                 logger.error(f"Bosta create pickup failed: {response.text}")
-                raise ValueError(f"Failed to create pickup: {response.text}")
+                raise CarrierApiError(
+                    response.status_code,
+                    f"Failed to create pickup: {response.text}",
+                    carrier="bosta",
+                )
 
             data = response.json()
             return data.get("data", data)
@@ -712,7 +733,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta list pickups failed: {response.text}")
-                raise ValueError(f"Failed to list pickups: {response.text}")
+                raise CarrierApiError(
+                    response.status_code,
+                    f"Failed to list pickups: {response.text}",
+                    carrier="bosta",
+                )
 
             return response.json()
 
@@ -730,7 +755,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta get pickup failed: {response.text}")
-                raise ValueError(f"Failed to get pickup: {response.text}")
+                raise CarrierApiError(
+                    response.status_code,
+                    f"Failed to get pickup: {response.text}",
+                    carrier="bosta",
+                )
 
             data = response.json()
             return data.get("data", data)
@@ -768,7 +797,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code not in (200, 201):
                 logger.error(f"Bosta update pickup failed: {response.text}")
-                raise ValueError(f"Failed to update pickup: {response.text}")
+                raise CarrierApiError(
+                    response.status_code,
+                    f"Failed to update pickup: {response.text}",
+                    carrier="bosta",
+                )
 
             data = response.json()
             return data.get("data", data)
@@ -805,7 +838,11 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta pickup locations failed: {response.text}")
-                raise ValueError("Failed to get pickup locations")
+                raise CarrierApiError(
+                    response.status_code,
+                    "Failed to get pickup locations",
+                    carrier="bosta",
+                )
 
             data = response.json()
             return (
@@ -828,7 +865,9 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta get cities failed: {response.text}")
-                raise ValueError("Failed to get cities")
+                raise CarrierApiError(
+                    response.status_code, "Failed to get cities", carrier="bosta"
+                )
 
             data = response.json()
             return data.get("data", data) if isinstance(data.get("data"), list) else []
@@ -854,7 +893,9 @@ class BostaShippingService(IShippingService):
 
             if response.status_code != 200:
                 logger.error(f"Bosta get zones failed: {response.text}")
-                raise ValueError("Failed to get city zones")
+                raise CarrierApiError(
+                    response.status_code, "Failed to get city zones", carrier="bosta"
+                )
 
             data = response.json()
             return data.get("data", data) if isinstance(data.get("data"), list) else []
@@ -900,27 +941,16 @@ class BostaShippingService(IShippingService):
 async def get_merchant_bosta_credentials(store_settings: dict) -> dict | None:
     """Decrypt and return a merchant's Bosta credentials from store settings.
 
+    Thin wrapper kept for existing callers; the shared implementation
+    lives in ``application/services/carrier_credentials.py`` so all
+    carriers read credentials the same way.
+
     Returns:
         dict with keys: api_key, business_id, webhook_secret, or None if not configured.
     """
-    bosta_settings = (store_settings or {}).get("shipping", {}).get("bosta", {})
+    from src.application.services.carrier_credentials import load_credentials
 
-    if not bosta_settings.get("encrypted_credentials"):
-        return None
-
-    from src.infrastructure.external_services.secrets.secrets_manager import (
-        get_secrets_manager,
-    )
-
-    secrets_manager = get_secrets_manager()
-    key_id = bosta_settings["encryption_key_id"]
-    encrypted = base64.b64decode(bosta_settings["encrypted_credentials"])
-
-    try:
-        return await secrets_manager.decrypt(encrypted, key_id)
-    except Exception as e:
-        logger.error(f"Failed to decrypt Bosta credentials: {e}")
-        return None
+    return await load_credentials(store_settings, "bosta")
 
 
 async def get_bosta_service_for_store(store_settings: dict) -> BostaShippingService:
