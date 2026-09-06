@@ -745,7 +745,10 @@ async def get_storefront_password(
     """
     from sqlalchemy import select
 
-    from src.application.services.storefront_lock import lock_password, lock_reason
+    from src.application.services.storefront_lock import (
+        lock_password,
+        resolve_lock_reason,
+    )
     from src.infrastructure.database.models.public.tenant import TenantModel
 
     pp = _password_protected(store.settings)
@@ -754,7 +757,7 @@ async def get_storefront_password(
             select(TenantModel).where(TenantModel.id == store.tenant_id)
         )
     ).scalar_one_or_none()
-    reason = lock_reason(tenant)
+    reason = await resolve_lock_reason(session, tenant)
 
     return SuccessResponse(
         data=StorefrontPasswordResponse(

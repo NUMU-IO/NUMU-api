@@ -8,6 +8,7 @@ from src.application.services.storefront_lock import (
     lock_password,
     lock_password_hash,
     lock_reason,
+    resolve_lock_reason,
 )
 
 
@@ -50,3 +51,40 @@ class TestLockPassword:
     def test_password_is_typeable(self):
         pwd = lock_password("9f1c8b2e-0000-4000-8000-000000000004")
         assert pwd.isalnum() and pwd.islower() and len(pwd) == 10
+
+
+class TestResolveLockReason:
+    """PAYG never gets a trial, so the lifecycle alone would never lock it."""
+
+    class _Session:
+        def __init__(self, funded: bool):
+            self._funded = funded
+
+        async def scalar(self, _query):
+            return self._funded
+
+    def _run(self, coro):
+        import asyncio
+
+        return asyncio.run(coro)
+
+    def test_unfunded_payg_is_locked_even_while_active(self):
+        tenant = SimpleNamespace(is_writable=True, plan="payg", id="t1")
+        got = self._run(resolve_lock_reason(self._Session(funded=False), tenant))
+        assert got == AWAITING_TOPUP
+
+    def test_funded_payg_is_open(self):
+        tenant = SimpleNamespace(is_writable=True, plan="payg", id="t1")
+        got = self._run(resolve_lock_reason(self._Session(funded=True), tenant))
+        assert got is None
+
+    def test_active_paid_plan_never_queries_the_wallet(self):
+        """A starter tenant must not be locked for having an empty wallet."""
+        tenant = SimpleNamespace(is_writable=True, plan="starter", id="t1")
+        got = self._run(resolve_lock_reason(self._Session(funded=False), tenant))
+        assert got is None
+
+    def test_read_only_still_wins(self):
+        tenant = SimpleNamespace(is_writable=False, plan="starter", id="t1")
+        got = self._run(resolve_lock_reason(self._Session(funded=True), tenant))
+        assert got == AWAITING_SUBSCRIPTION
