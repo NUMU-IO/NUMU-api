@@ -815,11 +815,38 @@ def _reproject_cached(payload: dict) -> dict:
     return {**payload, "settings": _public_settings(payload.get("settings"))}
 
 
+async def storefront_billing_lock_reason(session, store) -> str | None:
+    """Why this storefront is billing-locked, or None when it is open.
+
+    Its own round trip rather than a join onto the indexing gate: that gate
+    answers a different question and deliberately swallows its errors, which
+    is right for de-indexing and wrong for a paywall. No try/except here — a
+    database fault surfaces as a failed request instead of quietly opening a
+    locked store. A missing tenant row reads as unlocked, since that is a
+    data-integrity bug rather than a statement about payment.
+
+    Runs on the store-payload path, which the storefront caches for 60s, so
+    a lock or an unlock is visible within a minute.
+    """
+    from sqlalchemy import select
+
+    from src.application.services.storefront_lock import lock_reason
+    from src.infrastructure.database.models.public.tenant import TenantModel
+
+    tenant = (
+        await session.execute(
+            select(TenantModel).where(TenantModel.id == store.tenant_id)
+        )
+    ).scalar_one_or_none()
+    return lock_reason(tenant)
+
+
 def _serialize_public_store(
     store,
     *,
     tenant_feature_flags: dict[str, bool] | None = None,
     indexing_block_reason: str | None = None,
+    billing_lock_reason: str | None = None,
 ) -> dict:
     """Common payload returned by `/store-by-subdomain` and `/store-by-domain`.
 
@@ -854,7 +881,21 @@ def _serialize_public_store(
         seo_normalized["robots_indexing_enabled"] = False
         seo_normalized["blocked_reason"] = indexing_block_reason
 
+    public_settings = _public_settings(raw_settings)
+
+    # A tenant that never converted is gated behind the pre-launch password
+    # the storefront already renders, rather than a second mechanism it would
+    # have to learn. Reported here, not read from `settings.password_protected`
+    # — that field is the merchant's own switch and they can turn it off.
+    # `billing_lock` is advisory, for a theme that wants to explain why.
+    if billing_lock_reason:
+        public_settings["password_protected"] = {
+            "enabled": True,
+            "has_password": True,
+        }
+
     return {
+        "billing_lock": billing_lock_reason,
         "id": str(store.id),
         "name": store.name,
         "slug": store.slug,
@@ -866,7 +907,7 @@ def _serialize_public_store(
         "status": store.status.value
         if hasattr(store.status, "value")
         else str(store.status),
-        "settings": _public_settings(raw_settings),
+        "settings": public_settings,
         "seo": seo_normalized,
         "theme_settings": store.theme_settings,
         "business_hours": store.business_hours or {},
@@ -920,8 +961,12 @@ async def get_store_by_subdomain(
 
     flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
     block_reason = await platform_indexing_block_reason(session, store)
+    lock_reason = await storefront_billing_lock_reason(session, store)
     payload = _serialize_public_store(
-        store, tenant_feature_flags=flags, indexing_block_reason=block_reason
+        store,
+        tenant_feature_flags=flags,
+        indexing_block_reason=block_reason,
+        billing_lock_reason=lock_reason,
     )
     await cache.set_store(payload)
     return SuccessResponse(
@@ -968,8 +1013,12 @@ async def get_store_by_domain(
 
     flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
     block_reason = await platform_indexing_block_reason(session, store)
+    lock_reason = await storefront_billing_lock_reason(session, store)
     payload = _serialize_public_store(
-        store, tenant_feature_flags=flags, indexing_block_reason=block_reason
+        store,
+        tenant_feature_flags=flags,
+        indexing_block_reason=block_reason,
+        billing_lock_reason=lock_reason,
     )
     await cache.set_store(payload)
     return SuccessResponse(
@@ -2612,6 +2661,7 @@ async def verify_store_password(
     subdomain: Annotated[str, Path(description="Store subdomain")],
     payload: VerifyStorePasswordRequest,
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Check a submitted pre-launch password. Public, rate-limited upstream.
 
@@ -2628,19 +2678,23 @@ async def verify_store_password(
     import hashlib
     import hmac as _hmac
 
-    store = await store_repo.get_by_subdomain(subdomain.lower())
-    protection = (
-        ((store.settings or {}).get("password_protected") or {}) if store else {}
-    )
-    stored = protection.get("password_hash") if isinstance(protection, dict) else None
+    from src.application.services.storefront_lock import lock_password_hash
 
-    if not store or store.status != StoreStatus.ACTIVE or not stored:
+    store = await store_repo.get_by_subdomain(subdomain.lower())
+    if not store or store.status != StoreStatus.ACTIVE:
         # Same answer whether the store is missing, inactive, or simply has
         # no password set — this endpoint must not be a store-existence oracle.
         return SuccessResponse(data={"verified": False}, message="Not verified")
 
+    protection = (store.settings or {}).get("password_protected") or {}
+    accepted = [protection.get("password_hash")] if isinstance(protection, dict) else []
+    # A billing-locked store accepts its derived password too, so a merchant
+    # who has not paid can still open their own storefront to look at it.
+    if await storefront_billing_lock_reason(session, store):
+        accepted.append(lock_password_hash(store.id))
+
     submitted = hashlib.sha256(payload.password.encode()).hexdigest()
-    verified = _hmac.compare_digest(submitted, str(stored))
+    verified = any(_hmac.compare_digest(submitted, str(h)) for h in accepted if h)
     return SuccessResponse(
         data={"verified": verified},
         message="Verified" if verified else "Not verified",

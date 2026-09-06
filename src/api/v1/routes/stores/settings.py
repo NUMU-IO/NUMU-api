@@ -11,6 +11,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     get_current_store,
@@ -19,6 +20,7 @@ from src.api.dependencies import (
     get_store_repository,
     get_storefront_cache_service,
 )
+from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.settings import (
     BostaCredentialsResponse,
@@ -704,6 +706,13 @@ async def update_cod_autopilot_settings_endpoint(
 class StorefrontPasswordResponse(BaseModel):
     enabled: bool
     has_password: bool
+    # Platform billing lock — set when the tenant is read_only, cleared by a
+    # wallet top-up (PAYG) or an activated subscription. The merchant cannot
+    # turn it off from here, so the hub shows it as state, not a toggle. The
+    # password is returned so they can still open their own storefront.
+    billing_locked: bool = False
+    billing_lock_reason: str | None = None
+    billing_lock_password: str | None = None
 
 
 class UpdateStorefrontPasswordRequest(BaseModel):
@@ -726,13 +735,34 @@ def _password_protected(store_settings: dict | None) -> dict:
 )
 async def get_storefront_password(
     store: Annotated[Store, Depends(get_current_store)],
+    session: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Return whether the storefront is password-protected (never the hash)."""
+    """Return whether the storefront is password-protected (never the hash).
+
+    Also reports the platform billing lock, which gates the storefront while
+    the tenant sits in ``read_only``. That one is state rather than a switch:
+    only a top-up or a paid subscription clears it.
+    """
+    from sqlalchemy import select
+
+    from src.application.services.storefront_lock import lock_password, lock_reason
+    from src.infrastructure.database.models.public.tenant import TenantModel
+
     pp = _password_protected(store.settings)
+    tenant = (
+        await session.execute(
+            select(TenantModel).where(TenantModel.id == store.tenant_id)
+        )
+    ).scalar_one_or_none()
+    reason = lock_reason(tenant)
+
     return SuccessResponse(
         data=StorefrontPasswordResponse(
             enabled=bool(pp.get("enabled")),
             has_password=bool(pp.get("password_hash")),
+            billing_locked=reason is not None,
+            billing_lock_reason=reason,
+            billing_lock_password=lock_password(store.id) if reason else None,
         ),
         message="Storefront password status retrieved",
     )
