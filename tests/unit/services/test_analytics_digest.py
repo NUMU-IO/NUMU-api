@@ -20,11 +20,37 @@ class TestHeadline:
 
     def test_decline_headline(self):
         d = build_weekly_digest(
-            {"revenue_cents": 80000, "prev_revenue_cents": 100000, "orders": 5},
+            {
+                "revenue_cents": 80000,
+                "prev_revenue_cents": 100000,
+                "orders": 8,
+                "prev_orders": 10,
+            },
             "en",
             _fmt,
         )
         assert "down 20%" in d["headline"]
+        assert d["nudge"]  # a declining week always suggests a next step
+
+    def test_low_volume_week_reports_counts_not_percentages(self):
+        """1 order after 4 is a -59% swing that says nothing — show the counts."""
+        d = build_weekly_digest(
+            {
+                "revenue_cents": 73000,
+                "prev_revenue_cents": 178000,
+                "orders": 1,
+                "prev_orders": 4,
+                "aov_cents": 73000,
+            },
+            "en",
+            _fmt,
+        )
+        assert "%" not in d["headline"]
+        assert d["headline"] == (
+            "1 order this week vs 4 orders last week — 730.00 EGP."
+        )
+        assert d["highlights"] == ["1 order (-3 vs last week)"]
+        assert d["nudge"]
 
     def test_flat_headline_under_3pct(self):
         d = build_weekly_digest(
@@ -84,6 +110,25 @@ class TestHighlights:
 
 
 class TestArabic:
+    def test_arabic_order_plurals(self):
+        for n, expected in (
+            (1, "طلب واحد"),
+            (2, "طلبين"),
+            (5, "5 طلبات"),
+            (15, "15 طلب"),
+        ):
+            d = build_weekly_digest(
+                {
+                    "revenue_cents": 100000,
+                    "prev_revenue_cents": 100000,
+                    "orders": n,
+                    "prev_orders": n,
+                },
+                "ar",
+                _fmt,
+            )
+            assert expected in d["highlights"][0], (n, d["highlights"])
+
     def test_arabic_headline_and_bullets(self):
         d = build_weekly_digest(
             {
