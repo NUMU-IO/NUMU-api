@@ -2370,6 +2370,7 @@ async def _decrypt_capi_token(session: Any, store: Any) -> str | None:
 # Retention
 # ──────────────────────────────────────────────────────────────────────
 
+
 # `meta_event_log` is append-mostly and had NO retention policy: one row per
 # event per pixel, kept forever. It is a delivery/debug log, not a business
 # record — the conversions themselves live in `orders` — so an unbounded
@@ -2377,7 +2378,16 @@ async def _decrypt_capi_token(session: Any, store: Any) -> str | None:
 #
 # 90 days keeps a full quarter for support and for the orphan sweep (which
 # only looks back 24h anyway), while bounding growth.
-_EVENT_LOG_RETENTION_DAYS = 90
+#
+# Now read from `settings.ad_event_log_retention_days`, shared with the TikTok
+# rail: the two logs hold the same class of data and used to disagree (90 here
+# vs 180 there) for no reason anyone recorded. The period is a legal decision
+# — see the setting's comment.
+def _event_log_retention_days() -> int:
+    from src.config.settings import get_settings
+
+    return get_settings().ad_event_log_retention_days
+
 
 # EMQ snapshots are much smaller (a handful of rows per store per poll) and
 # their value IS the history — proving a change moved the score needs a long
@@ -2407,8 +2417,9 @@ def meta_tracking_prune(self: Any) -> dict[str, int]:
 
 
 async def _prune_tracking_rows() -> dict[str, int]:
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete, func, select
 
+    from src.core.services.meta_delivery_policy import TERMINAL_STATUSES
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.meta_event_log import (
         MetaEventLogModel,
@@ -2418,7 +2429,11 @@ async def _prune_tracking_rows() -> dict[str, int]:
     )
     from src.infrastructure.tenancy.rls import enable_rls_bypass
 
-    stats = {"event_log_deleted": 0, "match_quality_deleted": 0}
+    stats = {
+        "event_log_deleted": 0,
+        "match_quality_deleted": 0,
+        "event_log_open_past_window": 0,
+    }
     batch = 5_000
 
     async with AsyncSessionLocal() as session:
@@ -2429,12 +2444,24 @@ async def _prune_tracking_rows() -> dict[str, int]:
         # fact — but it reads as dynamic SQL to a scanner and to the next
         # person, and expressing it through the ORM costs nothing and makes
         # the bound parameters real.
-        for model, days, key in (
-            (MetaEventLogModel, _EVENT_LOG_RETENTION_DAYS, "event_log_deleted"),
+        # `extra` is the terminal-state guard. `meta_event_log` is an OUTBOX:
+        # a row in `pending` or `retrying` is a delivery the platform still
+        # owes, and age alone does not make it ours to throw away. Deleting one
+        # mid-flight would drop a conversion silently and leave nothing behind
+        # to explain the gap. The snapshot table has no lifecycle, so it prunes
+        # on age alone.
+        for model, days, key, extra in (
+            (
+                MetaEventLogModel,
+                _event_log_retention_days(),
+                "event_log_deleted",
+                MetaEventLogModel.status.in_(TERMINAL_STATUSES),
+            ),
             (
                 MetaMatchQualitySnapshotModel,
                 _MATCH_QUALITY_RETENTION_DAYS,
                 "match_quality_deleted",
+                None,
             ),
         ):
             cutoff = datetime.now(UTC) - timedelta(days=days)
@@ -2445,9 +2472,10 @@ async def _prune_tracking_rows() -> dict[str, int]:
                 try:
                     # Delete by PK from a LIMITed subquery: one bounded lock
                     # per batch instead of one long lock over the whole scan.
-                    doomed = (
-                        select(model.id).where(model.created_at < cutoff).limit(batch)
-                    )
+                    doomed = select(model.id).where(model.created_at < cutoff)
+                    if extra is not None:
+                        doomed = doomed.where(extra)
+                    doomed = doomed.limit(batch)
                     result = await session.execute(
                         delete(model).where(model.id.in_(doomed))
                     )
@@ -2464,5 +2492,29 @@ async def _prune_tracking_rows() -> dict[str, int]:
                 if deleted < batch:
                     break
 
-    logger.info("meta_tracking_prune_done", **stats)
+        # Rows the guard above refused to touch. A non-zero count here is not
+        # an error, it is a signal: the outbox is holding deliveries older than
+        # the whole retention window, which means something stopped draining
+        # it. Silently leaving them out of the delete would have made that
+        # invisible AND let the table grow without bound.
+        open_cutoff = datetime.now(UTC) - timedelta(days=_event_log_retention_days())
+        try:
+            stats["event_log_open_past_window"] = int(
+                (
+                    await session.execute(
+                        select(func.count(MetaEventLogModel.id)).where(
+                            MetaEventLogModel.created_at < open_cutoff,
+                            MetaEventLogModel.status.notin_(TERMINAL_STATUSES),
+                        )
+                    )
+                ).scalar()
+                or 0
+            )
+        except Exception:  # noqa: BLE001 — a counter must not fail housekeeping
+            logger.exception("meta_tracking_prune_open_count_failed")
+
+    if stats["event_log_open_past_window"]:
+        logger.warning("meta_tracking_prune_open_rows_past_window", **stats)
+    else:
+        logger.info("meta_tracking_prune_done", **stats)
     return stats
