@@ -62,6 +62,56 @@ class TestPropertiesTransform:
     def test_currency_defaults_to_egp(self):
         assert _to_tiktok_properties({})["currency"] == "EGP"
 
+    def test_contents_synthesized_from_content_ids(self):
+        """ViewContent / AddToCart / the thank-you Purchase send only
+        `content_ids`; TikTok's "Content ID is missing" diagnostic reads
+        `contents[].content_id`, so the mapper must build the lines itself."""
+        props = _to_tiktok_properties({
+            "content_ids": ["6dc03192-f6a3-4100-b593-8cb185bc7bbe"],
+            "content_name": "Degradee - Blue & Baby Blue",
+            "content_type": "product",
+            "value": 250,
+            "currency": "EGP",
+        })
+        assert props["content_ids"] == ["6dc03192-f6a3-4100-b593-8cb185bc7bbe"]
+        assert props["contents"] == [
+            {
+                "content_id": "6dc03192-f6a3-4100-b593-8cb185bc7bbe",
+                "quantity": 1,
+                "content_name": "Degradee - Blue & Baby Blue",
+                "price": 250,
+            }
+        ]
+
+    def test_multi_id_synthesis_never_invents_a_price(self):
+        props = _to_tiktok_properties({"content_ids": ["A", "B"], "value": 500})
+        assert props["contents"] == [
+            {"content_id": "A", "quantity": 1},
+            {"content_id": "B", "quantity": 1},
+        ]
+
+    def test_purchase_payload_never_passes_order_total_as_price(self):
+        """A single-item order's `value` is the order total (shipping, tax,
+        fees). It must not be reported as the product's price."""
+        props = _to_tiktok_properties({
+            "content_ids": ["A"],
+            "num_items": 1,
+            "value": 300,
+            "order_id": "o1",
+        })
+        assert props["contents"] == [{"content_id": "A", "quantity": 1}]
+
+    def test_blank_content_ids_are_dropped_everywhere(self):
+        props = _to_tiktok_properties({
+            "content_ids": ["A", "", "  "],
+            "contents": [{"id": "", "quantity": 1}, {"id": "A", "quantity": 2}],
+        })
+        assert props["content_id"] == "A"
+        assert props["contents"] == [{"content_id": "A", "quantity": 2, "price": 0}]
+
+    def test_no_ids_at_all_means_no_contents_key(self):
+        assert "contents" not in _to_tiktok_properties({"value": 1})
+
     def test_search_query_passthrough(self):
         assert _to_tiktok_properties({"query": "hijab"})["query"] == "hijab"
 

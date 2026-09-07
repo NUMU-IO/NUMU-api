@@ -96,23 +96,60 @@ def _to_tiktok_properties(custom_data: dict[str, Any]) -> dict[str, Any]:
     props["currency"] = custom_data.get("currency") or "EGP"
     props["content_type"] = custom_data.get("content_type", "product")
 
-    content_ids = custom_data.get("content_ids")
-    if isinstance(content_ids, list) and content_ids:
-        props["content_id"] = ",".join(str(c) for c in content_ids)
+    raw_ids = custom_data.get("content_ids")
+    content_ids = (
+        [str(c).strip() for c in raw_ids if isinstance(c, str | int) and str(c).strip()]
+        if isinstance(raw_ids, list)
+        else []
+    )
+    if content_ids:
+        # `content_id` is the pixel-1.x key, kept for reporting continuity;
+        # `content_ids` is the 2.0 key. Neither is what the catalog / Video
+        # Shopping Ads pipeline reads — that is `contents[].content_id`, below.
+        props["content_id"] = ",".join(content_ids)
+        props["content_ids"] = content_ids
 
+    contents: list[dict[str, Any]] = []
     raw_contents = custom_data.get("contents")
-    if isinstance(raw_contents, list) and raw_contents:
-        contents: list[dict[str, Any]] = []
+    if isinstance(raw_contents, list):
         for c in raw_contents:
             if not isinstance(c, dict):
                 continue
+            cid = str(c.get("id") or c.get("content_id") or "").strip()
+            if not cid:
+                # TikTok counts a blank content_id as missing — drop the line
+                # rather than ship a claim it will flag.
+                continue
             contents.append({
-                "content_id": str(c.get("id") or c.get("content_id") or ""),
+                "content_id": cid,
                 "quantity": int(c.get("quantity", 1)),
                 "price": c.get("item_price", c.get("price", 0)),
             })
-        if contents:
-            props["contents"] = contents
+    if not contents and content_ids:
+        # ViewContent / AddToCart / the confirmation-page Purchase only carry
+        # `content_ids`. TikTok's "Content ID is missing" diagnostic keys on
+        # `contents[].content_id`, so synthesize one line per id from what
+        # the event does carry. Price and name are only trustworthy for a
+        # single-product event (value == that product's price).
+        single = len(content_ids) == 1
+        qty = custom_data.get("num_items") if single else None
+        line: dict[str, Any] = {"quantity": int(qty) if qty is not None else 1}
+        if single and custom_data.get("content_name"):
+            line["content_name"] = custom_data["content_name"]
+        # `value` is a unit price only on browse events. A purchase-shaped
+        # payload (it carries `order_id`) totals shipping, tax and fees too,
+        # so passing it off as the product's price would inflate every
+        # single-item order's price in TikTok's catalog reporting.
+        if (
+            single
+            and line["quantity"] == 1
+            and "order_id" not in custom_data
+            and custom_data.get("value") is not None
+        ):
+            line["price"] = custom_data["value"]
+        contents = [{"content_id": cid, **line} for cid in content_ids]
+    if contents:
+        props["contents"] = contents
 
     if custom_data.get("num_items") is not None:
         props["quantity"] = custom_data["num_items"]

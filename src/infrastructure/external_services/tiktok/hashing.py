@@ -1,8 +1,10 @@
 """PII hashing helpers for the TikTok Events API.
 
 TikTok's Events API v1.3 wants the same lowercase-trimmed SHA-256 digests
-that Meta requires for email / phone / name / location fields; ``ttclid``,
-``ttp``, IP and user-agent are passed verbatim.
+that Meta requires for email / name / location fields; ``ttclid``,
+``ttp``, IP and user-agent are passed verbatim. **Phone is the one field
+where the two rails differ:** Meta hashes the bare E.164 digits, TikTok
+hashes the E.164 string *with* its leading ``+`` (``sha256("+2010…")``).
 
 To keep a single source of truth for the *hard* parts — MENA phone
 normalization and Egyptian-Arabic name transliteration — this module
@@ -49,6 +51,18 @@ def _first(values: list[str] | None) -> str | None:
     return values[0]
 
 
+def _hash_tiktok_phone(phone: str | None) -> str | None:
+    """SHA-256 of the E.164 phone WITH the ``+`` — TikTok's contract.
+
+    ``_normalize_mena_phone`` returns Meta's form (country code + subscriber,
+    no ``+``). Hashing that verbatim produced a digest TikTok could never
+    match, on 100 % of server-side events, while every diagnostic reported
+    the parameter as present.
+    """
+    digits = _normalize_mena_phone(phone) if phone else ""
+    return _h("+" + digits) if digits else None
+
+
 def _first_external_id(raw: dict) -> str | None:
     """Hashed ``external_id`` — customer id when known, else session id.
 
@@ -77,9 +91,7 @@ def hash_tiktok_user_data(raw: dict) -> dict[str, Any]:
     user: dict[str, Any] = {
         # Hashed identifiers.
         "email": _h(raw["email"]) if raw.get("email") else None,
-        "phone": (
-            _h(_normalize_mena_phone(raw["phone"])) if raw.get("phone") else None
-        ),
+        "phone": _hash_tiktok_phone(raw.get("phone")),
         # Customer id when authenticated, else the pseudonymous session
         # fingerprint. TikTok's `external_id` is a single string (unlike
         # Meta's array), so this is a preference order, not both. Reading

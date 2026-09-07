@@ -4846,6 +4846,7 @@ async def _build_tiktok_response(
         api_enabled=bool(cfg.get("api_enabled", False)),
         mode=mode,
         api_access_token_masked=masked,
+        has_token=has_token,
         test_event_code=cfg.get("test_event_code"),
         consent_required=bool(cfg.get("consent_required", False)),
         purchase_trigger=cfg.get("purchase_trigger"),
