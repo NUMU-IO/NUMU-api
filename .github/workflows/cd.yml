@@ -513,6 +513,20 @@ jobs:
             echo "==> Authenticating with GHCR..."
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
+            # Reclaim disk BEFORE the pull, not after. The prune at the end of
+            # this script only ran once a deploy had already succeeded, so
+            # every failed or superseded image accumulated until the box
+            # filled and `docker compose pull` died with "failed to register
+            # layer: no space left on device" — which is exactly how the
+            # 2026-09-07 prod deploy failed. Dangling images and build cache
+            # are safe to drop unconditionally; running containers pin their
+            # own images.
+            echo "==> Reclaiming disk before the pull..."
+            df -h / | tail -1
+            docker image prune -f || echo "[image prune] skipped — non-fatal"
+            docker builder prune -f || echo "[builder prune] skipped — non-fatal"
+            df -h / | tail -1
+
             echo "==> Pulling latest api image (:prod)..."
             docker compose pull api
 
