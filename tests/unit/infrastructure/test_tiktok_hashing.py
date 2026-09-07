@@ -30,7 +30,16 @@ class TestHashedIdentifiers:
     def test_phone_normalized_to_mena_e164_then_hashed(self):
         # Egyptian national format → 20-prefixed E.164-without-plus, then SHA-256.
         out = hash_tiktok_user_data({"phone": "01001234567"})
-        assert out["phone"] == _sha("201001234567")
+        # TikTok's contract is the digest of the E.164 string INCLUDING the
+        # "+". Meta's is the bare digits — the two rails must differ here, and
+        # this used to assert Meta's form, pinning a hash TikTok never matched.
+        assert out["phone"] == _sha("+201001234567")
+        assert out["phone"] != _sha("201001234567")
+        # National, E.164 and bare-digit spellings land on one digest. (The
+        # "0020…" international-prefix form is a known gap in the shared MENA
+        # normalizer and is out of scope here — Meta's hashes share it.)
+        for spelled in ("+20 100 123 4567", "201001234567"):
+            assert hash_tiktok_user_data({"phone": spelled})["phone"] == out["phone"]
 
     def test_arabic_first_name_produces_a_hash(self):
         out = hash_tiktok_user_data({"first_name": "محمد"})

@@ -33,8 +33,8 @@ from src.api.v1.routes.stores import apps as apps_module
 from src.api.v1.routes.stores import audit as audit_module
 from src.api.v1.routes.stores import blogs as blogs_module
 from src.api.v1.routes.stores import bundles as bundles_module
-from src.api.v1.routes.stores import carriers as carriers_module
 from src.api.v1.routes.stores import business_profile as business_profile_module
+from src.api.v1.routes.stores import carriers as carriers_module
 from src.api.v1.routes.stores import categories as categories_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
