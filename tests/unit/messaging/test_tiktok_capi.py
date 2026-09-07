@@ -1,7 +1,7 @@
 """Unit tests for the TikTok Events API Celery task helpers (pure pieces).
 
-Covers the funnel-step→event map (the #1 gotcha: order_completed →
-CompletePayment, NOT "Purchase"), the Meta-shaped custom_data → TikTok
+Covers the funnel-step→event map (TikTok renamed CompletePayment → Purchase
+and SubmitForm → Lead on 2025-05-01), the Meta-shaped custom_data → TikTok
 properties transform, response redaction, and backoff. The full async
 _send_event (DB + httpx) is out of scope here (no live TikTok calls).
 """
@@ -18,9 +18,24 @@ from src.infrastructure.messaging.tasks.tiktok_capi import (
 
 
 class TestFunnelMap:
-    def test_order_completed_is_complete_payment_not_purchase(self):
-        assert FUNNEL_STEP_TO_TIKTOK_EVENT["order_completed"] == "CompletePayment"
-        assert "Purchase" not in FUNNEL_STEP_TO_TIKTOK_EVENT.values()
+    def test_uses_the_current_renamed_event_codes(self):
+        """TikTok renamed these on 2025-05-01. The legacy names still work via
+        auto-conversion, so this asserts intent, not survival: the storefront's
+        map must say the same thing, because dedup keys on the event NAME."""
+        assert FUNNEL_STEP_TO_TIKTOK_EVENT["order_completed"] == "Purchase"
+        assert FUNNEL_STEP_TO_TIKTOK_EVENT["lead"] == "Lead"
+        assert "CompletePayment" not in FUNNEL_STEP_TO_TIKTOK_EVENT.values()
+        assert "SubmitForm" not in FUNNEL_STEP_TO_TIKTOK_EVENT.values()
+
+    def test_purchase_event_names_covers_the_legacy_row_name(self):
+        """Log rows written before the rename say CompletePayment; the sweep
+        reads them back and would re-send every historical order without it."""
+        from src.infrastructure.messaging.tasks.tiktok_capi import (
+            PURCHASE_EVENT_NAMES,
+        )
+
+        assert set(PURCHASE_EVENT_NAMES) == {"Purchase", "CompletePayment"}
+        assert FUNNEL_STEP_TO_TIKTOK_EVENT["order_completed"] in PURCHASE_EVENT_NAMES
 
     def test_core_commerce_events(self):
         assert FUNNEL_STEP_TO_TIKTOK_EVENT["product_view"] == "ViewContent"
@@ -34,7 +49,7 @@ class TestFunnelMap:
 
     def test_helper_returns_none_for_unknown(self):
         assert _funnel_step_to_tiktok_event("nope") is None
-        assert _funnel_step_to_tiktok_event("order_completed") == "CompletePayment"
+        assert _funnel_step_to_tiktok_event("order_completed") == "Purchase"
 
 
 class TestPropertiesTransform:
@@ -145,3 +160,85 @@ class TestBackoff:
 
     def test_capped_at_300(self):
         assert _backoff_from_response({}, retries=20) == 300
+
+
+class TestDedupKey:
+    """The UNIQUE key must include pixel_id.
+
+    Both fan-out paths (`/track` and the purchase dispatcher) enqueue one
+    task per api-enabled pixel with the SAME event_id, because TikTok's own
+    dedup window is scoped to a single Pixel Code. Keying the log on
+    (store_id, event_id) alone made every task after the first return
+    {"status": "duplicate"} before any HTTP call — a multi-pixel store was
+    silently a single-pixel store.
+    """
+
+    def test_unique_constraint_is_store_pixel_event(self):
+        from sqlalchemy import UniqueConstraint
+
+        from src.infrastructure.database.models.tenant.tiktok_event_log import (
+            TikTokEventLogModel,
+        )
+
+        uniques = [
+            c
+            for c in TikTokEventLogModel.__table__.constraints
+            if isinstance(c, UniqueConstraint)
+        ]
+        assert len(uniques) == 1, "expected exactly one UNIQUE constraint"
+        assert [c.name for c in uniques[0].columns] == [
+            "store_id",
+            "pixel_id",
+            "event_id",
+        ]
+
+
+class TestAdoptionRule:
+    """Which UNIQUE-violating row the worker is allowed to finish.
+
+    Getting this wrong is invisible: too strict and an event is written,
+    never sent, and looks identical in the log to one that was; too loose
+    and a second producer re-sends an event TikTok already counted.
+    """
+
+    class _Row:
+        def __init__(self, sent_at=None, response_status=None):
+            self.sent_at = sent_at
+            self.response_status = response_status
+
+    def test_no_row_is_never_adopted(self):
+        from src.infrastructure.messaging.tasks.tiktok_capi import (
+            should_adopt_existing_row,
+        )
+
+        assert should_adopt_existing_row(None, 0) is False
+        assert should_adopt_existing_row(None, 3) is False
+
+    def test_a_retry_owns_its_own_row(self):
+        from src.infrastructure.messaging.tasks.tiktok_capi import (
+            should_adopt_existing_row,
+        )
+
+        answered = self._Row(sent_at="2026-09-08", response_status=500)
+        assert should_adopt_existing_row(answered, retries=1) is True
+
+    def test_unanswered_row_is_adopted_even_on_first_delivery(self):
+        """The crash case: acks_late redelivers with retries == 0. Before
+        this, the event stayed written-but-never-sent forever."""
+        from src.infrastructure.messaging.tasks.tiktok_capi import (
+            should_adopt_existing_row,
+        )
+
+        assert should_adopt_existing_row(self._Row(), retries=0) is True
+
+    def test_answered_row_on_first_delivery_is_a_real_duplicate(self):
+        from src.infrastructure.messaging.tasks.tiktok_capi import (
+            should_adopt_existing_row,
+        )
+
+        delivered = self._Row(sent_at="2026-09-08", response_status=200)
+        assert should_adopt_existing_row(delivered, retries=0) is False
+        # A recorded FAILURE is still an answer — the retry machinery owns
+        # that row, not a fresh producer.
+        failed = self._Row(sent_at="2026-09-08", response_status=400)
+        assert should_adopt_existing_row(failed, retries=0) is False

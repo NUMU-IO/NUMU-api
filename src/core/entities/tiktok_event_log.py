@@ -2,7 +2,7 @@
 
 Sibling of ``MetaEventLog``. Each row corresponds to one logical event the
 platform attempted to send to TikTok's Events API v1.3. The
-``UNIQUE (store_id, event_id)`` constraint on the underlying table is the
+``UNIQUE (store_id, pixel_id, event_id)`` constraint on the table is the
 **server-side dedup primitive**: if a duplicate row would be inserted (e.g.
 webhook retry, late-ack Celery retry), the IntegrityError tells the worker to
 skip the outbound call.

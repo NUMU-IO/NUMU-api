@@ -7,6 +7,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime
+from datetime import timedelta as _timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -3667,6 +3668,7 @@ from src.api.v1.schemas.tenant.tracking import (  # noqa: E402
     SendTikTokTestEventRequest,
     SendTikTokTestEventResponse,
     TikTokEventLogEntry,
+    TikTokReplayResponse,
     TikTokReportResponse,
     TikTokTrackingResponse,
     TikTokTrackingStatusResponse,
@@ -4813,17 +4815,20 @@ async def _build_tiktok_response(
         if not recent:
             status_label = "configured_no_events"
         else:
-            last_5_failed = sum(
-                1
-                for r in recent[:5]
-                if r.response_status is None
-                or r.response_status >= 400
-                or r.response_code not in (0, None)
-            ) == min(5, len(recent[:5]))
-            if last_5_failed and len(recent) >= 5:
-                status_label = "failing"
-            else:
-                status_label = "connected"
+            # Every recent event failed (up to the last 5). The `len(recent)
+            # >= 5` gate that used to guard this reported "connected" for a
+            # store whose only 1-4 events had ALL failed — precisely the
+            # freshly-configured store where a bad token is most likely.
+            status_label = (
+                "failing"
+                if all(
+                    r.response_status is None
+                    or r.response_status >= 400
+                    or r.response_code not in (0, None)
+                    for r in recent[:5]
+                )
+                else "connected"
+            )
 
     debug_expires_at = cfg.get("debug_mode_expires_at")
     debug_expires_dt = None
@@ -5056,7 +5061,7 @@ async def delete_tiktok_tracking(
 @router.post(
     "/tracking/tiktok/test-event",
     response_model=SuccessResponse[SendTikTokTestEventResponse],
-    summary="Send a synthetic CompletePayment test event to TikTok",
+    summary="Send a synthetic Purchase test event to TikTok",
     operation_id="send_tiktok_test_event",
 )
 async def send_tiktok_test_event(
@@ -5064,7 +5069,7 @@ async def send_tiktok_test_event(
     store: Annotated[Store, Depends(get_current_store)],
     db: Annotated[_AsyncSession, Depends(_get_db)],
 ):
-    """Fire a synthetic CompletePayment via the Celery fan-out task.
+    """Fire a synthetic Purchase via the Celery fan-out task.
 
     Rejects with 422 when the resolved mode is ``off`` or ``pixel_only``
     (no Events API to test).
@@ -5118,7 +5123,7 @@ async def send_tiktok_test_event(
     tiktok_capi_send_event.delay(
         store_id=str(store.id),
         pixel_id=pixel_id,
-        event_name="CompletePayment",
+        event_name="Purchase",
         event_id=event_id,
         event_time=int(datetime.now(UTC).timestamp()),
         # Same reasoning as the Meta test event: TikTok wants a page URL on
@@ -5215,6 +5220,117 @@ async def get_tiktok_events(
         )
 
     return SuccessResponse(data=out, message="Recent TikTok events retrieved")
+
+
+@router.get(
+    "/tracking/tiktok/failed-events",
+    response_model=SuccessResponse[list[TikTokEventLogEntry]],
+    summary="Get TikTok Events API deliveries that failed",
+    operation_id="get_tiktok_failed_events",
+)
+async def get_tiktok_failed_events(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+    hours: int = 24,
+    limit: int = 50,
+):
+    """Rows TikTok never accepted, newest first — the dead-letter view.
+
+    "Failed" is the same predicate as the ``idx_tiktok_event_log_failed``
+    partial index: no response recorded, an HTTP 4xx/5xx, or a non-zero
+    business code. Redaction matches ``get_tiktok_events`` — the hashed
+    ``user`` object never leaves the API, only presence booleans.
+    """
+    from src.infrastructure.repositories.tiktok_event_log_repository import (
+        TikTokEventLogRepository,
+    )
+
+    hours = min(max(hours, 1), 720)
+    limit = min(max(limit, 1), 200)
+    since = datetime.now(UTC) - _timedelta(hours=hours)
+    rows = await TikTokEventLogRepository(db).failed_for_store(store.id, since, limit)
+
+    out: list[TikTokEventLogEntry] = []
+    for r in rows:
+        redacted = dict(r.request_payload or {})
+        user = redacted.pop("user", None) or {}
+        redacted["user_indicators"] = {
+            "had_email": bool(user.get("email")),
+            "had_phone": bool(user.get("phone")),
+            "had_external_id": bool(user.get("external_id")),
+            "had_ttclid": bool(user.get("ttclid")),
+            "had_ttp": bool(user.get("ttp")),
+        }
+        out.append(
+            TikTokEventLogEntry(
+                id=str(r.id),
+                event_id=r.event_id,
+                event_name=r.event_name,
+                event_time=r.event_time,
+                pixel_id=r.pixel_id,
+                response_status=r.response_status,
+                response_code=r.response_code,
+                request_id=r.request_id,
+                attempt_count=r.attempt_count,
+                last_error=r.last_error,
+                sent_at=r.sent_at,
+                created_at=r.created_at,
+                channel="server",
+                request_payload_redacted=redacted,
+            )
+        )
+
+    return SuccessResponse(data=out, message="Failed TikTok events retrieved")
+
+
+@router.post(
+    "/tracking/tiktok/replay",
+    response_model=SuccessResponse[TikTokReplayResponse],
+    summary="Re-send failed TikTok Events API deliveries",
+    operation_id="replay_tiktok_failed_events",
+)
+async def replay_tiktok_failed_events(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+    hours: int = 24,
+    limit: int = 100,
+):
+    """Queue a re-send of every failed delivery in the window.
+
+    Each row is replayed from its STORED payload, so no PII is re-hashed and
+    the ``event_id`` is unchanged — TikTok collapses a replay into the
+    original event rather than counting a second conversion. Rows that already
+    succeeded are skipped by the task itself, so calling this twice is safe.
+
+    Rejects when the Events API is not actually on: replaying into a
+    disconnected integration would just re-fail every row and reset their
+    attempt counts.
+    """
+    from src.infrastructure.messaging.tasks.tiktok_capi import (
+        tiktok_capi_replay_failed,
+    )
+
+    cfg = _tiktok_cfg(store)
+    has_token = await _has_active_tiktok_credential(db, store.tenant_id)
+    if resolve_tiktok_mode(cfg, has_token) in ("off", "pixel_only"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="TikTok Events API is not enabled for this store.",
+        )
+
+    hours = min(max(hours, 1), 720)
+    limit = min(max(limit, 1), 500)
+    tiktok_capi_replay_failed.delay(store_id=str(store.id), hours=hours, limit=limit)
+    logger.info(
+        "tiktok_replay_requested store_id=%s hours=%s limit=%s",
+        store.id,
+        hours,
+        limit,
+    )
+    return SuccessResponse(
+        data=TikTokReplayResponse(queued=limit, window_hours=hours),
+        message="Replay queued",
+    )
 
 
 @router.post(
@@ -5396,7 +5512,9 @@ async def get_tiktok_tracking_status(
         status_label = "disabled"
     elif not recent:
         status_label = "configured_no_events"
-    elif len(recent) >= 5 and sum(1 for r in recent[:5] if _is_failed(r)) == 5:
+    elif all(_is_failed(r) for r in recent[:5]):
+        # No `len(recent) >= 5` gate: a store whose only 1-4 events all failed
+        # is failing, not connected.
         status_label = "failing"
     else:
         status_label = "connected"

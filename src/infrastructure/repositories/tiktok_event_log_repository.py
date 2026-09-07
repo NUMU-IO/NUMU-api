@@ -96,9 +96,9 @@ class TikTokEventLogRepository(ITikTokEventLogRepository):
     async def create(self, entity: TikTokEventLog) -> TikTokEventLog:
         """Insert a new row.
 
-        IntegrityError on the ``(store_id, event_id)`` UNIQUE constraint
-        propagates by design — the Celery task catches it and treats it
-        as "already sent, skip the outbound Events API call".
+        IntegrityError on the ``(store_id, pixel_id, event_id)`` UNIQUE
+        constraint propagates by design — the Celery task catches it and
+        treats it as "this pixel already got it, skip the outbound call".
         """
         model = self._to_model(entity)
         self.session.add(model)
@@ -114,6 +114,7 @@ class TikTokEventLogRepository(ITikTokEventLogRepository):
         body: dict | None,
         request_id: str | None,
         sent_at: datetime,
+        attempt_count: int | None = None,
     ) -> TikTokEventLog | None:
         query = select(TikTokEventLogModel).where(TikTokEventLogModel.id == log_id)
         result = await self.session.execute(self._tenant_filter(query))
@@ -125,6 +126,8 @@ class TikTokEventLogRepository(ITikTokEventLogRepository):
         model.response_body = body
         model.request_id = request_id
         model.sent_at = sent_at
+        if attempt_count is not None:
+            model.attempt_count = attempt_count
         await self.session.flush()
         await self.session.refresh(model)
         return self._to_entity(model)
@@ -146,6 +149,27 @@ class TikTokEventLogRepository(ITikTokEventLogRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
+    async def get_for_event(
+        self,
+        store_id: UUID,
+        pixel_id: str,
+        event_id: str,
+    ) -> TikTokEventLog | None:
+        """Fetch the row that a duplicate insert collided with."""
+        query = select(TikTokEventLogModel).where(
+            and_(
+                TikTokEventLogModel.store_id == store_id,
+                TikTokEventLogModel.pixel_id == pixel_id,
+                TikTokEventLogModel.event_id == event_id,
+            )
+        )
+        model = (
+            (await self.session.execute(self._tenant_filter(query)))
+            .scalars()
+            .one_or_none()
+        )
+        return self._to_entity(model) if model else None
+
     async def recent_for_store(
         self,
         store_id: UUID,
@@ -154,6 +178,31 @@ class TikTokEventLogRepository(ITikTokEventLogRepository):
         query = (
             select(TikTokEventLogModel)
             .where(TikTokEventLogModel.store_id == store_id)
+            .order_by(TikTokEventLogModel.created_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [self._to_entity(m) for m in result.scalars().all()]
+
+    async def failed_for_store(
+        self,
+        store_id: UUID,
+        since: datetime,
+        limit: int = 50,
+    ) -> list[TikTokEventLog]:
+        query = (
+            select(TikTokEventLogModel)
+            .where(
+                and_(
+                    TikTokEventLogModel.store_id == store_id,
+                    TikTokEventLogModel.created_at >= since,
+                    or_(
+                        TikTokEventLogModel.response_status.is_(None),
+                        TikTokEventLogModel.response_status >= 400,
+                        TikTokEventLogModel.response_code != 0,
+                    ),
+                )
+            )
             .order_by(TikTokEventLogModel.created_at.desc())
             .limit(limit)
         )

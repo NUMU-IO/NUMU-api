@@ -1,17 +1,22 @@
-"""Single source of truth for TikTok Events API CompletePayment fan-out
+"""Single source of truth for TikTok Events API Purchase fan-out
 across all payment-confirmation paths (Paymob, Fawry, Fawaterak, Instapay,
 Kashier, COD). Sibling of ``meta_capi_purchase_dispatcher``.
 
-CompletePayment is server-authoritative: the browser-side
-``ttq.track('CompletePayment', …, { event_id: order.id })`` fire is
+Purchase is server-authoritative: the browser-side
+``ttq.track('Purchase', …, { event_id: order.id })`` fire is
 best-effort; the webhook hook here is the one TikTok optimizes ad spend
 against.
 
 Dedup contract:
     event_id = str(order.id)
 
+TikTok renamed this event from ``CompletePayment`` to ``Purchase`` on
+2025-05-01; rows written to ``tiktok_event_log`` before 2026-09-08 still carry
+the old name, so anything reading the log back must use
+``PURCHASE_EVENT_NAMES`` rather than a single literal.
+
 The storefront's order-confirmation page passes the same id when it fires
-CompletePayment from the browser, so Pixel + Events API collapse to one
+Purchase from the browser, so Pixel + Events API collapse to one
 event in TikTok's Events Manager.
 
 All callers should:
@@ -50,7 +55,7 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     by ``fill_identity_from_customer`` at the call site — the same correction
     the Meta sibling already carries. ``OrderShippingAddress`` has no email
     field and never has, so ``shipping.get("email")`` was a permanent None and
-    every server-side CompletePayment reached TikTok with no email match key
+    every server-side Purchase reached TikTok with no email match key
     at all.
     """
     from src.infrastructure.external_services.meta.country_iso import (
@@ -131,7 +136,7 @@ async def enqueue_tiktok_capi_event_for_order(
     db: AsyncSession,
     order: Any,
     *,
-    event_name: str = "CompletePayment",
+    event_name: str = "Purchase",
     event_id: str | None = None,
 ) -> None:
     """Enqueue any TikTok Events API event for an order, gated on config.
@@ -141,11 +146,14 @@ async def enqueue_tiktok_capi_event_for_order(
     across all fan-out copies.
 
     Dedup contract: ``event_id`` defaults to ``str(order.id)`` for
-    CompletePayment (matches the browser fire). For other events it
+    Purchase (matches the browser fire). For other events it
     defaults to ``f"{event_name_lower}-{order.id}"``.
     """
     from src.application.services.tiktok_pixel_resolver import resolve_tiktok_pixels
-    from src.infrastructure.messaging.tasks.tiktok_capi import tiktok_capi_send_event
+    from src.infrastructure.messaging.tasks.tiktok_capi import (
+        PURCHASE_EVENT_NAMES,
+        tiktok_capi_send_event,
+    )
     from src.infrastructure.repositories.store_repository import StoreRepository
 
     sr = StoreRepository(db)
@@ -166,7 +174,7 @@ async def enqueue_tiktok_capi_event_for_order(
     if event_id is None:
         event_id = (
             str(order.id)
-            if event_name == "CompletePayment"
+            if event_name in PURCHASE_EVENT_NAMES
             else f"{event_name.lower()}-{order.id}"
         )
 
@@ -212,9 +220,9 @@ async def enqueue_tiktok_capi_event_for_order(
 
 
 async def enqueue_tiktok_capi_purchase(db: AsyncSession, order: Any) -> None:
-    """Enqueue a CompletePayment event for ``order``, gated on store config.
+    """Enqueue a Purchase event for ``order``, gated on store config.
 
     Thin wrapper preserved for the payment-webhook callers (Paymob, Fawry,
     Fawaterak, Instapay, Kashier, COD).
     """
-    await enqueue_tiktok_capi_event_for_order(db, order, event_name="CompletePayment")
+    await enqueue_tiktok_capi_event_for_order(db, order, event_name="Purchase")

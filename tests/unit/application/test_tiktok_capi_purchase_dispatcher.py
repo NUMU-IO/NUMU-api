@@ -1,4 +1,4 @@
-"""Unit tests for ``enqueue_tiktok_capi_purchase`` — TikTok CompletePayment
+"""Unit tests for ``enqueue_tiktok_capi_purchase`` — TikTok Purchase
 dispatcher used by every payment/COD webhook.
 
 Pure-Python: the lazy imports (StoreRepository, resolve_tiktok_pixels,
@@ -114,7 +114,7 @@ class TestFire:
 
         send_task.delay.assert_called_once()
         kwargs = send_task.delay.call_args.kwargs
-        assert kwargs["event_name"] == "CompletePayment"
+        assert kwargs["event_name"] == "Purchase"
         assert kwargs["event_id"] == str(order.id)  # dedup contract
         assert kwargs["pixel_id"] == PIXEL_ID
         assert kwargs["action_source"] == "web"

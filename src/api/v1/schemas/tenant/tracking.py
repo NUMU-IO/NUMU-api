@@ -355,8 +355,8 @@ class SaveTikTokTrackingRequest(BaseModel):
     test_event_code: str | None = Field(default=None, max_length=64)
     consent_required: bool = False
     debug_mode: bool = False
-    # COD-aware CompletePayment timing — None preserves legacy behaviour
-    # (payment webhooks remain the sole CompletePayment source).
+    # COD-aware Purchase timing — None preserves legacy behaviour
+    # (payment webhooks remain the sole Purchase source).
     purchase_trigger: PurchaseTrigger | None = None
     # Optional multi-pixel list. When set, every Events API fire fans out
     # to each api_enabled entry; the storefront pixel mount iterates.
@@ -425,7 +425,7 @@ class SendTikTokTestEventRequest(BaseModel):
 
 
 class SendTikTokTestEventResponse(BaseModel):
-    """Synthetic-CompletePayment fan-out result (the actual POST is async)."""
+    """Synthetic-Purchase fan-out result (the actual POST is async)."""
 
     enqueued: bool
     test_event_code: str
@@ -453,6 +453,13 @@ class TikTokEventLogEntry(BaseModel):
     created_at: datetime
     channel: Literal["browser", "server", "both"] = "server"
     request_payload_redacted: dict
+
+
+class TikTokReplayResponse(BaseModel):
+    """Result of queueing a replay of failed Events API deliveries."""
+
+    queued: int = 0
+    window_hours: int = 24
 
 
 class TikTokTrackingStatusResponse(BaseModel):

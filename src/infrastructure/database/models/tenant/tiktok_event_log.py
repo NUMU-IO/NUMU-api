@@ -5,10 +5,12 @@ sends (or attempts). Sibling of ``meta_event_log``; lives in the
 ``public`` schema with a ``tenant_id`` discriminator (RLS enforces
 isolation).
 
-The ``UNIQUE (store_id, event_id)`` constraint is the **server-side
-dedup primitive**. The Celery task inserts a row *before* contacting
-TikTok; an IntegrityError on insert means the event was already sent and
-the task short-circuits.
+The ``UNIQUE (store_id, pixel_id, event_id)`` constraint is the
+**server-side dedup primitive**. The Celery task inserts a row *before*
+contacting TikTok; an IntegrityError on insert means this pixel already
+received the event and the task short-circuits. ``pixel_id`` is part of
+the key because TikTok's own dedup window is per Pixel Code, so one
+event_id fanned out to several of a store's pixels is correct.
 """
 
 from datetime import datetime
@@ -41,8 +43,18 @@ class TikTokEventLogModel(Base, UUIDMixin, TenantMixin):
 
     __tablename__ = "tiktok_event_log"
     __table_args__ = (
+        # (store, PIXEL, event) — not (store, event). TikTok scopes its own
+        # deduplication to a single Pixel Code, so the same event_id fanned out
+        # to a store's second and third pixels is CORRECT. Keying without
+        # pixel_id meant this constraint rejected pixels 2..N as duplicates
+        # before they ever reached TikTok: a multi-pixel store was silently a
+        # single-pixel store, and the log recorded the drop as an ordinary
+        # "duplicate". See migration `tiktok_pixel_dedup_20260908`.
         UniqueConstraint(
-            "store_id", "event_id", name="uq_tiktok_event_log_store_event_id"
+            "store_id",
+            "pixel_id",
+            "event_id",
+            name="uq_tiktok_event_log_store_pixel_event_id",
         ),
         Index(
             "idx_tiktok_event_log_store_event",

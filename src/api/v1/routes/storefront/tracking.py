@@ -1408,29 +1408,20 @@ async def _enrich_purchase_from_order(
         fill_identity_from_customer,
         resolve_catalog_ids,
     )
+    from src.core.services.conversion_provider import get_provider
 
-    if platform == "tiktok":
-        from src.application.services.tiktok_capi_purchase_dispatcher import (
-            _build_custom_data_from_order,
-            _build_user_data_from_order,
-        )
-
-        order_user = _build_user_data_from_order(order)
-    else:
-        from src.application.services.meta_capi_purchase_dispatcher import (
-            _build_custom_data_from_order,
-            _build_user_data_from_order,
-            _store_host,
-        )
-
-        order_user = _build_user_data_from_order(order, host=_store_host(store))
+    # `platform` used to select a pair of imports through an if/else here.
+    # The provider registry owns that mapping now, so adding a third ad
+    # platform does not mean editing this function.
+    provider = get_provider(platform)
+    order_user = provider.build_user_data_from_order(order, store)
 
     await fill_identity_from_customer(session, order_user, order)
     for key, value in order_user.items():
         if value and (key in _ORDER_IDENTITY_WINS or not user_data.get(key)):
             user_data[key] = value
 
-    return _build_custom_data_from_order(
+    return provider.build_custom_data_from_order(
         order, await resolve_catalog_ids(session, order)
     )
 
@@ -1648,7 +1639,7 @@ async def _maybe_enqueue_tiktok_capi(
     browser pixel configured; an Events-API-only store never had it).
 
     Mapping (funnel step → TikTok event) lives in the task module's
-    ``FUNNEL_STEP_TO_TIKTOK_EVENT`` (e.g. order_completed → CompletePayment,
+    ``FUNNEL_STEP_TO_TIKTOK_EVENT`` (e.g. order_completed → Purchase,
     product_view → ViewContent). Fans out one task per api-enabled pixel,
     reusing the same browser-issued ``event_id`` across pixels.
 
@@ -1724,7 +1715,7 @@ async def _maybe_enqueue_tiktok_capi(
 
     custom_data = sanitize_custom_data(body.step_data)
 
-    # Same as the Meta leg: this fire is the only server CompletePayment
+    # Same as the Meta leg: this fire is the only server Purchase
     # TikTok receives for the order, so carry the order's own lines and
     # identity instead of the thin browser payload.
     if step == "order_completed":
