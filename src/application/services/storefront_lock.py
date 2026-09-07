@@ -31,12 +31,24 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from datetime import UTC, datetime
 from uuid import UUID
 
 from src.config import settings
 
 AWAITING_TOPUP = "awaiting_topup"
 AWAITING_SUBSCRIPTION = "awaiting_subscription"
+
+# The PAYG wallet gate applies only to tenants created from here on.
+#
+# Shipping it without this closed eight live storefronts the moment it
+# deployed — merchants who had been selling for months under rules that
+# never required a funded wallet. A paywall may set the terms for new
+# signups; it may not retroactively shut a working shop whose owner was
+# never told. Existing PAYG merchants are still chased for a top-up by
+# the wallet warnings and the checkout gate, which is where that
+# conversation belongs.
+PAYG_GATE_FROM = datetime(2026, 9, 8, tzinfo=UTC)
 
 # ponytail: derived, so it cannot be rotated — a merchant who leaks it
 # cannot pick a new one. Acceptable for a gate on a store that is not
@@ -48,11 +60,19 @@ _PASSWORD_CHARS = 10
 def lock_reason(tenant) -> str | None:
     """Why this tenant's storefront is locked, or ``None`` if it is not.
 
+    Only ``read_only`` locks. This asked ``not tenant.is_writable``
+    until it shut off a paying merchant: ``is_writable`` is DEMO, TRIAL
+    or ACTIVE, so it also swallowed ``past_due`` — the dunning window
+    where a subscriber's renewal is still being retried. Closing a
+    customer's shop while we are in the middle of charging them is the
+    opposite of what dunning is for, and ``read_only`` is the state the
+    lifecycle already uses for "gave up on collecting".
+
     PAYG merchants fund the store with wallet top-ups instead of a
     subscription, so they are told to top up; everyone else is told to
     pay for their plan.
     """
-    if tenant is None or tenant.is_writable:
+    if tenant is None or not tenant.is_read_only:
         return None
     return (
         AWAITING_TOPUP
@@ -75,13 +95,21 @@ async def resolve_lock_reason(session, tenant) -> str | None:
     zero keeps their storefront — the wallet checkout gate already stops
     orders it cannot charge, and closing a working shop over a temporary
     empty balance is a harsher answer than the problem asks for.
+
+    Applies only to tenants created on or after :data:`PAYG_GATE_FROM`;
+    everyone who was already trading keeps their storefront.
     """
     if tenant is None:
         return None
-    if not tenant.is_writable:
+    if tenant.is_read_only:
         return lock_reason(tenant)
     if (tenant.plan or "").lower() != "payg":
         return None
+
+    created = getattr(tenant, "created_at", None)
+    if created is None or created < PAYG_GATE_FROM:
+        return None
+
     return None if await payg_ever_funded(session, tenant.id) else AWAITING_TOPUP
 
 
