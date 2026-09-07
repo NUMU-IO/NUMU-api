@@ -389,6 +389,7 @@ def _normalize_mena_phone(phone: str, default_cc: str = _DEFAULT_DIAL_CODE) -> s
     Accepts any of:
         +201001234567   (E.164 with +)
         201001234567    (E.164 without +)
+        00201001234567  (ITU international access prefix)
         01001234567     (Egyptian national format)
         ٠١٠٠١٢٣٤٥٦٧     (Arabic-Indic digits — handled via isdigit())
         +966501234567   (Saudi E.164)
@@ -414,6 +415,16 @@ def _normalize_mena_phone(phone: str, default_cc: str = _DEFAULT_DIAL_CODE) -> s
     digits = "".join(c for c in phone_ascii if c.isdigit())
     if not digits:
         return ""
+
+    # "00" is the ITU international access prefix — "00201001234567" is the
+    # same number as "+201001234567", and MENA users type it constantly.
+    # Without this it matches no country code and falls through to the
+    # national branch below, which strips ONE leading zero and re-prefixes the
+    # default country: 00201001234567 became 200201001234567. Well-formed,
+    # present in every diagnostic, and matching nothing — on BOTH the Meta and
+    # TikTok rails, which share this normalizer.
+    if digits.startswith("00"):
+        digits = digits[2:]
 
     # Longest-prefix country-code match. 966/971/212/213 are 3-digit;
     # 20 is 2-digit. Try 3-digit first so "20" doesn't shadow "212".
