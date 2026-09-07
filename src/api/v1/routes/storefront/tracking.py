@@ -1330,6 +1330,110 @@ def _request_host(body: TrackPageViewRequest) -> str | None:
 # lands.
 _PRE_PERSISTED_EVENTS = frozenset({"Purchase", "DeliveredOrder"})
 
+# Identity keys where the ORDER (what the buyer typed for this purchase) beats
+# whatever the session lookup resolved — on a shared device the fingerprint
+# can surface a stranger's abandoned-checkout row. Request-time signals (ip,
+# user_agent, cookies, click ids) keep the fresher value from the /track
+# request and only fill blanks from the checkout-time snapshot.
+_ORDER_IDENTITY_WINS = frozenset({
+    "email",
+    "phone",
+    "first_name",
+    "last_name",
+    "city",
+    "state",
+    "zip",
+    "country_code",
+    "customer_id",
+})
+
+
+async def _load_order_for_purchase(session, store_id: UUID, raw_order_id):
+    """The order behind a confirmation-page ``order_completed``, or None.
+
+    Scoped to the store from the URL path: ``step_data`` is client-supplied,
+    so a forged ``order_id`` from another tenant must resolve to nothing.
+    """
+    if session is None or not raw_order_id:
+        return None
+    try:
+        order_uuid = UUID(str(raw_order_id))
+    except (ValueError, TypeError):
+        return None
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.order import OrderModel
+
+    try:
+        return (
+            await session.execute(
+                select(OrderModel).where(
+                    OrderModel.id == order_uuid, OrderModel.store_id == store_id
+                )
+            )
+        ).scalar_one_or_none()
+    except Exception:  # noqa: BLE001 — enrichment must never break /track
+        return None
+
+
+async def _enrich_purchase_from_order(
+    *,
+    platform: str,
+    session,
+    store: Store,
+    user_data: dict,
+    custom_data: dict,
+) -> dict:
+    """Rebuild a confirmation-page Purchase from the ORDER, not the browser.
+
+    The thank-you page fires ``order_completed`` with the thin payload every
+    browser event carries (``content_ids`` + totals) and an identity that
+    depends on a session-fingerprint lookup. Both event logs are
+    ``UNIQUE (store_id, event_id)`` and insert before sending, so this fire
+    is the ONLY server Purchase either platform ever receives for the order:
+    the webhook / status-handler copy — order lines, shipping phone, customer
+    email, click-id snapshot — lands later with the same id and is dropped.
+
+    So build it the way the dispatchers do, reusing their builders verbatim.
+    Mutates ``user_data`` in place; returns the custom_data to send. Leaves
+    the browser payload untouched when the order cannot be loaded.
+    """
+    order = await _load_order_for_purchase(
+        session, store.id, (custom_data or {}).get("order_id")
+    )
+    if order is None:
+        return custom_data
+
+    from src.application.services.meta_capi_purchase_dispatcher import (
+        fill_identity_from_customer,
+        resolve_catalog_ids,
+    )
+
+    if platform == "tiktok":
+        from src.application.services.tiktok_capi_purchase_dispatcher import (
+            _build_custom_data_from_order,
+            _build_user_data_from_order,
+        )
+
+        order_user = _build_user_data_from_order(order)
+    else:
+        from src.application.services.meta_capi_purchase_dispatcher import (
+            _build_custom_data_from_order,
+            _build_user_data_from_order,
+            _store_host,
+        )
+
+        order_user = _build_user_data_from_order(order, host=_store_host(store))
+
+    await fill_identity_from_customer(session, order_user, order)
+    for key, value in order_user.items():
+        if value and (key in _ORDER_IDENTITY_WINS or not user_data.get(key)):
+            user_data[key] = value
+
+    return _build_custom_data_from_order(
+        order, await resolve_catalog_ids(session, order)
+    )
+
 
 async def _maybe_enqueue_meta_capi(
     *,
@@ -1456,6 +1560,23 @@ async def _maybe_enqueue_meta_capi(
             )
 
     custom_data = sanitize_custom_data(body.step_data)
+
+    # The confirmation page's Purchase is the one server Purchase Meta ever
+    # gets for this order (see `_enrich_purchase_from_order`). Build it from
+    # the order — lines, shipping phone, customer email — not the browser.
+    if step == "order_completed":
+        try:
+            custom_data = await _enrich_purchase_from_order(
+                platform="meta",
+                session=session,
+                store=store,
+                user_data=user_data,
+                custom_data=custom_data,
+            )
+        except Exception:  # noqa: BLE001 — a richer payload is a bonus, never a gate
+            logger.exception(
+                "meta_capi_order_enrich_failed", extra={"store_id": str(store.id)}
+            )
 
     # Remap internal product UUIDs → the merchant's Meta catalog ids.
     #
@@ -1602,6 +1723,24 @@ async def _maybe_enqueue_tiktok_capi(
             )
 
     custom_data = sanitize_custom_data(body.step_data)
+
+    # Same as the Meta leg: this fire is the only server CompletePayment
+    # TikTok receives for the order, so carry the order's own lines and
+    # identity instead of the thin browser payload.
+    if step == "order_completed":
+        try:
+            custom_data = await _enrich_purchase_from_order(
+                platform="tiktok",
+                session=session,
+                store=store,
+                user_data=user_data,
+                custom_data=custom_data,
+            )
+        except Exception:  # noqa: BLE001 — a richer payload is a bonus, never a gate
+            logger.exception(
+                "tiktok_capi_order_enrich_failed", extra={"store_id": str(store.id)}
+            )
+
     event_time_int = int(event_time.timestamp())
 
     for pixel in pixels:

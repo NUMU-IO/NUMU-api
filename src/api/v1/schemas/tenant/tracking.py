@@ -395,6 +395,10 @@ class TikTokTrackingResponse(BaseModel):
     api_enabled: bool = False
     mode: TrackingMode = "off"
     api_access_token_masked: str | None = None
+    # Whether an active credential row exists — the mask above is None when
+    # the token cannot be decrypted for display, which the hub used to read
+    # as "no token on file" while events were flowing.
+    has_token: bool = False
     test_event_code: str | None = None
     consent_required: bool = False
     debug_mode: bool = False
