@@ -90,6 +90,17 @@ class TestPropertiesTransform:
             {"content_id": "B", "quantity": 1},
         ]
 
+    def test_purchase_payload_never_passes_order_total_as_price(self):
+        """A single-item order's `value` is the order total (shipping, tax,
+        fees). It must not be reported as the product's price."""
+        props = _to_tiktok_properties({
+            "content_ids": ["A"],
+            "num_items": 1,
+            "value": 300,
+            "order_id": "o1",
+        })
+        assert props["contents"] == [{"content_id": "A", "quantity": 1}]
+
     def test_blank_content_ids_are_dropped_everywhere(self):
         props = _to_tiktok_properties({
             "content_ids": ["A", "", "  "],

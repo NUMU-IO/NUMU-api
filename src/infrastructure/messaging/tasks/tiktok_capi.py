@@ -136,7 +136,16 @@ def _to_tiktok_properties(custom_data: dict[str, Any]) -> dict[str, Any]:
         line: dict[str, Any] = {"quantity": int(qty) if qty is not None else 1}
         if single and custom_data.get("content_name"):
             line["content_name"] = custom_data["content_name"]
-        if single and line["quantity"] == 1 and custom_data.get("value") is not None:
+        # `value` is a unit price only on browse events. A purchase-shaped
+        # payload (it carries `order_id`) totals shipping, tax and fees too,
+        # so passing it off as the product's price would inflate every
+        # single-item order's price in TikTok's catalog reporting.
+        if (
+            single
+            and line["quantity"] == 1
+            and "order_id" not in custom_data
+            and custom_data.get("value") is not None
+        ):
             line["price"] = custom_data["value"]
         contents = [{"content_id": cid, **line} for cid in content_ids]
     if contents:
