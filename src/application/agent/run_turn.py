@@ -53,6 +53,7 @@ async def stream_turn(
     locale: str = "en",
     provider=None,
     registry=None,
+    attachments: list[dict] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run one turn, yielding SSE events. Persists user + agent turns at the end.
 
@@ -128,6 +129,18 @@ async def stream_turn(
         conversation.id, limit=app_settings.agent_history_max_turns
     )
 
+    # Attachments reach the model as text on the user's message. A text-only
+    # model can still pass the URL into create_product/update_product images,
+    # which is the whole point of the URL path: the agent never touches bytes.
+    # A vision model additionally *sees* them — see `_message_to_wire`.
+    model_message = message
+    if attachments:
+        urls = "\n".join(
+            f"[attached image: {a['url']}]" for a in attachments if a.get("url")
+        )
+        if urls:
+            model_message = f"{message}\n{urls}"
+
     ctx = ToolContext(
         tenant_id=tenant_id,
         store_id=store_id,
@@ -149,7 +162,8 @@ async def stream_turn(
     started = time.monotonic()
     try:
         async for event in loop.run(
-            user_message=message,
+            user_message=model_message,
+            image_urls=[a["url"] for a in (attachments or []) if a.get("url")],
             history=_history_to_messages(history),
             ctx=ctx,
             result=result,

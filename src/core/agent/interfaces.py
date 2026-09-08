@@ -35,6 +35,10 @@ class ChatMessage:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
+    # Image URLs on a user message. Sent as OpenAI content blocks only when the
+    # configured model can actually see them; otherwise the URLs travel as text
+    # in `content`, which a text-only model can still pass to a tool.
+    image_urls: list[str] = field(default_factory=list)
 
 
 @dataclass

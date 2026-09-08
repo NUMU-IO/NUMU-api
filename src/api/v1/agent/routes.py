@@ -39,10 +39,23 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/stores/{store_id}/agent", tags=["Agent"])
 
 
+class ChatAttachment(BaseModel):
+    """A file the merchant attached, already uploaded and addressable by URL.
+
+    The agent never handles bytes: the hub uploads through the existing
+    customization-assets route and sends the resulting URL here.
+    """
+
+    type: Literal["image"] = "image"
+    url: str = Field(..., max_length=2048, pattern=r"^https://")
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     conversation_id: UUID | None = None
     locale: str | None = Field(default=None, pattern="^(ar|en)$")
+    # Optional and additive: older hub builds simply never send it.
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=4)
 
 
 def _sse(event_type: str, data: dict) -> str:
@@ -74,6 +87,7 @@ async def chat(
                 message=body.message,
                 conversation_id=body.conversation_id,
                 locale=locale,
+                attachments=[a.model_dump() for a in body.attachments],
             ):
                 yield _sse(event.type, event.data)
         except Exception as exc:  # noqa: BLE001 — never leak a stacktrace to the stream
