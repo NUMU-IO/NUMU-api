@@ -66,7 +66,23 @@ class LLMRateLimitError(Exception):
 
 
 class LLMProviderError(Exception):
-    """Non-retryable provider failure (bad request, auth, 5xx after retries)."""
+    """Non-retryable provider failure (bad request, auth, 5xx after retries).
+
+    ``kind`` separates the causes that need different human responses:
+
+    * ``auth``     — the key is missing, wrong, or revoked. Nobody is coming to
+                     fix this on its own; it needs an operator.
+    * ``credits``  — the account is out of money or over quota. Also an
+                     operator, and retrying is just a slower failure.
+    * ``upstream`` — the provider is having a bad day. Worth trying later.
+
+    All three used to arrive as one undifferentiated error, which meant a dead
+    API key and a dead provider looked identical in the logs.
+    """
+
+    def __init__(self, message: str, kind: str = "upstream") -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 class LLMProvider(Protocol):

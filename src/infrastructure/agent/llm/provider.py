@@ -30,6 +30,15 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _error_kind(status_code: int) -> str:
+    """Map an HTTP status to the cause a human would act on."""
+    if status_code in (401, 403):
+        return "auth"
+    if status_code == 402:
+        return "credits"
+    return "upstream"
+
+
 def _message_to_wire(msg: ChatMessage) -> dict[str, Any]:
     """Serialize a domain ChatMessage to the OpenAI chat-completions shape."""
     wire: dict[str, Any] = {"role": msg.role}
@@ -107,7 +116,9 @@ class OpenAICompatibleProvider:
                     headers=headers,
                 )
         except httpx.HTTPError as exc:  # network/timeout
-            raise LLMProviderError(f"LLM transport error: {exc}") from exc
+            raise LLMProviderError(
+                f"LLM transport error: {exc}", kind="upstream"
+            ) from exc
 
         if resp.status_code == 429:
             retry_after = resp.headers.get("retry-after")
@@ -116,11 +127,19 @@ class OpenAICompatibleProvider:
                 retry_after=float(retry_after) if retry_after else None,
             )
         if resp.status_code >= 400:
+            kind = _error_kind(resp.status_code)
             # Do not log the key; log status + a trimmed body for diagnostics.
+            # `kind` is the field to alert on: auth and credits mean the agent
+            # is down for everyone until a human acts, and no retry will help.
             logger.warning(
-                "agent_llm_error", status=resp.status_code, body=resp.text[:500]
+                "agent_llm_error",
+                status=resp.status_code,
+                kind=kind,
+                body=resp.text[:500],
             )
-            raise LLMProviderError(f"LLM provider returned {resp.status_code}")
+            raise LLMProviderError(
+                f"LLM provider returned {resp.status_code}", kind=kind
+            )
 
         data = resp.json()
         choice = (data.get("choices") or [{}])[0]

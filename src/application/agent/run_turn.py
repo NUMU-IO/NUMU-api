@@ -15,6 +15,7 @@ from uuid import UUID, uuid4
 
 from src.application.agent.agent_loop import AgentEvent, AgentLoop, AgentRunResult
 from src.application.agent.knowledge.system_map import build_system_map
+from src.application.agent.quota import consume_turn, quota_message
 from src.application.agent.scope import decline_message, off_domain_reason
 from src.application.agent.tool_registry import build_default_registry
 from src.application.agent.tools import ToolContext
@@ -76,6 +77,20 @@ async def stream_turn(
 
     yield AgentEvent("meta", {"conversation_id": str(conversation.id)})
 
+    # Cost ceiling, checked before the model is called and after the
+    # conversation exists so the merchant still sees the thread they opened.
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    if not await consume_turn(
+        RedisCacheService(),
+        store_id,
+        limit=app_settings.agent_max_turns_per_store_per_day,
+    ):
+        text = quota_message(locale)
+        yield AgentEvent("error", {"code": "quota_exceeded", "message": text})
+        yield AgentEvent("done", {"quota_exceeded": True})
+        return
+
     # Scope guardrail (Constitution VIII): decline clearly off-domain requests up
     # front — no model call, no open-domain answer.
     reason = off_domain_reason(message)
@@ -104,7 +119,9 @@ async def stream_turn(
         )
         return
 
-    history = await turn_repo.list_for_conversation(conversation.id)
+    history = await turn_repo.list_for_conversation(
+        conversation.id, limit=app_settings.agent_history_max_turns
+    )
 
     ctx = ToolContext(
         tenant_id=tenant_id,
@@ -120,6 +137,7 @@ async def stream_turn(
         registry or build_default_registry(),
         max_iterations=app_settings.agent_max_tool_iterations,
         temperature=app_settings.agent_llm_temperature,
+        tool_result_max_chars=app_settings.agent_tool_result_max_chars,
     )
 
     result = AgentRunResult()
