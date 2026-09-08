@@ -14,27 +14,36 @@ verification passed — not when the code was written.
 - [ ] **A2** `useNavConfig` defaults unknown keys to **hidden**, not visible (hub)
       · verify: remove a key from the config in dev → its feature disappears rather than appears
 
-## Phase B — Security fixes (branch: `fix/agent-confirm-authz`)
+## Phase B — Security fixes (branch: `fix/agent-confirm-authz`, PR #550)
 
-- [ ] **B1** Confirm and audit gate on the tool's own `required_permission`, not `themes.edit`
+- [x] **B1** Confirm and audit gate on the tool's own `required_permission`, not `themes.edit`
       · verify: a `themes.edit`-only member is refused on a product proposal; a member with only
         `discounts` can confirm their own discount proposal
-- [ ] **B2** Proposals carry `store_id`; a confirm from another store is refused
+- [x] **B2** Proposals carry `store_id`; a confirm from another store is refused
       · verify: propose on store A, confirm at `/stores/B/agent/confirm` → 409, nothing written
-- [ ] **B3** Confirming a theme change lands in the **draft**, not the live storefront
+- [x] **B3** Confirming a theme change lands in the **draft**, not the live storefront
       · verify: after confirm the draft holds the change and the storefront does not, until publish
 
-## Phase C — Survivability (branch: `fix/agent-loop-bounds`)
+### Found on the way
 
-- [ ] **C1** Conversation history is capped
+- [x] **B0** `set_tenant_context` no longer issues the Postgres-only `set_config` on the
+      SQLite test engine · this was breaking every agent integration test that reached an
+      apply path, on `dev`, before any of this work — confirmed by stashing and re-running
+
+## Phase C — Survivability (branch: `fix/agent-loop-bounds`, PR #551, stacked on #550)
+
+- [x] **C1** Conversation history is capped
       · verify: a 30-turn conversation still answers and its prompt size is flat
-- [ ] **C2** Tool results are truncated with a visible `truncated` marker
+- [x] **C2** Tool results are truncated with a visible `truncated` marker
       · verify: a store with 500 products produces a bounded prompt
-- [ ] **C3** Per-tenant turn cap, refused with a merchant-readable message
+- [x] **C3** Per-tenant turn cap, refused with a merchant-readable message
       · verify: the cap returns a clean SSE error, never a 500
-- [ ] **C4** Provider errors split into `auth` / `credits` / `upstream`; no retry on the first two
+- [x] **C4** Provider errors split into `auth` / `credits` / `upstream`; no retry on the first two
       · verify: a deliberately wrong key logs one structured `auth` line
 - [ ] **C5** nginx no longer cuts the agent stream at 60s
+      · `proxy_read_timeout 60s` on the apex and api server blocks. Deliberately deferred to
+        Phase D: it is an ops change on the box, untestable from the repo, and nothing streams
+        for long while there is no API key
       · verify: a turn that runs past 60s completes
 
 ## Phase D — Turn it on
