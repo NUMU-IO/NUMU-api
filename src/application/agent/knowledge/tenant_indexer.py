@@ -23,11 +23,26 @@ from src.infrastructure.agent.knowledge.repository import KnowledgeRepository
 
 logger = get_logger(__name__)
 
+# Products per embedding request. Small enough to stay well inside provider
+# payload limits, large enough that a 1,000-product catalogue is ~50 calls
+# rather than 1,000.
+_EMBED_BATCH = 20
+
 
 async def _fetch_rows(session: AsyncSession, sql: str, params: dict) -> list:
+    """Read one source, tolerating its absence.
+
+    The swallow is deliberate — a missing optional source should not stop the
+    rest of the index — but it cannot be done on the shared session. Postgres
+    aborts the whole transaction on a failed statement, so catching the
+    exception here and carrying on meant every later write, and every earlier
+    one, was discarded at commit while the caller was told it had indexed
+    everything. A savepoint keeps the failure local to this query.
+    """
     try:
-        result = await session.execute(text(sql), params)
-        return list(result.all())
+        async with session.begin_nested():
+            result = await session.execute(text(sql), params)
+            return list(result.all())
     except Exception as exc:  # noqa: BLE001 — absent table/column → skip that source
         logger.warning("tenant_index_query_failed", error=str(exc))
         return []
@@ -46,9 +61,22 @@ async def reindex_catalog(
     embedder = get_embedder()
     repo = KnowledgeRepository(session)
     count = 0
-    for pid, name, description in rows:
-        body = f"{name}\n\n{description}".strip()
-        embeddings = await embedder.embed_passages([body])
+
+    # One embedding request per product is one HTTP call per product. A store
+    # with a real catalogue rate-limits the provider long before it finishes —
+    # vionne's first run died on 429 partway through. The endpoint takes a
+    # list, so ask for a batch at a time.
+    bodies = [f"{name}\n\n{description}".strip() for _, name, description in rows]
+    vectors: list[list[float]] = []
+    for start in range(0, len(bodies), _EMBED_BATCH):
+        vectors.extend(
+            await embedder.embed_passages(bodies[start : start + _EMBED_BATCH])
+        )
+
+    for (pid, name, _description), body, vector in zip(
+        rows, bodies, vectors, strict=True
+    ):
+        embeddings = [vector]
         await repo.upsert_tenant_doc(
             tenant_id=tenant_id,
             source=f"tenant-catalog/{pid}",
@@ -68,12 +96,19 @@ async def reindex_policies(
     session: AsyncSession, *, tenant_id: UUID, store_id: UUID
 ) -> int:
     """Index store policies (return/shipping/etc.) as Layer-B 'policy' docs."""
-    rows = await _fetch_rows(
+    # Policies live in `stores.settings->'policies'`, the same JSONB the
+    # storefront reads. There is no `store_settings` table and there never
+    # was — this queried one, which is why policy indexing had never once
+    # returned a row.
+    raw = await _fetch_rows(
         session,
-        "SELECT key, value FROM public.store_settings "
-        "WHERE store_id = :sid AND key ILIKE '%policy%'",
+        "SELECT settings -> 'policies' FROM public.stores WHERE id = :sid",
         {"sid": str(store_id)},
     )
+    policies = (raw[0][0] if raw else None) or {}
+    if not isinstance(policies, dict):
+        return 0
+    rows = [(k, v) for k, v in policies.items() if isinstance(v, str) and v.strip()]
     embedder = get_embedder()
     repo = KnowledgeRepository(session)
     count = 0
