@@ -19,8 +19,12 @@ from src.api.v1.routes.admin.analytics_rollups import (
     router as analytics_rollups_router,
 )
 from src.api.v1.routes.admin.auth import router as admin_auth_router
+from src.api.v1.routes.admin.campaigns import router as campaigns_router
 from src.api.v1.routes.admin.customers import router as customers_router
 from src.api.v1.routes.admin.dashboard import router as dashboard_router
+from src.api.v1.routes.admin.dashboard_overview import (
+    router as dashboard_overview_router,
+)
 from src.api.v1.routes.admin.demos import router as demos_router
 from src.api.v1.routes.admin.email_templates import router as email_templates_router
 from src.api.v1.routes.admin.feedback import router as feedback_router
@@ -40,10 +44,12 @@ from src.api.v1.routes.admin.platform_settings import (
 )
 from src.api.v1.routes.admin.products import router as products_router
 from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
+from src.api.v1.routes.admin.risk import router as risk_router
 from src.api.v1.routes.admin.stores import router as stores_router
 from src.api.v1.routes.admin.subscription_payments import (
     router as subscription_payments_router,
 )
+from src.api.v1.routes.admin.support_cases import router as support_cases_router
 from src.api.v1.routes.admin.tracking import router as tracking_router
 from src.api.v1.routes.admin.users import router as admin_users_router
 from src.api.v1.routes.admin.waitlist import router as waitlist_router
@@ -65,6 +71,16 @@ router.include_router(feedback_router, prefix="/feedback", tags=["Admin - Feedba
 router.include_router(orders_router, prefix="/orders", tags=["Admin - Orders"])
 router.include_router(customers_router, prefix="/customers", tags=["Admin - Customers"])
 router.include_router(dashboard_router, prefix="/dashboard", tags=["Admin - Dashboard"])
+# Same prefix: the overview is part of the dashboard surface, it just lives in
+# its own module because it is a screen-shaped payload rather than a statistic.
+router.include_router(
+    dashboard_overview_router, prefix="/dashboard", tags=["Admin - Dashboard"]
+)
+router.include_router(risk_router, prefix="/risk", tags=["Admin - Trust & risk"])
+router.include_router(campaigns_router, prefix="/campaigns", tags=["Admin - Campaigns"])
+router.include_router(
+    support_cases_router, prefix="/support-cases", tags=["Admin - Support cases"]
+)
 router.include_router(products_router, prefix="/products", tags=["Admin - Products"])
 router.include_router(email_templates_router, tags=["Admin - Email Templates"])
 router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
