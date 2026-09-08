@@ -177,6 +177,7 @@ class ProposalRepository:
             tool_name=m.tool_name,
             params=m.params,
             diff=m.diff,
+            store_id=m.store_id,
             based_on_theme_version=m.based_on_theme_version,
             status=ProposalStatus(m.status),
             created_at=m.created_at,
@@ -191,6 +192,7 @@ class ProposalRepository:
             tool_name=proposal.tool_name,
             params=proposal.params,
             diff=proposal.diff,
+            store_id=proposal.store_id,
             based_on_theme_version=proposal.based_on_theme_version,
             status=proposal.status.value,
         )

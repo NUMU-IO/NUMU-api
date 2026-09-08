@@ -164,6 +164,7 @@ async def stream_turn(
                 tool_name=pp["tool_name"],
                 params=pp["params"],
                 diff=pp["diff"],
+                store_id=store_id,
                 based_on_theme_version=pp.get("based_on_theme_version"),
             )
         )

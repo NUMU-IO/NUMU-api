@@ -135,6 +135,7 @@ async def test_propose_confirm_apply_audit_undo(test_session, monkeypatch):
                 tool_name="add_theme_section",
                 params=result.proposal["params"],
                 diff=result.proposal["diff"],
+                store_id=store_id,
                 based_on_theme_version=result.proposal["based_on_theme_version"],
             )
         )
@@ -150,7 +151,11 @@ async def test_propose_confirm_apply_audit_undo(test_session, monkeypatch):
             model_used="fake",
         )
         assert applied["applied"] is True
-        assert "testimonials-0" in fake.published["templates"]["home"]["order"]
+        # Confirm writes the draft the customizer reads; the storefront only
+        # changes when the merchant presses Update.
+        assert applied["published"] is False
+        assert "testimonials-0" in fake.draft["templates"]["home"]["order"]
+        assert "testimonials-0" not in fake.published["templates"]["home"]["order"]
 
         # Exactly one applied audit; proposal now applied (SC-002/SC-003).
         audit = await AuditRepository(test_session).get_last_applied_for_conversation(
@@ -171,6 +176,6 @@ async def test_propose_confirm_apply_audit_undo(test_session, monkeypatch):
             model_used="fake",
         )
         assert undone["undone"] is True
-        assert "testimonials-0" not in fake.published["templates"]["home"]["order"]
+        assert "testimonials-0" not in fake.draft["templates"]["home"]["order"]
     finally:
         set_tenant_id(None)

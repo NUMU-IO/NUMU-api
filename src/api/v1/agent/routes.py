@@ -18,6 +18,7 @@ from starlette.responses import StreamingResponse
 from src.api.v1.agent.deps import AgentRequestContext, get_agent_context
 from src.application.agent.proposals import (
     NothingToUndoError,
+    PermissionDeniedError,
     ProposalError,
     StaleProposalError,
     apply_proposal,
@@ -31,8 +32,6 @@ from src.infrastructure.agent.persistence.repositories import (
     ConversationRepository,
 )
 from src.infrastructure.database.connection import set_tenant_id
-
-_WRITE_PERMISSION = "themes.edit"
 
 logger = get_logger(__name__)
 
@@ -122,18 +121,6 @@ class UndoRequest(BaseModel):
     conversation_id: UUID
 
 
-async def _require_write(ctx: AgentRequestContext) -> None:
-    # Re-check at apply time (fail closed) — never trust the proposal step alone.
-    if not await ctx.has_permission(_WRITE_PERMISSION):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "forbidden",
-                "message": f"Missing permission: {_WRITE_PERMISSION}",
-            },
-        )
-
-
 @router.post("/confirm")
 async def confirm(
     body: ConfirmRequest,
@@ -142,7 +129,6 @@ async def confirm(
     if body.decision == "decline":
         return await decline_proposal(ctx.session, proposal_id=body.proposal_id)
 
-    await _require_write(ctx)
     try:
         return await apply_proposal(
             ctx.session,
@@ -151,6 +137,12 @@ async def confirm(
             tenant_id=ctx.tenant_id,
             conversation_id=None,
             proposal_id=body.proposal_id,
+            has_permission=ctx.has_permission,
+        )
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "message": exc.message},
         )
     except StaleProposalError as exc:
         raise HTTPException(
@@ -202,7 +194,6 @@ async def undo(
     body: UndoRequest,
     ctx: Annotated[AgentRequestContext, Depends(get_agent_context)],
 ) -> dict:
-    await _require_write(ctx)
     try:
         return await undo_last(
             ctx.session,
@@ -210,6 +201,12 @@ async def undo(
             staff_id=ctx.staff_id,
             tenant_id=ctx.tenant_id,
             conversation_id=body.conversation_id,
+            has_permission=ctx.has_permission,
+        )
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "message": exc.message},
         )
     except NothingToUndoError as exc:
         raise HTTPException(
