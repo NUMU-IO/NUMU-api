@@ -56,6 +56,11 @@ class AgentTurnModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     tool_calls: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     model_used: Mapped[str | None] = mapped_column(String(128), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The provider returns these on every completion and we were dropping
+    # them, so "what does this store cost us" had no answer but a guess.
+    # Summed across the turn: one turn can be several model calls.
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class AgentActionProposalModel(Base, UUIDMixin, TimestampMixin, TenantMixin):

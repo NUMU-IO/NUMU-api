@@ -120,6 +120,8 @@ class TurnRepository:
             tool_calls=tool_calls,
             model_used=m.model_used,
             latency_ms=m.latency_ms,
+            prompt_tokens=m.prompt_tokens,
+            completion_tokens=m.completion_tokens,
             created_at=m.created_at,
         )
 
@@ -144,6 +146,8 @@ class TurnRepository:
             or None,
             model_used=turn.model_used,
             latency_ms=turn.latency_ms,
+            prompt_tokens=turn.prompt_tokens,
+            completion_tokens=turn.completion_tokens,
         )
         self.session.add(model)
         await self.session.flush()

@@ -242,6 +242,8 @@ async def stream_turn(
             tool_calls=result.tool_calls,
             model_used=result.model_used,
             latency_ms=latency_ms,
+            prompt_tokens=result.prompt_tokens or None,
+            completion_tokens=result.completion_tokens or None,
         )
     )
 
@@ -250,5 +252,7 @@ async def stream_turn(
         conversation_id=str(conversation.id),
         model=result.model_used,
         latency_ms=latency_ms,
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
         tool_calls=[tc.name for tc in result.tool_calls],
     )
