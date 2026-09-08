@@ -28,8 +28,6 @@ class TestBackCompat:
                 pixel_id="C4A2B1D3E4",
                 pixel_enabled=True,
                 api_enabled=True,
-                label="Primary",
-                role="primary",
             )
         ]
 

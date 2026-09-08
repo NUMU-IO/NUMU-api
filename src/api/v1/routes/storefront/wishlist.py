@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from src.api.dependencies.repositories import (
@@ -27,7 +27,10 @@ from src.api.dependencies.repositories import (
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.storefront._cart_owner import CartOwner, get_cart_owner
 from src.core.entities.product import PURCHASABLE_STATUSES
+from src.core.logging import get_logger
 from src.infrastructure.repositories import ProductRepository, StoreRepository
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -148,6 +151,7 @@ async def get_wishlist(
     operation_id="add_to_wishlist",
 )
 async def add_to_wishlist(
+    request: Request,
     body: WishlistItemRequest,
     owner: Annotated[CartOwner, Depends(get_cart_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
@@ -189,11 +193,95 @@ async def add_to_wishlist(
             variant_id=body.variant_id,
         )
 
+    if store is not None:
+        await _fan_out_add_to_wishlist(request, store, owner, body, product)
+
     items = await _resolve_wishlist_for_owner(owner, product_repo)
     return SuccessResponse(
         data=WishlistResponse(items=items, total=len(items)),
         message="Item added to wishlist",
     )
+
+
+async def _fan_out_add_to_wishlist(
+    request: Request,
+    store: Any,
+    owner: CartOwner,
+    body: WishlistItemRequest,
+    product: Any,
+) -> None:
+    """Send AddToWishlist to Meta and TikTok. Never fails the write.
+
+    Fired here rather than from the storefront because themes call this route
+    directly through the SDK's ``useWishlist`` — there is no host proxy to hang
+    it off, the way ``/api/cart/add`` carries AddToCart.
+
+    ``event_id`` is deterministic — ``wishlist-{store}-{owner}-{product}`` — so
+    the ad platforms and our own ``UNIQUE (store_id, pixel_id, event_id)`` both
+    collapse a re-add into the first one. This route is idempotent by design
+    (re-adding is a no-op), and without a stable id every duplicate POST would
+    have reported a fresh conversion signal.
+    """
+    from src.api.v1.routes.storefront.tracking import (
+        TrackPageViewRequest,
+        _maybe_enqueue_meta_capi,
+        _maybe_enqueue_tiktok_capi,
+    )
+    from src.core.services.conversion_provider import PROVIDER_KEYS
+    from src.infrastructure.database.connection import AsyncSessionLocal
+
+    # Keyed off the provider registry so a third ad platform cannot be added
+    # without this fan-out being noticed — the enqueue helpers are still
+    # per-vendor (see conversion_provider's module docstring on why).
+    enqueue_by_provider = {
+        "meta": _maybe_enqueue_meta_capi,
+        "tiktok": _maybe_enqueue_tiktok_capi,
+    }
+    missing = set(PROVIDER_KEYS) - set(enqueue_by_provider)
+    if missing:
+        logger.warning("wishlist_tracking_provider_unwired", extra={"keys": missing})
+
+    owner_key = owner.customer_id or owner.session_id or "anon"
+    price = getattr(product, "price", None)
+    track_body = TrackPageViewRequest(
+        path="/wishlist",
+        step="add_to_wishlist",
+        step_data={
+            "content_ids": [str(body.product_id)],
+            "content_type": "product",
+            "content_name": getattr(product, "name", None),
+            "currency": getattr(store, "default_currency", None) or "EGP",
+            **({"value": price / 100} if isinstance(price, int) else {}),
+        },
+        fingerprint=str(owner.session_id) if owner.session_id else None,
+        customer_id=str(owner.customer_id) if owner.customer_id else None,
+        event_id=f"wishlist-{store.id}-{owner_key}-{body.product_id}",
+        ttclid=request.cookies.get("ttclid"),
+        ttp=request.cookies.get("_ttp"),
+        fbp=request.cookies.get("_fbp"),
+        fbc=request.cookies.get("_fbc"),
+    )
+    ip = request.headers.get("cf-connecting-ip") or (
+        request.client.host if request.client else None
+    )
+    user_agent = request.headers.get("user-agent", "")
+
+    async with AsyncSessionLocal() as session:
+        for key in PROVIDER_KEYS:
+            enqueue = enqueue_by_provider.get(key)
+            if enqueue is None:
+                continue
+            try:
+                await enqueue(
+                    store=store,
+                    step="add_to_wishlist",
+                    body=track_body,
+                    ip=ip,
+                    user_agent=user_agent,
+                    session=session,
+                )
+            except Exception:  # noqa: BLE001 — tracking never breaks the write
+                logger.warning("wishlist_tracking_fanout_failed", exc_info=True)
 
 
 @router.delete(

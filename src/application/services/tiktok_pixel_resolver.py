@@ -25,8 +25,6 @@ class ResolvedTikTokPixel:
     pixel_id: str
     pixel_enabled: bool
     api_enabled: bool
-    label: str | None = None
-    role: str | None = None
 
 
 def resolve_tiktok_pixels(
@@ -63,8 +61,6 @@ def resolve_tiktok_pixels(
                     pixel_id=str(pid),
                     pixel_enabled=bool(p.get("pixel_enabled", True)),
                     api_enabled=bool(p.get("api_enabled", True)),
-                    label=p.get("label"),
-                    role=p.get("role"),
                 )
             )
     else:
@@ -75,8 +71,6 @@ def resolve_tiktok_pixels(
                     pixel_id=str(legacy_pid),
                     pixel_enabled=bool(tiktok_cfg.get("pixel_enabled", False)),
                     api_enabled=bool(tiktok_cfg.get("api_enabled", False)),
-                    label="Primary",
-                    role="primary",
                 )
             )
 

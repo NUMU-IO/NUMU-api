@@ -1,15 +1,15 @@
-"""COD-aware CompletePayment firing from order-status transitions (TikTok).
+"""COD-aware Purchase firing from order-status transitions (TikTok).
 
 Sibling of ``meta_capi_status_event_handler`` — subscribes to
-``OrderStatusChangedEvent`` and fires a TikTok Events API ``CompletePayment``
+``OrderStatusChangedEvent`` and fires a TikTok Events API ``Purchase``
 based on the per-store ``purchase_trigger`` config in
 ``store.settings.tracking.tiktok``:
 
-  * ``purchase_trigger`` (default ``None``) — when set, ``CompletePayment``
+  * ``purchase_trigger`` (default ``None``) — when set, ``Purchase``
     fires on the matching order-status transition. Backward-compatible: when
     ``None``, this handler is a no-op and the payment-webhook path
     (Paymob/Fawry/Fawaterak/Instapay/Kashier + COD collection) remains the sole
-    CompletePayment source.
+    Purchase source.
 
 For a COD-heavy store, ``purchase_trigger="delivered"`` means TikTok only sees
 real conversions (not no-show COD placements), so ROAS doesn't decay.
@@ -18,9 +18,9 @@ Dedup contract preserved: the payment webhook and this handler can both fire for
 the same order with the same ``event_id = str(order.id)`` — TikTok collapses
 them. For pure COD flow (no payment webhook), only this handler fires.
 
-TikTok has no ``lead_trigger`` (its ``SubmitForm`` is browser-only) and no
+TikTok has no ``lead_trigger`` (its ``Lead`` is browser-only) and no
 server Refund event, so — unlike the Meta handler — this fires only
-CompletePayment.
+Purchase.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ async def _load_store_and_order(
 async def handle_order_status_changed_for_tiktok_capi(
     event: OrderStatusChangedEvent,
 ) -> None:
-    """Fire TikTok CompletePayment when the order hits the configured status.
+    """Fire TikTok Purchase when the order hits the configured status.
 
     Fail-open: a fire that errors must never break the order-status update
     flow. The hourly orphan sweep is the backstop for missed events.
@@ -110,7 +110,7 @@ async def handle_order_status_changed_for_tiktok_capi(
                 return
 
             await enqueue_tiktok_capi_event_for_order(
-                session, order, event_name="CompletePayment"
+                session, order, event_name="Purchase"
             )
             log.info("tiktok_capi_complete_payment_enqueued_from_status_change")
     except Exception as exc:  # noqa: BLE001 — fail-open

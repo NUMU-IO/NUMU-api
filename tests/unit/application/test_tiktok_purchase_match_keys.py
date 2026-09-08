@@ -1,4 +1,4 @@
-"""The TikTok CompletePayment's identity match keys.
+"""The TikTok Purchase's identity match keys.
 
 These are the keys TikTok joins a conversion back to the ad click with. The
 Meta sibling (``meta_capi_purchase_dispatcher``) had already been corrected on

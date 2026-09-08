@@ -588,6 +588,12 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.tiktok_capi_sweep_orphaned_purchases",
         "schedule": crontab(minute=25),  # hourly at :25
     },
+    # TikTok Events API log retention — the table had no expiry and only ever
+    # grew. 04:10 UTC (06:10 Cairo), after the other nightly purges.
+    "tiktok-capi-purge-event-log": {
+        "task": "tasks.tiktok_capi_purge_event_log",
+        "schedule": crontab(hour=4, minute=10),
+    },
     # ─── offers-v2: promotion lifecycle ─────────────────────────────────
     # Sweeping the promotion table every 5 min keeps the storefront and
     # the merchant list in sync with `starts_at` / `ends_at` without

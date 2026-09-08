@@ -496,6 +496,29 @@ class TestMENAPhoneNormalization:
         # legacy behavior assumes Egypt. Strip leading 0, prepend 20.
         assert _normalize_mena_phone("0501234567") == "20501234567"
 
+    def test_international_access_prefix_is_stripped(self):
+        """ "00" + CC is the same number as "+" + CC. Before this was handled,
+        "00201001234567" fell through to the national branch and came back as
+        "200201001234567" — a digest that could never match, on both the Meta
+        and TikTok rails, which share this normalizer."""
+        assert _normalize_mena_phone("00201001234567") == "201001234567"
+        assert _normalize_mena_phone("00 20 100 123 4567") == "201001234567"
+        assert _normalize_mena_phone("00966501234567") == "966501234567"
+        # Every spelling of one Egyptian number collapses to one digest.
+        assert (
+            len({
+                _normalize_mena_phone(p)
+                for p in (
+                    "+201001234567",
+                    "201001234567",
+                    "01001234567",
+                    "00201001234567",
+                    "0020 100 123 4567",
+                )
+            })
+            == 1
+        )
+
     def test_empty_input(self):
         assert _normalize_mena_phone("") == ""
         assert _normalize_mena_phone("abc") == ""

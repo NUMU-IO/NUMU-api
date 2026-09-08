@@ -713,6 +713,21 @@ class Settings(BaseSettings):
     r2_backup_bucket_name: str = "numu-db-backups"
     backup_retention_days: int = 30
 
+    # How long an ad-platform delivery log row is kept — `meta_event_log` and
+    # `tiktok_event_log` both. They hold the same class of data: SHA-256
+    # digests of shopper PII plus delivery metadata, never raw values.
+    #
+    # ONE setting on purpose. These were 90 (Meta, hardcoded) and 180 (TikTok)
+    # — two different answers to the same question about the same data, which
+    # is the first thing a compliance review would ask about. Unified on the
+    # SHORTER of the two: shortening retention of PII-adjacent data is the safe
+    # direction to move unilaterally, lengthening it is not.
+    #
+    # "Hashed" is not "anonymous", so the PERIOD ITSELF IS A LEGAL DECISION,
+    # not an engineering one. 90 days is what Meta's rail has actually been
+    # running; treat it as the current behaviour, not as approved policy.
+    ad_event_log_retention_days: int = 90
+
     # Local-dev asset base URL. When object storage is NOT configured (see
     # ``object_storage_configured``), uploads are written to
     # ``<project_root>/uploads`` and served by the FastAPI ``/uploads`` static
