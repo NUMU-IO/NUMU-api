@@ -31,6 +31,25 @@ _OFF_DOMAIN_PATTERNS = [
     ),
     re.compile(r"\btell\s+me\s+a\s+joke\b", re.I),
     re.compile(r"\b(solve|do)\s+my\s+(homework|math)\b", re.I),
+    # Arabic. Everything above is English-only, and the merchants this agent is
+    # built for type in Egyptian Arabic — so "اكتبلي كود بايثون" walked straight
+    # past the guard and the model answered it with a full Python tutorial, the
+    # system prompt notwithstanding. A prompt is a request; this is the gate.
+    #
+    # No \b here: Arabic script has no word boundary in the sense the engine
+    # means, so these match the words themselves.
+    re.compile(
+        r"(اكتب|إكتب|اعمل|أعمل|اعملي|صمم)\s*(لي|لى|لية)?\s*"
+        r"(كود|سكريبت|برنامج|دالة|فانكشن)"
+    ),
+    re.compile(r"(كود|سكريبت)\s*(بايثون|جافا|جافاسكريبت|python|java|php)", re.I),
+    re.compile(r"(اتصرف|تصرف|اتكلم)\s*(كأنك|زي|مثل)\s*(شات|chatgpt|جي بي تي)", re.I),
+    re.compile(r"(تجاهل|انسى|إنسى)\s*(كل)?\s*(التعليمات|الأوامر|القواعد|تعليماتك)"),
+    re.compile(
+        r"(اكتب|إكتب|ألف|الف)\s*(لي|لى|لية)?\s*(قصة|قصيدة|مقال|أغنية|اغنية|رواية)"
+    ),
+    re.compile(r"(قولي|قوللي|احكيلي|إحكيلي)\s*(لي|لى)?\s*(نكتة|نكته)"),
+    re.compile(r"(حل|اعمل|أعمل)\s*(لي|لى|لية)?\s*(الواجب|واجبي|المسألة|مسألة)"),
 ]
 
 _DECLINE_EN = (

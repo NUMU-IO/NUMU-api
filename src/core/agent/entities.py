@@ -101,6 +101,7 @@ class ActionProposal:
     tool_name: str
     params: dict
     diff: dict
+    store_id: UUID | None = None
     based_on_theme_version: str | None = None
     status: ProposalStatus = ProposalStatus.PENDING
     created_at: datetime | None = None

@@ -9,6 +9,7 @@ rejected-at-apply) write produces exactly one immutable audit record (FR-010).
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from uuid import UUID, uuid4
 
 from src.application.dto.coupon import CreateCouponDTO
@@ -52,6 +53,46 @@ class StaleProposalError(ProposalError):
 
 class NothingToUndoError(ProposalError):
     pass
+
+
+class PermissionDeniedError(ProposalError):
+    """Caller lacks the permission the proposal's own tool requires."""
+
+
+# Confirm used to gate every proposal on a single hardcoded "themes.edit".
+# That is wrong in both directions once more than one kind of write exists: a
+# theme editor with no product rights could confirm a price change, and a
+# product manager without themes.edit was refused their own. Each CONFIRM-tier
+# spec already declares `required_permission`, so ask the registry.
+#
+# Fails closed: an unknown tool, or one declaring no permission, still needs the
+# strictest gate rather than none.
+_FALLBACK_PERMISSION = "themes.edit"
+
+
+@lru_cache(maxsize=1)
+def _registry():
+    # Imported lazily: tool modules import from this package, so a module-level
+    # import here would close the cycle.
+    from src.application.agent.tool_registry import build_default_registry
+
+    return build_default_registry()
+
+
+def permission_for_tool(tool_name: str) -> str:
+    spec = _registry().get(tool_name)
+    if spec is None or not spec.required_permission:
+        return _FALLBACK_PERMISSION
+    return spec.required_permission
+
+
+async def _require_tool_permission(has_permission, tool_name: str) -> None:
+    """Re-check at apply time — never trust the proposal step alone."""
+    if has_permission is None:
+        return
+    needed = permission_for_tool(tool_name)
+    if not await has_permission(needed):
+        raise PermissionDeniedError("forbidden", f"Missing permission: {needed}")
 
 
 _SUPPORTED_WRITE_TOOLS = ("add_theme_section", "update_theme_setting")
@@ -242,6 +283,7 @@ async def apply_proposal(
     conversation_id: UUID | None,
     proposal_id: UUID,
     model_used: str | None = None,
+    has_permission=None,
 ) -> dict:
     proposal_repo = ProposalRepository(session)
     audit_repo = AuditRepository(session)
@@ -251,6 +293,18 @@ async def apply_proposal(
         raise ProposalError("not_found", "Proposal not found.")
     if proposal.status != ProposalStatus.PENDING:
         raise ProposalError("already_resolved", f"Proposal is {proposal.status.value}.")
+
+    await _require_tool_permission(has_permission, proposal.tool_name)
+
+    # Confirm takes its store from the URL. Without this a tenant with two
+    # stores could propose against A and confirm at /stores/B/agent/confirm,
+    # and the change would land on B — the params were built against A's draft.
+    # A proposal predating the column has no store to check against, so it is
+    # refused rather than trusted.
+    if proposal.store_id != store_id:
+        raise ProposalError(
+            "wrong_store", "This proposal was made for a different store."
+        )
 
     # Non-theme actions (Pillar 2) take the generic use-case apply path.
     if proposal.tool_name in ACTION_APPLIERS:
@@ -314,10 +368,13 @@ async def apply_proposal(
             "The theme changed since this was proposed. Please re-preview.",
         ) from None
 
-    published = await service.publish(store_id=store_id, user_id=staff_id)
-
-    # publish() commits, which drops the transaction-scoped app.current_tenant GUC;
-    # re-apply it so the audit/proposal writes below pass FORCE RLS.
+    # Deliberately NOT published. A confirmed agent change lands in the same
+    # draft the customizer edits; the merchant presses Update when they have
+    # looked at it. Publishing here was the only path where a model-initiated
+    # change reached shoppers with no human in between, and it contradicted the
+    # blast radius this feature was signed off on ("the store's draft only").
+    # autosave_draft commits, which drops the transaction-scoped
+    # app.current_tenant GUC; re-apply it so the writes below pass FORCE RLS.
     await set_tenant_context(session, tenant_id)
 
     audit = await audit_repo.add(
@@ -341,9 +398,9 @@ async def apply_proposal(
     )
     return {
         "applied": True,
+        "published": False,
         "proposal_id": str(proposal_id),
         "audit_id": str(audit.id),
-        "revision_id": published.get("revision_id"),
     }
 
 
@@ -365,6 +422,7 @@ async def undo_last(
     tenant_id: UUID,
     conversation_id: UUID,
     model_used: str | None = None,
+    has_permission=None,
 ) -> dict:
     audit_repo = AuditRepository(session)
     last = await audit_repo.get_last_applied_for_conversation(conversation_id)
@@ -372,6 +430,9 @@ async def undo_last(
         raise NothingToUndoError(
             "nothing_to_undo", "There is no applied change to undo."
         )
+
+    # Reversing a write needs the same permission the write itself needed.
+    await _require_tool_permission(has_permission, last.tool_name)
 
     service = build_v3_service(session)
     draft_res = await service.get_draft_with_etag(store_id)
@@ -383,10 +444,11 @@ async def undo_last(
         change_summary="Agent: undo last change",
         expected_etag=draft_res.get("etag"),
     )
-    await service.publish(store_id=store_id, user_id=staff_id)
+    # Not published, for the same reason apply_proposal does not: undo restores
+    # the draft and the merchant decides when it goes live.
     await set_tenant_context(
         session, tenant_id
-    )  # re-apply RLS GUC dropped by publish's commit
+    )  # re-apply RLS GUC dropped by autosave's commit
 
     audit = await audit_repo.add(
         AuditRecord(

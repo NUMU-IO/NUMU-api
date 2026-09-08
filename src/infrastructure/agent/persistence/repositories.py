@@ -130,6 +130,7 @@ class TurnRepository:
             tenant_id=tenant_id,
             conversation_id=turn.conversation_id,
             role=turn.role.value,
+            **({"created_at": turn.created_at} if turn.created_at else {}),
             content=turn.content,
             tool_calls=[
                 {
@@ -149,17 +150,36 @@ class TurnRepository:
         await self.session.refresh(model)
         return self._to_entity(model)
 
-    async def list_for_conversation(self, conversation_id: UUID) -> list[Turn]:
+    async def list_for_conversation(
+        self, conversation_id: UUID, *, limit: int | None = None
+    ) -> list[Turn]:
+        """Turns oldest-first. With ``limit``, the most recent ``limit`` of them.
+
+        The limit exists because every turn re-sends the history to the model:
+        uncapped, a long thread costs more on each message until it exceeds the
+        context window and stops working. Newest are kept and returned in
+        chronological order, so the model still reads a coherent conversation.
+        """
         tenant_id = _require_tenant()
+        where = (
+            AgentTurnModel.tenant_id == tenant_id,
+            AgentTurnModel.conversation_id == conversation_id,
+        )
+        if limit is None:
+            result = await self.session.execute(
+                select(AgentTurnModel)
+                .where(*where)
+                .order_by(AgentTurnModel.created_at.asc(), AgentTurnModel.id.asc())
+            )
+            return [self._to_entity(m) for m in result.scalars().all()]
+
         result = await self.session.execute(
             select(AgentTurnModel)
-            .where(
-                AgentTurnModel.tenant_id == tenant_id,
-                AgentTurnModel.conversation_id == conversation_id,
-            )
-            .order_by(AgentTurnModel.created_at.asc())
+            .where(*where)
+            .order_by(AgentTurnModel.created_at.desc(), AgentTurnModel.id.desc())
+            .limit(limit)
         )
-        return [self._to_entity(m) for m in result.scalars().all()]
+        return [self._to_entity(m) for m in reversed(result.scalars().all())]
 
 
 class ProposalRepository:
@@ -177,6 +197,7 @@ class ProposalRepository:
             tool_name=m.tool_name,
             params=m.params,
             diff=m.diff,
+            store_id=m.store_id,
             based_on_theme_version=m.based_on_theme_version,
             status=ProposalStatus(m.status),
             created_at=m.created_at,
@@ -191,6 +212,7 @@ class ProposalRepository:
             tool_name=proposal.tool_name,
             params=proposal.params,
             diff=proposal.diff,
+            store_id=proposal.store_id,
             based_on_theme_version=proposal.based_on_theme_version,
             status=proposal.status.value,
         )
