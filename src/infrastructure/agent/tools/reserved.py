@@ -15,7 +15,7 @@ from src.core.agent.entities import RiskTier
 _RESERVED: list[tuple[str, str]] = [
     ("generate_custom_section", "Generate a brand-new custom-coded theme section"),
     # create_discount is now a real gated action tool (Pillar 2).
-    ("update_product", "Bulk-update product fields"),
+    # update_product is now a real gated action tool (Pillar 2).
 ]
 
 _OPEN_SCHEMA: dict[str, Any] = {

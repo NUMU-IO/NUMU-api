@@ -1,0 +1,80 @@
+{
+  "description": "Golden set: merchant question -> which tool the agent must reach for first. expect_tools lists acceptable first calls; expect_args_subset (optional) must appear in the call's arguments; expect_no_tool marks conversational turns.",
+  "cases": [
+    {
+      "id": "orders-today-en",
+      "locale": "en",
+      "message": "How many orders do I have today?",
+      "expect_tools": ["get_orders"],
+      "expect_args_subset": {"period": "today"}
+    },
+    {
+      "id": "orders-today-ar",
+      "locale": "ar",
+      "message": "كام أوردر عندي النهاردة؟",
+      "expect_tools": ["get_orders"],
+      "expect_args_subset": {"period": "today"}
+    },
+    {
+      "id": "store-performance-en",
+      "locale": "en",
+      "message": "How is my store doing this month compared to last month?",
+      "expect_tools": ["get_store_analytics"]
+    },
+    {
+      "id": "store-performance-ar",
+      "locale": "ar",
+      "message": "شغل المتجر عامل ازاي الشهر ده مقارنة بالشهر اللي فات؟",
+      "expect_tools": ["get_store_analytics"]
+    },
+    {
+      "id": "abandoned-carts-en",
+      "locale": "en",
+      "message": "How many abandoned carts do I have and how much are they worth?",
+      "expect_tools": ["get_abandoned_checkouts"]
+    },
+    {
+      "id": "abandoned-carts-ar",
+      "locale": "ar",
+      "message": "في كام عربية متروكة عندي وقيمتها كام؟",
+      "expect_tools": ["get_abandoned_checkouts"]
+    },
+    {
+      "id": "howto-paymob-en",
+      "locale": "en",
+      "message": "How do I set up Paymob card payments on my store?",
+      "expect_tools": ["search_knowledge"]
+    },
+    {
+      "id": "howto-paymob-ar",
+      "locale": "ar",
+      "message": "ازاي أفعّل الدفع بالكارت عن طريق باي موب في متجري؟",
+      "expect_tools": ["search_knowledge"]
+    },
+    {
+      "id": "products-list-en",
+      "locale": "en",
+      "message": "Which of my products are low on stock?",
+      "expect_tools": ["get_products"]
+    },
+    {
+      "id": "create-coupon-en",
+      "locale": "en",
+      "message": "Create a 15% discount coupon called RAMADAN15",
+      "expect_tools": ["create_discount"],
+      "expect_args_subset": {"code": "RAMADAN15", "discount_type": "percentage"}
+    },
+    {
+      "id": "update-price-needs-lookup-en",
+      "locale": "en",
+      "message": "Change the price of my black hoodie to 450",
+      "expect_tools": ["get_products", "update_product"]
+    },
+    {
+      "id": "greeting-no-tool-en",
+      "locale": "en",
+      "message": "hello!",
+      "expect_no_tool": true
+    }
+  ]
+}

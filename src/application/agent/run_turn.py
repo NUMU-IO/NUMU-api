@@ -71,8 +71,13 @@ async def stream_turn(
             )
             return
     else:
+        # Title = the opening message, trimmed — gives the history list a
+        # human-scannable label without an extra model call.
+        title = " ".join(message.split())[:60] or None
         conversation = await conv_repo.create(
-            Conversation(id=uuid4(), tenant_id=tenant_id, staff_id=staff_id)
+            Conversation(
+                id=uuid4(), tenant_id=tenant_id, staff_id=staff_id, title=title
+            )
         )
 
     yield AgentEvent("meta", {"conversation_id": str(conversation.id)})
