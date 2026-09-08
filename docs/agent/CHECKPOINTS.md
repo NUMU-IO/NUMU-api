@@ -52,7 +52,7 @@ verification passed — not when the code was written.
       · **not yet proven end to end** — a stream that actually runs past 60s needs an API
         key and a real turn, so the final proof belongs to D4
 
-## Phase D — Turn it on
+## Phase D — Turn it on (blocked on D3: needs #552 in the image)
 
 - [ ] **D1** Model chosen and paid for (Yousef)
       · the shortest path is already proven: prod runs `gemini-3.1-flash-lite-preview` on
@@ -61,12 +61,24 @@ verification passed — not when the code was written.
         requirement. Setting `AGENT_LLM_*` to the same three values is all D2 needs.
       · open question is the tier, not the key: the free tier trains on inputs, which is
         what D2 has to rule on before merchant and shopper data goes through it
-- [ ] **D2** `AGENT_*` + `AGENT_EMBED_*` set on the box; api + celery restarted
-      · verify: `grep '^AGENT_' /opt/numu-api/.env` is non-empty
+- [x] **D2** `AGENT_*` + `AGENT_EMBED_*` set on the box; api + celery **recreated** · 2026-09-08
+      · reuses the platform's existing `GOOGLE_AI_API_KEY` — no second vendor, no HF token
+      · `docker restart` does NOT re-read `env_file`; `docker compose up -d` is required
+      · verified in the running container: model, base url and both keys resolve
 - [ ] **D3** Knowledge seeded and tenant-indexed for vionne and rabbit
+      · **blocked**: seeding with the currently deployed image would request no
+        `dimensions`, get 3072-wide vectors and fail against a `vector(1024)` column.
+        Needs #552 in the image first.
       · verify: `numu_knowledge_chunks` > 0; `search_knowledge` cites a real corpus file
-- [ ] **D4** Eval 12/12 + ten Arabic replies read by a human
-      · verify: `AGENT_EVAL=1 pytest tests/evals -q`
+- [~] **D4** Eval **12/12** against production's model, on #411 merged with the fix branches
+      · the ten Arabic replies were read, and they failed the first time: with no tools
+        attached the model introduced itself as a general AI, wrote Python on request, and
+        recommended Salla/Zid/Shopify to a NUMU merchant. With tools attached and the
+        guard fixed it is grounded and stays on NUMU
+      · **still open:** the register is MSA rather than Egyptian colloquial. Not a blocker
+        for correctness, but it is not the voice the system prompt asks for
+      · **re-read the replies after D3** — the corpus is empty, so every how-to answer is
+        currently the model improvising
 - [ ] **D5** Unhide the panel — only after D4
 - [ ] **D6** Dead-droplet env sync deleted from `cd.yml`; #412 closed
 
