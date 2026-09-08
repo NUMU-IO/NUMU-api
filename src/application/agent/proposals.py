@@ -365,9 +365,86 @@ async def _undo_send_cart_recovery(
     raise NothingToUndoError("cannot_undo", "A sent recovery email can't be unsent.")
 
 
+async def _apply_create_product(
+    session, *, store_id: UUID, staff_id: UUID, params: dict
+) -> dict:
+    """Create the proposed product through the same use case the API route runs.
+
+    Drafts by default (the tool sets it): a model that misheard a price must not
+    be able to put a live, buyable product in front of shoppers on one
+    confirmation. Publishing stays a deliberate act in the dashboard.
+    """
+    from src.application.dto.product import CreateProductDTO
+    from src.application.use_cases.products.create_product import (
+        CreateProductUseCase,
+    )
+    from src.infrastructure.repositories.category_repository import (
+        CategoryRepository,
+    )
+    from src.infrastructure.repositories.product_repository import ProductRepository
+
+    dto = CreateProductDTO(
+        name=str(params["name"]),
+        price=_to_decimal(params["price"]),
+        compare_at_price=(
+            _to_decimal(params["compare_at_price"])
+            if params.get("compare_at_price") is not None
+            else None
+        ),
+        quantity=int(params.get("quantity") or 0),
+        description=params.get("description"),
+        category_id=(
+            UUID(str(params["category_id"])) if params.get("category_id") else None
+        ),
+        images=list(params.get("images") or []),
+        status=params.get("status") or "draft",
+    )
+    use_case = CreateProductUseCase(
+        product_repository=ProductRepository(session),
+        store_repository=StoreRepository(session),
+        category_repository=CategoryRepository(session),
+    )
+    created = await use_case.execute(dto, store_id, staff_id)
+    return {
+        "summary": f"Created product {created.name}",
+        "after_state": {
+            "product_id": str(created.id),
+            "name": created.name,
+            "status": getattr(created.status, "value", str(created.status)),
+        },
+        "result": {"product_id": str(created.id), "name": created.name},
+    }
+
+
+async def _undo_create_product(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    """Undo a creation by deleting the product it created."""
+    from src.application.use_cases.products.delete_product import (
+        DeleteProductUseCase,
+    )
+    from src.infrastructure.repositories.product_repository import ProductRepository
+
+    after = audit.after_state or {}
+    product_id = after.get("product_id")
+    if not product_id:
+        raise NothingToUndoError("nothing_to_undo", "No created product recorded.")
+
+    use_case = DeleteProductUseCase(
+        product_repository=ProductRepository(session),
+        store_repository=StoreRepository(session),
+    )
+    await use_case.execute(UUID(str(product_id)), staff_id, store_id)
+    return {
+        "summary": f"Deleted product {after.get('name') or product_id}",
+        "after_state": {},
+    }
+
+
 # tool_name → applier. Tools listed here follow the generic (non-theme) path.
 ACTION_APPLIERS = {
     "create_discount": _apply_create_discount,
+    "create_product": _apply_create_product,
     "update_product": _apply_update_product,
     "send_cart_recovery": _apply_send_cart_recovery,
 }
@@ -377,6 +454,7 @@ ACTION_APPLIERS = {
 # have an entry (else its audit's before_state would be pushed into the theme).
 ACTION_UNDOERS = {
     "create_discount": _undo_create_discount,
+    "create_product": _undo_create_product,
     "update_product": _undo_update_product,
     "send_cart_recovery": _undo_send_cart_recovery,
 }
