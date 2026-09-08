@@ -101,14 +101,30 @@ verification passed — not when the code was written.
 
 ## Phase E — Land the open work
 
-- [ ] **E1** api #411 merged (after B)
-- [ ] **E2** hub #173 merged
-- [ ] **E3** Promoted; verified by content, not by a green pipeline
+- [x] **E1** api #411 merged · after #550, as required
+- [x] **E2** hub #173 merged
+- [x] **E3** Promoted and verified by content: 15 tools registered in the running
+      container, real corpus-grounded answers, migration at head
 
 ## Phase F–J — Features and hardening
 
-- [ ] **F** `create_product`
-- [ ] **G** Photos (URL path, then vision)
-- [ ] **H** Theme section edit + remove
-- [ ] **I** Knowledge freshness (Celery by default; n8n only if §1's conditions apply)
-- [ ] **J** Token counts persisted; alerts on `auth` / `credits`
+All open as PRs, none merged yet.
+
+- [x] **F** `create_product` · api #557 + hub #274 — CONFIRM-tier, draft by default,
+      undoer deletes; 14/14 evals with the two new golden cases
+- [x] **G** Photos · api #558 + hub #275 — `product_image` asset type, `attachments`
+      on the chat request, vision blocks behind `agent_llm_vision` (off)
+- [x] **H** Section edit + remove · api #559 — 17 tools; deliberately does **not**
+      apply schema defaults on update, which would have reset settings the merchant
+      never mentioned
+- [x] **I** Knowledge freshness · api #560 — nightly Celery beat at 03:40; n8n if
+      §1's conditions ever apply
+- [x] **J** Token counts persisted and `auth`/`credits` alert · api #560
+
+### Found on the way
+
+- `Log.alert` tags its own payload with `kind="alert"`, so passing our own `kind=`
+  raised `TypeError` **inside the error handler** — on the one path that exists to
+  report a dead API key. Renamed to `failure=`.
+- `reindex_tenant` reported 15 catalog docs and wrote none: a query against a
+  non-existent table aborted the transaction and discarded the work (api #556, merged).
