@@ -84,6 +84,8 @@ class Turn:
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     model_used: str | None = None
     latency_ms: int | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
     created_at: datetime | None = None
 
 

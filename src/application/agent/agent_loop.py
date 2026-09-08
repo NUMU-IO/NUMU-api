@@ -72,6 +72,10 @@ class AgentRunResult:
     reply_text: str = ""
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     model_used: str | None = None
+    # Summed over the turn: one turn is up to `max_iterations` model calls,
+    # and the cost of the turn is all of them, not the last one.
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     # Set when a CONFIRM-tier tool produced a gated write awaiting confirmation.
     pending_proposal: dict | None = None
 
@@ -134,8 +138,18 @@ class AgentLoop:
                 # auth/credits are an operator problem, not a merchant one, and
                 # they take the agent down for everyone — log them loudly enough
                 # to alert on. The merchant still gets one calm sentence.
-                log = logger.error if kind in ("auth", "credits") else logger.warning
-                log("agent_loop_provider_error", kind=kind, error=str(exc))
+                if kind in ("auth", "credits"):
+                    # A human has to act, and until they do the assistant is
+                    # down for every merchant — that is alert-worthy, not a
+                    # line in a log nobody is reading at 2am.
+                    # NOT `kind=`: Log.alert tags its own payload with
+                    # kind="alert", and passing ours collides — which turned a
+                    # dead API key into a TypeError inside the error handler.
+                    logger.alert("agent_llm_unavailable", failure=kind, error=str(exc))
+                else:
+                    logger.warning(
+                        "agent_loop_provider_error", kind=kind, error=str(exc)
+                    )
                 yield AgentEvent(
                     "error",
                     {
@@ -147,6 +161,8 @@ class AgentLoop:
                 return
 
             result.model_used = response.model
+            result.prompt_tokens += response.prompt_tokens or 0
+            result.completion_tokens += response.completion_tokens or 0
 
             if not response.tool_calls:
                 result.reply_text = response.content or ""

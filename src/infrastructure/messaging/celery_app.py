@@ -89,6 +89,7 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.onboarding_nudge_tasks",
         # Stream 1.5 + 4.6: Demo + trial lifecycle sweepers
         "src.infrastructure.messaging.tasks.demo_cleanup_task",
+        "src.infrastructure.messaging.tasks.agent_knowledge_tasks",
         "src.infrastructure.messaging.tasks.trial_expiry_task",
         "src.infrastructure.messaging.tasks.read_only_purge_task",
         # Staff permission system
@@ -378,6 +379,15 @@ celery_app.conf.beat_schedule = {
     "cleanup-expired-demo-tenants": {
         "task": "tasks.cleanup_expired_demo_tenants",
         "schedule": crontab(minute=0, hour="*/2"),  # Every 2 hours
+    },
+    # ─── Agent knowledge: keep the corpus current (nightly) ──────────
+    # The refresh endpoint has existed since the knowledge base shipped and
+    # nothing ever called it, so the corpus only changed when someone
+    # remembered to. Idempotent by content hash: an unchanged corpus writes
+    # nothing, so running this nightly costs one embedding pass at worst.
+    "refresh-agent-knowledge": {
+        "task": "tasks.refresh_agent_knowledge",
+        "schedule": crontab(minute=40, hour=3),  # 03:40, off the busy hours
     },
     # ─── Stream 4.6: Trial expiry sweep (hourly) ─────────────────────
     "expire-trials": {
