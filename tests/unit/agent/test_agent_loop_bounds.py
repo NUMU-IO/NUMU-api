@@ -194,3 +194,42 @@ class TestDailyTurnCap:
     async def test_a_broken_cache_fails_open(self):
         """Redis is a cache here, not a ledger. Losing it must not close the agent."""
         assert await consume_turn(FakeCache(broken=True), uuid4(), limit=1) is True
+
+
+class TestRetryPolicy:
+    """Transient upstream faults get another attempt; auth and credits do not."""
+
+    class _Flaky:
+        def __init__(self, fail_times, kind, retryable):
+            self.left = fail_times
+            self.kind = kind
+            self.retryable = retryable
+            self.attempts = 0
+
+        async def chat(self, *a, **kw):
+            self.attempts += 1
+            if self.left > 0:
+                self.left -= 1
+                raise LLMProviderError("boom", kind=self.kind, retryable=self.retryable)
+            return LLMResponse(content="ok", tool_calls=[], model="fake")
+
+    @pytest.mark.asyncio
+    async def test_a_503_is_retried(self):
+        from src.infrastructure.agent.llm.provider import RetryingLLMProvider
+
+        inner = self._Flaky(1, "upstream", True)
+        out = await RetryingLLMProvider(
+            inner, max_retries=2, backoff_seconds=0
+        ).chat([])
+        assert out.content == "ok"
+        assert inner.attempts == 2
+
+    @pytest.mark.asyncio
+    async def test_auth_is_not_retried(self):
+        """Nothing changes between attempts except how long the merchant waits."""
+        from src.infrastructure.agent.llm.provider import RetryingLLMProvider
+
+        inner = self._Flaky(1, "auth", False)
+        with pytest.raises(LLMProviderError):
+            await RetryingLLMProvider(inner, max_retries=3, backoff_seconds=0).chat([])
+        assert inner.attempts == 1
