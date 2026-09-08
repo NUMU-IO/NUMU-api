@@ -97,6 +97,7 @@ class AgentLoop:
         *,
         user_message: str,
         history: list[ChatMessage],
+        image_urls: list[str] | None = None,
         ctx: ToolContext,
         result: AgentRunResult,
         system_context: str | None = None,
@@ -114,7 +115,9 @@ class AgentLoop:
             messages.append(ChatMessage(role="system", content=system_context))
         messages += [
             *history,
-            ChatMessage(role="user", content=user_message),
+            ChatMessage(
+                role="user", content=user_message, image_urls=list(image_urls or [])
+            ),
         ]
         tools = self._registry.openai_tools()
 

@@ -2811,6 +2811,13 @@ async def upload_customization_asset(
         "profile_picture",
         "section_image",
         "social_image",
+        # A photo the merchant attaches to an assistant conversation, so the
+        # agent can hand its URL to create_product / update_product. Reuses
+        # this route's existing 5 MB cap, content-type checks and R2 upload
+        # rather than adding a parallel one.
+        # ponytail: keys land under customization/{store}/product_image_*; R2
+        # does not care, move them if per-product cleanup is ever needed.
+        "product_image",
     }
     generic_asset_type = "generic_file"
     allowed_types = image_asset_types | {generic_asset_type}

@@ -225,6 +225,11 @@ class Settings(BaseSettings):
     # How much of a conversation is replayed to the model. Every turn re-sends
     # the history, so without a cap the cost of a thread grows with its length
     # until it exceeds the context window and the turn fails outright.
+    # Whether the configured model can read images. Off by default: a
+    # text-only model rejects OpenAI content blocks, and it does not need
+    # them — an attached URL is already in the message text, which is enough
+    # for the model to hand to create_product.
+    agent_llm_vision: bool = False
     agent_history_max_turns: int = 10
     # Tool results are serialized into the prompt. A store with a large
     # catalogue would otherwise send its whole product list, once per

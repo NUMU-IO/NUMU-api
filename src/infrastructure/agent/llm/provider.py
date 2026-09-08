@@ -75,6 +75,18 @@ def _message_to_wire(msg: ChatMessage) -> dict[str, Any]:
         if msg.name:
             wire["name"] = msg.name
         return wire
+    # A user message carrying images the model can actually see becomes OpenAI
+    # content blocks. Gated on `agent_llm_vision` because a text-only model
+    # rejects the block form outright — and it does not need it: the URLs are
+    # already in the text, which is enough to pass one to a tool.
+    if msg.role == "user" and msg.image_urls and app_settings.agent_llm_vision:
+        blocks: list[dict[str, Any]] = [{"type": "text", "text": msg.content or ""}]
+        blocks += [
+            {"type": "image_url", "image_url": {"url": url}} for url in msg.image_urls
+        ]
+        wire["content"] = blocks
+        return wire
+
     # Plain system/user/assistant message
     wire["content"] = msg.content or ""
     return wire
