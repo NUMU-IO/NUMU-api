@@ -23,6 +23,7 @@ from src.infrastructure.agent.tools import (
     reserved,
     store,
     theme_read,
+    theme_sections,
     theme_write,
     update_product,
 )
@@ -38,6 +39,8 @@ _TOOL_SPECS = [
     theme_read.SPEC,
     theme_write.SPEC,
     theme_write.UPDATE_SETTING_SPEC,
+    theme_sections.UPDATE_SECTION_SPEC,
+    theme_sections.REMOVE_SECTION_SPEC,
     knowledge.SPEC,
     growth.SPEC,
     create_discount.SPEC,

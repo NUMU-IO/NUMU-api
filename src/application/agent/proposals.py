@@ -95,7 +95,12 @@ async def _require_tool_permission(has_permission, tool_name: str) -> None:
         raise PermissionDeniedError("forbidden", f"Missing permission: {needed}")
 
 
-_SUPPORTED_WRITE_TOOLS = ("add_theme_section", "update_theme_setting")
+_SUPPORTED_WRITE_TOOLS = (
+    "add_theme_section",
+    "update_theme_setting",
+    "update_section_settings",
+    "remove_section",
+)
 
 
 def _insert_section(draft: dict, params: dict) -> dict:
@@ -139,17 +144,52 @@ def _set_setting(draft: dict, params: dict) -> dict:
     return draft
 
 
+def _update_section_settings(draft: dict, params: dict) -> dict:
+    """Merge the proposed settings into a section that still exists."""
+    page, section_id = params["page"], params["section_id"]
+    sections = ((draft.get("templates") or {}).get(page) or {}).get("sections") or {}
+    if section_id not in sections:
+        raise ProposalError("section_gone", f"Section '{section_id}' no longer exists.")
+    current = sections[section_id].setdefault("settings", {})
+    # Merge, never replace: the merchant may have changed other settings in the
+    # customizer between the preview and the confirm, and those are not ours.
+    current.update(params.get("settings") or {})
+    return draft
+
+
+def _remove_section(draft: dict, params: dict) -> dict:
+    page, section_id = params["page"], params["section_id"]
+    tpl = (draft.get("templates") or {}).get(page)
+    if tpl is None:
+        raise ProposalError("page_gone", f"Page '{page}' no longer exists.")
+    sections = tpl.get("sections") or {}
+    if section_id not in sections:
+        # Already gone. Nothing to do, and nothing to complain about.
+        raise ProposalError("section_gone", f"Section '{section_id}' is already gone.")
+    sections.pop(section_id, None)
+    tpl["order"] = [s for s in (tpl.get("order") or []) if s != section_id]
+    return draft
+
+
 def _apply_change(tool_name: str, draft: dict, params: dict) -> dict:
     if tool_name == "add_theme_section":
         return _insert_section(draft, params)
     if tool_name == "update_theme_setting":
         return _set_setting(draft, params)
+    if tool_name == "update_section_settings":
+        return _update_section_settings(draft, params)
+    if tool_name == "remove_section":
+        return _remove_section(draft, params)
     raise ProposalError("unsupported", f"Cannot apply tool '{tool_name}'.")
 
 
 def _change_summary(tool_name: str, params: dict) -> str:
     if tool_name == "add_theme_section":
         return f"Agent: add {params['section_type']} to {params['page']}"
+    if tool_name == "update_section_settings":
+        return f"Agent: update {params['section_id']} on {params['page']}"
+    if tool_name == "remove_section":
+        return f"Agent: remove {params['section_id']} from {params['page']}"
     return f"Agent: update {params.get('setting_path')}"
 
 
