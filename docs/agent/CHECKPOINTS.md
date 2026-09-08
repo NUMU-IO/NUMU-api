@@ -52,7 +52,7 @@ verification passed — not when the code was written.
       · **not yet proven end to end** — a stream that actually runs past 60s needs an API
         key and a real turn, so the final proof belongs to D4
 
-## Phase D — Turn it on (blocked on D3: needs #552 in the image)
+## Phase D — Turn it on
 
 - [ ] **D1** Model chosen and paid for (Yousef)
       · the shortest path is already proven: prod runs `gemini-3.1-flash-lite-preview` on
@@ -65,12 +65,23 @@ verification passed — not when the code was written.
       · reuses the platform's existing `GOOGLE_AI_API_KEY` — no second vendor, no HF token
       · `docker restart` does NOT re-read `env_file`; `docker compose up -d` is required
       · verified in the running container: model, base url and both keys resolve
-- [ ] **D3** Knowledge seeded and tenant-indexed for vionne and rabbit
-      · **blocked**: seeding with the currently deployed image would request no
-        `dimensions`, get 3072-wide vectors and fail against a `vector(1024)` column.
-        Needs #552 in the image first.
-      · verify: `numu_knowledge_chunks` > 0; `search_knowledge` cites a real corpus file
-- [~] **D4** Eval **12/12** against production's model, on #411 merged with the fix branches
+- [x] **D3a** Platform corpus seeded on production · 2026-09-08
+      · 6 docs / 6 chunks, every one with a real pgvector embedding through the Google
+        key — #552 confirmed working live
+      · retrieval checked end to end: **5/5** queries returned the intended document,
+        including Arabic questions against English docs (`ازاي أربط بوسطة` → `numu-docs/shipping/bosta`)
+- [ ] **D3b** Tenant layer (catalog + policies) for vionne and rabbit
+      · **blocked on #556.** `reindex_tenant` reported 15 catalog docs and wrote none:
+        `reindex_policies` queried `public.store_settings`, which does not exist, and a
+        failed statement aborts the Postgres transaction — so the catalog work was
+        discarded at commit while the caller was told it succeeded
+      · vionne additionally hit `429` on embeddings; #556 batches them
+- [x] **D4** Eval **12/12**, and the Arabic replies re-read against the seeded corpus · 2026-09-08
+      · with knowledge in place the agent answers with real NUMU steps
+        (`الإعدادات → الشحن → بوسطة → API key`), calls the right tools, and says
+        "no abandoned carts" rather than inventing any. The competitor
+        recommendations and the "I am an AI model" opener are gone.
+      · earlier reading, kept for the record:
       · the ten Arabic replies were read, and they failed the first time: with no tools
         attached the model introduced itself as a general AI, wrote Python on request, and
         recommended Salla/Zid/Shopify to a NUMU merchant. With tools attached and the
@@ -79,7 +90,13 @@ verification passed — not when the code was written.
         for correctness, but it is not the voice the system prompt asks for
       · **re-read the replies after D3** — the corpus is empty, so every how-to answer is
         currently the model improvising
-- [ ] **D5** Unhide the panel — only after D4
+- [ ] **D5** Unhide the panel — **held on D2, not on D4**
+      · every technical gate now passes. What is unresolved is the billing tier: the
+        agent runs on the platform's existing Google key, and a modest embedding burst
+        returned `429`, which is what a free tier does. Google's free tier trains on
+        inputs, and agent prompts carry orders, customer contacts and abandoned carts.
+      · D2's recorded default is "No — free tiers for dev/eval only". Confirm the key's
+        project has billing enabled, or issue a paid key, before this flag flips.
 - [ ] **D6** Dead-droplet env sync deleted from `cd.yml`; #412 closed
 
 ## Phase E — Land the open work
