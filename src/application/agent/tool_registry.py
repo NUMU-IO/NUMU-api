@@ -11,6 +11,9 @@ from __future__ import annotations
 from src.application.agent.tools import ToolRegistry, ToolSpec
 from src.core.agent.entities import RiskTier
 from src.infrastructure.agent.tools import (
+    abandoned_carts,
+    analytics,
+    cart_recovery,
     create_discount,
     growth,
     knowledge,
@@ -21,6 +24,7 @@ from src.infrastructure.agent.tools import (
     store,
     theme_read,
     theme_write,
+    update_product,
 )
 
 # US1 read tools + US2/US3 theme read/write (CONFIRM-tier: propose only) + US4 RAG
@@ -29,12 +33,16 @@ _TOOL_SPECS = [
     products.SPEC,
     orders.SPEC,
     store.SPEC,
+    analytics.SPEC,
+    abandoned_carts.SPEC,
     theme_read.SPEC,
     theme_write.SPEC,
     theme_write.UPDATE_SETTING_SPEC,
     knowledge.SPEC,
     growth.SPEC,
     create_discount.SPEC,
+    update_product.SPEC,
+    cart_recovery.SPEC,
     orchestration.SPEC,
     *reserved.SPECS,
 ]

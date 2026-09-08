@@ -70,6 +70,14 @@ class AgentActionProposalModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         nullable=False,
         index=True,
     )
+    # The store the proposal was built against. Confirm takes its store from the
+    # URL, so without this a tenant with two stores could propose on A and
+    # confirm at /stores/B/agent/confirm — the coupon lands on B.
+    # Nullable for the handful of rows that predate the column; those are
+    # refused rather than trusted.
+    store_id: Mapped[PyUUID | None] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True, index=True
+    )
     tool_name: Mapped[str] = mapped_column(String(64), nullable=False)
     params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     diff: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

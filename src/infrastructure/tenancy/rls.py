@@ -51,6 +51,15 @@ async def set_tenant_context(session: AsyncSession, tenant_id: UUID | str) -> No
     except ValueError:
         raise ValueError(f"Invalid tenant_id format: {tenant_id_str}")
 
+    # set_config is Postgres-only, and RLS does not exist on the SQLite engine
+    # the tests run against — so calling it there is a hard failure for a
+    # statement that would be a no-op anyway. This is why every agent
+    # integration test that reaches an apply path errors on `no such function:
+    # set_config` rather than on anything it was written to check.
+    dialect = getattr(getattr(session, "bind", None), "dialect", None)
+    if dialect is not None and dialect.name != "postgresql":
+        return
+
     # Set the session variable using the database function
     # The third parameter 'true' makes it local to the current transaction
     await session.execute(

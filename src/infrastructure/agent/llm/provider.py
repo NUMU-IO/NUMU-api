@@ -30,14 +30,28 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+# 502/503/504 are the provider being briefly unwell, not a decision about us.
+_RETRYABLE_STATUS = (502, 503, 504)
+
+
+def _error_kind(status_code: int) -> str:
+    """Map an HTTP status to the cause a human would act on."""
+    if status_code in (401, 403):
+        return "auth"
+    if status_code == 402:
+        return "credits"
+    return "upstream"
+
+
 def _message_to_wire(msg: ChatMessage) -> dict[str, Any]:
     """Serialize a domain ChatMessage to the OpenAI chat-completions shape."""
     wire: dict[str, Any] = {"role": msg.role}
     # Assistant tool-call request
     if msg.tool_calls:
         wire["content"] = msg.content or ""
-        wire["tool_calls"] = [
-            {
+        calls = []
+        for tc in msg.tool_calls:
+            call = {
                 "id": tc.id,
                 "type": "function",
                 "function": {
@@ -45,8 +59,14 @@ def _message_to_wire(msg: ChatMessage) -> dict[str, Any]:
                     "arguments": json.dumps(tc.arguments),
                 },
             }
-            for tc in msg.tool_calls
-        ]
+            # Echo back whatever the provider attached to its own tool call.
+            # Gemini returns a thought_signature here and rejects the follow-up
+            # request without it, so dropping this breaks every turn that uses
+            # a tool at the point where the result is sent back.
+            if tc.extra:
+                call.update(tc.extra)
+            calls.append(call)
+        wire["tool_calls"] = calls
         return wire
     # Tool-result message
     if msg.role == "tool":
@@ -107,7 +127,10 @@ class OpenAICompatibleProvider:
                     headers=headers,
                 )
         except httpx.HTTPError as exc:  # network/timeout
-            raise LLMProviderError(f"LLM transport error: {exc}") from exc
+            # A dropped connection or timeout is worth one more attempt.
+            raise LLMProviderError(
+                f"LLM transport error: {exc}", kind="upstream", retryable=True
+            ) from exc
 
         if resp.status_code == 429:
             retry_after = resp.headers.get("retry-after")
@@ -116,11 +139,21 @@ class OpenAICompatibleProvider:
                 retry_after=float(retry_after) if retry_after else None,
             )
         if resp.status_code >= 400:
+            kind = _error_kind(resp.status_code)
             # Do not log the key; log status + a trimmed body for diagnostics.
+            # `kind` is the field to alert on: auth and credits mean the agent
+            # is down for everyone until a human acts, and no retry will help.
             logger.warning(
-                "agent_llm_error", status=resp.status_code, body=resp.text[:500]
+                "agent_llm_error",
+                status=resp.status_code,
+                kind=kind,
+                body=resp.text[:500],
             )
-            raise LLMProviderError(f"LLM provider returned {resp.status_code}")
+            raise LLMProviderError(
+                f"LLM provider returned {resp.status_code}",
+                kind=kind,
+                retryable=resp.status_code in _RETRYABLE_STATUS,
+            )
 
         data = resp.json()
         choice = (data.get("choices") or [{}])[0]
@@ -135,11 +168,19 @@ class OpenAICompatibleProvider:
                 parsed = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
             except json.JSONDecodeError:
                 parsed = {}
+            # Everything that is not part of the OpenAI shape is kept and
+            # replayed verbatim; see ToolCall.extra.
+            extra = {
+                k: v
+                for k, v in tc.items()
+                if k not in ("id", "type", "function", "index")
+            }
             tool_calls.append(
                 ToolCall(
                     id=tc.get("id") or fn.get("name", ""),
                     name=fn.get("name", ""),
                     arguments=parsed,
+                    extra=extra or None,
                 )
             )
 
@@ -187,6 +228,23 @@ class RetryingLLMProvider:
                 delay = exc.retry_after or (self._backoff * attempt)
                 logger.info(
                     "agent_llm_rate_limited_retry", attempt=attempt, delay=delay
+                )
+                await asyncio.sleep(delay)
+            except LLMProviderError as exc:
+                # Only the transient upstream faults. auth and credits fall
+                # straight through: nothing changes between attempts except
+                # how long the merchant waits for the same failure.
+                if not getattr(exc, "retryable", False):
+                    raise
+                attempt += 1
+                if attempt > self._max_retries:
+                    raise
+                delay = self._backoff * attempt
+                logger.info(
+                    "agent_llm_upstream_retry",
+                    attempt=attempt,
+                    delay=delay,
+                    kind=exc.kind,
                 )
                 await asyncio.sleep(delay)
 

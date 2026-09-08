@@ -222,6 +222,18 @@ class Settings(BaseSettings):
     agent_llm_temperature: float = 0.2
     agent_max_tool_iterations: int = 5  # cap the perceive→act loop (runaway guard)
     agent_request_timeout_seconds: int = 30
+    # How much of a conversation is replayed to the model. Every turn re-sends
+    # the history, so without a cap the cost of a thread grows with its length
+    # until it exceeds the context window and the turn fails outright.
+    agent_history_max_turns: int = 10
+    # Tool results are serialized into the prompt. A store with a large
+    # catalogue would otherwise send its whole product list, once per
+    # iteration. Truncated results are marked so the model knows it saw a slice.
+    agent_tool_result_max_chars: int = 4000
+    # Turns per store per day. The agent is billed per token, so an unbounded
+    # loop of retries or an over-enthusiastic merchant is a bill, not just load.
+    # 0 disables the cap.
+    agent_max_turns_per_store_per_day: int = 200
     # Free-tier rate-limit handling: queue/retry via Redis instead of failing hard.
     agent_rate_limit_max_retries: int = 3
     agent_rate_limit_backoff_seconds: float = 2.0

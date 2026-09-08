@@ -9,6 +9,7 @@ rejected-at-apply) write produces exactly one immutable audit record (FR-010).
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from uuid import UUID, uuid4
 
 from src.application.dto.coupon import CreateCouponDTO
@@ -52,6 +53,46 @@ class StaleProposalError(ProposalError):
 
 class NothingToUndoError(ProposalError):
     pass
+
+
+class PermissionDeniedError(ProposalError):
+    """Caller lacks the permission the proposal's own tool requires."""
+
+
+# Confirm used to gate every proposal on a single hardcoded "themes.edit".
+# That is wrong in both directions once more than one kind of write exists: a
+# theme editor with no product rights could confirm a price change, and a
+# product manager without themes.edit was refused their own. Each CONFIRM-tier
+# spec already declares `required_permission`, so ask the registry.
+#
+# Fails closed: an unknown tool, or one declaring no permission, still needs the
+# strictest gate rather than none.
+_FALLBACK_PERMISSION = "themes.edit"
+
+
+@lru_cache(maxsize=1)
+def _registry():
+    # Imported lazily: tool modules import from this package, so a module-level
+    # import here would close the cycle.
+    from src.application.agent.tool_registry import build_default_registry
+
+    return build_default_registry()
+
+
+def permission_for_tool(tool_name: str) -> str:
+    spec = _registry().get(tool_name)
+    if spec is None or not spec.required_permission:
+        return _FALLBACK_PERMISSION
+    return spec.required_permission
+
+
+async def _require_tool_permission(has_permission, tool_name: str) -> None:
+    """Re-check at apply time — never trust the proposal step alone."""
+    if has_permission is None:
+        return
+    needed = permission_for_tool(tool_name)
+    if not await has_permission(needed):
+        raise PermissionDeniedError("forbidden", f"Missing permission: {needed}")
 
 
 _SUPPORTED_WRITE_TOOLS = ("add_theme_section", "update_theme_setting")
@@ -156,9 +197,188 @@ async def _apply_create_discount(
     }
 
 
+async def _apply_update_product(
+    session, *, store_id: UUID, staff_id: UUID, params: dict
+) -> dict:
+    from src.application.dto.product import UpdateProductDTO
+    from src.application.use_cases.products.update_product import (
+        UpdateProductUseCase,
+    )
+    from src.infrastructure.repositories.product_repository import ProductRepository
+
+    product_repo = ProductRepository(session)
+    product_id = UUID(str(params["product_id"]))
+
+    # Re-fetch at apply time: the audit's before_state must reflect what the
+    # values actually were when applied (they may have drifted since propose).
+    current = await product_repo.get_by_id(product_id)
+    if current is None or current.store_id != store_id:
+        raise ProposalError("not_found", "Product no longer exists in this store.")
+    before_state = {
+        "product_id": str(product_id),
+        "price": str(current.price.amount),
+        "compare_at_price": (
+            str(current.compare_at_price.amount) if current.compare_at_price else None
+        ),
+        "quantity": current.quantity,
+    }
+
+    dto = UpdateProductDTO(
+        price=_to_decimal(params["price"]) if params.get("price") is not None else None,
+        compare_at_price=(
+            _to_decimal(params["compare_at_price"])
+            if params.get("compare_at_price") is not None
+            else None
+        ),
+        quantity=params.get("quantity"),
+    )
+    use_case = UpdateProductUseCase(
+        product_repository=product_repo,
+        store_repository=StoreRepository(session),
+    )
+    updated = await use_case.execute(product_id, dto, staff_id)
+    return {
+        "summary": f"Updated product {updated.name}",
+        "after_state": {
+            "product_id": str(product_id),
+            "price": str(updated.price),
+            "compare_at_price": (
+                str(updated.compare_at_price) if updated.compare_at_price else None
+            ),
+            "quantity": updated.quantity,
+        },
+        "before_state": before_state,
+        "result": {"product_id": str(product_id), "name": updated.name},
+    }
+
+
+async def _undo_create_discount(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    """Undo a created coupon by deleting it."""
+    from src.application.use_cases.coupons.delete_coupon import DeleteCouponUseCase
+
+    coupon_id = (audit.after_state or {}).get("coupon_id")
+    if not coupon_id:
+        raise NothingToUndoError("nothing_to_undo", "No coupon recorded to remove.")
+    use_case = DeleteCouponUseCase(
+        coupon_repository=CouponRepository(session),
+        store_repository=StoreRepository(session),
+    )
+    await use_case.execute(UUID(coupon_id), staff_id)
+    return {"undid": "create_discount", "deleted_coupon_id": coupon_id}
+
+
+async def _undo_update_product(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    """Undo a product update by restoring the audited before values."""
+    from src.application.dto.product import UpdateProductDTO
+    from src.application.use_cases.products.update_product import (
+        UpdateProductUseCase,
+    )
+    from src.infrastructure.repositories.product_repository import ProductRepository
+
+    before = audit.before_state or {}
+    product_id = before.get("product_id")
+    if not product_id:
+        raise NothingToUndoError("nothing_to_undo", "No prior product state recorded.")
+    dto = UpdateProductDTO(
+        price=_to_decimal(before["price"]) if before.get("price") is not None else None,
+        compare_at_price=(
+            _to_decimal(before["compare_at_price"])
+            if before.get("compare_at_price") is not None
+            else None
+        ),
+        quantity=before.get("quantity"),
+    )
+    use_case = UpdateProductUseCase(
+        product_repository=ProductRepository(session),
+        store_repository=StoreRepository(session),
+    )
+    await use_case.execute(UUID(product_id), dto, staff_id)
+    return {"undid": "update_product", "product_id": product_id}
+
+
+async def _apply_send_cart_recovery(
+    session, *, store_id: UUID, staff_id: UUID, params: dict
+) -> dict:
+    """Send the recovery email + stamp the checkout (mirrors the dashboard route)."""
+    from datetime import UTC, datetime
+
+    from src.core.interfaces.services.email_service import EmailMessage
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
+    from src.infrastructure.repositories import AbandonedCheckoutRepository
+
+    repo = AbandonedCheckoutRepository(session)
+    checkout_id = UUID(str(params["checkout_id"]))
+    checkout = await repo.get_by_id(checkout_id)
+    if checkout is None or checkout.store_id != store_id:
+        raise ProposalError("not_found", "Checkout no longer exists in this store.")
+    if checkout.recovered_at is not None:
+        raise ProposalError("already_recovered", "Checkout was already recovered.")
+    if not checkout.email:
+        raise ProposalError("no_email", "Checkout has no email address.")
+
+    store = await StoreRepository(session).get_by_id(store_id)
+    store_name = store.name if store else "your store"
+
+    items_html = "".join(
+        f"<li>{(li.get('product_name') or 'Item')} × {li.get('quantity', 1)}</li>"
+        for li in checkout.line_items
+    )
+    html = (
+        f"<p>Hi there,</p>"
+        f"<p>You left items in your cart at <strong>{store_name}</strong>.</p>"
+        f"<ul>{items_html}</ul>"
+        f"<p>Come back and finish your order whenever you're ready.</p>"
+    )
+    await ResendEmailService().send_email(
+        EmailMessage(
+            to=str(checkout.email),
+            subject=f"Complete your order at {store_name}",
+            html_content=html,
+        )
+    )
+    sent_at = datetime.now(UTC)
+    await repo.mark_recovery_email_sent(checkout_id, sent_at)
+    return {
+        "summary": "Sent cart recovery email",
+        "after_state": {
+            "checkout_id": str(checkout_id),
+            "recovery_email_sent_at": sent_at.isoformat(),
+        },
+        "result": {"checkout_id": str(checkout_id), "sent": True},
+    }
+
+
+async def _undo_send_cart_recovery(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    """A sent email cannot be unsent — fail with an honest message.
+
+    Registered anyway so this audit can never fall through to the
+    theme-restore path (see ACTION_UNDOERS note below).
+    """
+    raise NothingToUndoError("cannot_undo", "A sent recovery email can't be unsent.")
+
+
 # tool_name → applier. Tools listed here follow the generic (non-theme) path.
 ACTION_APPLIERS = {
     "create_discount": _apply_create_discount,
+    "update_product": _apply_update_product,
+    "send_cart_recovery": _apply_send_cart_recovery,
+}
+
+# tool_name → undoer for applied action audits. Anything not listed here that
+# reaches undo_last follows the theme-restore path, so EVERY action applier must
+# have an entry (else its audit's before_state would be pushed into the theme).
+ACTION_UNDOERS = {
+    "create_discount": _undo_create_discount,
+    "update_product": _undo_update_product,
+    "send_cart_recovery": _undo_send_cart_recovery,
 }
 
 
@@ -212,7 +432,9 @@ async def _apply_action_proposal(
             conversation_id=conversation_id,
             tool_name=proposal.tool_name,
             params=proposal.params,
-            before_state={},
+            # Appliers report before_state when the action mutates existing data
+            # (e.g. update_product) — that is what makes the action undo-capable.
+            before_state=outcome.get("before_state", {}),
             after_state=outcome["after_state"],
             result=AuditResult.APPLIED,
             model_used=model_used,
@@ -242,6 +464,7 @@ async def apply_proposal(
     conversation_id: UUID | None,
     proposal_id: UUID,
     model_used: str | None = None,
+    has_permission=None,
 ) -> dict:
     proposal_repo = ProposalRepository(session)
     audit_repo = AuditRepository(session)
@@ -251,6 +474,18 @@ async def apply_proposal(
         raise ProposalError("not_found", "Proposal not found.")
     if proposal.status != ProposalStatus.PENDING:
         raise ProposalError("already_resolved", f"Proposal is {proposal.status.value}.")
+
+    await _require_tool_permission(has_permission, proposal.tool_name)
+
+    # Confirm takes its store from the URL. Without this a tenant with two
+    # stores could propose against A and confirm at /stores/B/agent/confirm,
+    # and the change would land on B — the params were built against A's draft.
+    # A proposal predating the column has no store to check against, so it is
+    # refused rather than trusted.
+    if proposal.store_id != store_id:
+        raise ProposalError(
+            "wrong_store", "This proposal was made for a different store."
+        )
 
     # Non-theme actions (Pillar 2) take the generic use-case apply path.
     if proposal.tool_name in ACTION_APPLIERS:
@@ -314,10 +549,13 @@ async def apply_proposal(
             "The theme changed since this was proposed. Please re-preview.",
         ) from None
 
-    published = await service.publish(store_id=store_id, user_id=staff_id)
-
-    # publish() commits, which drops the transaction-scoped app.current_tenant GUC;
-    # re-apply it so the audit/proposal writes below pass FORCE RLS.
+    # Deliberately NOT published. A confirmed agent change lands in the same
+    # draft the customizer edits; the merchant presses Update when they have
+    # looked at it. Publishing here was the only path where a model-initiated
+    # change reached shoppers with no human in between, and it contradicted the
+    # blast radius this feature was signed off on ("the store's draft only").
+    # autosave_draft commits, which drops the transaction-scoped
+    # app.current_tenant GUC; re-apply it so the writes below pass FORCE RLS.
     await set_tenant_context(session, tenant_id)
 
     audit = await audit_repo.add(
@@ -341,9 +579,9 @@ async def apply_proposal(
     )
     return {
         "applied": True,
+        "published": False,
         "proposal_id": str(proposal_id),
         "audit_id": str(audit.id),
-        "revision_id": published.get("revision_id"),
     }
 
 
@@ -365,13 +603,53 @@ async def undo_last(
     tenant_id: UUID,
     conversation_id: UUID,
     model_used: str | None = None,
+    has_permission=None,
 ) -> dict:
     audit_repo = AuditRepository(session)
     last = await audit_repo.get_last_applied_for_conversation(conversation_id)
-    if last is None or not last.before_state:
+    if last is None:
         raise NothingToUndoError(
             "nothing_to_undo", "There is no applied change to undo."
         )
+
+    # Action audits (Pillar 2) undo through their registered undoer — NEVER the
+    # theme path (their before_state is domain data, not a theme draft).
+    if last.tool_name in ACTION_UNDOERS:
+        outcome = await ACTION_UNDOERS[last.tool_name](
+            session, store_id=store_id, staff_id=staff_id, audit=last
+        )
+        audit = await audit_repo.add(
+            AuditRecord(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                staff_id=staff_id,
+                conversation_id=conversation_id,
+                tool_name="undo",
+                params={"undid_audit_id": str(last.id), **outcome},
+                # Deliberately empty: if this undo record ever becomes "last",
+                # the `not before_state` guard below stops a second undo instead
+                # of pushing action data through the theme-restore path.
+                before_state={},
+                after_state=last.before_state,
+                result=AuditResult.APPLIED,
+                model_used=model_used,
+            )
+        )
+        logger.info(
+            "agent_action_undone",
+            conversation_id=str(conversation_id),
+            tool=last.tool_name,
+            audit_id=str(audit.id),
+        )
+        return {"undone": True, "audit_id": str(audit.id)}
+
+    if not last.before_state:
+        raise NothingToUndoError(
+            "nothing_to_undo", "There is no applied change to undo."
+        )
+
+    # Reversing a write needs the same permission the write itself needed.
+    await _require_tool_permission(has_permission, last.tool_name)
 
     service = build_v3_service(session)
     draft_res = await service.get_draft_with_etag(store_id)
@@ -383,10 +661,11 @@ async def undo_last(
         change_summary="Agent: undo last change",
         expected_etag=draft_res.get("etag"),
     )
-    await service.publish(store_id=store_id, user_id=staff_id)
+    # Not published, for the same reason apply_proposal does not: undo restores
+    # the draft and the merchant decides when it goes live.
     await set_tenant_context(
         session, tenant_id
-    )  # re-apply RLS GUC dropped by publish's commit
+    )  # re-apply RLS GUC dropped by autosave's commit
 
     audit = await audit_repo.add(
         AuditRecord(

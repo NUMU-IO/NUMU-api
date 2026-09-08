@@ -60,34 +60,72 @@ class FallbackEmbedder:
 
 
 class HttpEmbedder:
-    """OpenAI-compatible /embeddings client (e.g. a TEI server hosting e5)."""
+    """OpenAI-compatible /embeddings client (e.g. a TEI server hosting e5).
 
-    def __init__(self, *, url: str, api_key: str, model: str, dim: int) -> None:
+    Two knobs exist because the same wire format is served by models with
+    different conventions:
+
+    * ``send_dimensions`` asks the server for a specific vector width. Gemini
+      returns 3072 by default, and the ``embedding_vec`` column is a fixed
+      ``vector(1024)``, so without this every insert would fail on width. A TEI
+      server hosting e5 has one fixed width and rejects the field, hence the
+      flag rather than always sending it.
+    * ``e5_prefixes`` adds the "query: " / "passage: " markers e5 was trained
+      with. They are meaningless to Gemini, where they would just be text the
+      model has to embed alongside the real content.
+    """
+
+    def __init__(
+        self,
+        *,
+        url: str,
+        api_key: str,
+        model: str,
+        dim: int,
+        send_dimensions: bool = False,
+        e5_prefixes: bool = True,
+    ) -> None:
         self._url = url.rstrip("/")
         self._api_key = api_key
         self._model = model
         self._dim = dim
+        self._send_dimensions = send_dimensions
+        self._e5_prefixes = e5_prefixes
 
     async def _embed(self, inputs: list[str]) -> list[list[float]]:
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
+        payload: dict = {"model": self._model, "input": inputs}
+        if self._send_dimensions:
+            payload["dimensions"] = self._dim
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{self._url}/embeddings",
-                json={"model": self._model, "input": inputs},
+                json=payload,
                 headers=headers,
             )
             resp.raise_for_status()
             data = resp.json()
-        return [_l2_normalize(item["embedding"]) for item in data.get("data", [])]
+        vectors = [_l2_normalize(item["embedding"]) for item in data.get("data", [])]
+        # Fail loudly here rather than at the INSERT: a width mismatch means the
+        # model or the `dimensions` request is wrong, and the pgvector error
+        # names neither.
+        for v in vectors:
+            if len(v) != self._dim:
+                raise ValueError(
+                    f"Embedder returned {len(v)} dimensions, expected {self._dim}. "
+                    f"Check AGENT_EMBED_MODEL / AGENT_EMBED_DIM."
+                )
+        return vectors
 
     async def embed_query(self, text: str) -> list[float]:
-        # e5 convention: queries are prefixed "query: ".
-        return (await self._embed([f"query: {text}"]))[0]
+        return (await self._embed([f"query: {text}" if self._e5_prefixes else text]))[0]
 
     async def embed_passages(self, texts: list[str]) -> list[list[float]]:
-        return await self._embed([f"passage: {t}" for t in texts])
+        if self._e5_prefixes:
+            texts = [f"passage: {t}" for t in texts]
+        return await self._embed(texts)
 
 
 class HFFeatureExtractionEmbedder:
@@ -143,6 +181,17 @@ def get_embedder() -> Embedder:
                 api_key=s.agent_embed_api_key,
                 model=s.agent_embed_model,
                 dim=s.agent_embed_dim,
+            )
+        if s.agent_embed_provider == "google":
+            # Gemini over its OpenAI-compatible endpoint. Reuses the platform's
+            # existing Google key, so the agent needs no second credential.
+            return HttpEmbedder(
+                url=s.agent_embed_url,
+                api_key=s.agent_embed_api_key,
+                model=s.agent_embed_model,
+                dim=s.agent_embed_dim,
+                send_dimensions=True,
+                e5_prefixes=False,
             )
         return HttpEmbedder(
             url=s.agent_embed_url,

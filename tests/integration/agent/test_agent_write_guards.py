@@ -156,6 +156,7 @@ async def test_stale_proposal_guard_rejects_and_audits(test_session, monkeypatch
                 tool_name="add_theme_section",
                 params=result.proposal["params"],
                 diff=result.proposal["diff"],
+                store_id=store_id,
                 based_on_theme_version=result.proposal["based_on_theme_version"],
             )
         )

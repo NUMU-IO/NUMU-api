@@ -39,11 +39,21 @@ class ChatMessage:
 
 @dataclass
 class ToolCall:
-    """A model-requested tool invocation."""
+    """A model-requested tool invocation.
+
+    ``extra`` carries provider fields that are not part of the OpenAI schema
+    but which the provider requires back when the call is replayed in the
+    transcript. Gemini attaches a ``thought_signature`` here and rejects the
+    next request with 400 INVALID_ARGUMENT if it is missing, which made every
+    multi-step turn fail on the second iteration. Kept opaque on purpose: this
+    client speaks one wire format, and a provider-specific field it never
+    interprets is cheaper than a second client.
+    """
 
     id: str
     name: str
     arguments: dict[str, Any]
+    extra: dict[str, Any] | None = None
 
 
 @dataclass
@@ -66,7 +76,31 @@ class LLMRateLimitError(Exception):
 
 
 class LLMProviderError(Exception):
-    """Non-retryable provider failure (bad request, auth, 5xx after retries)."""
+    """Non-retryable provider failure (bad request, auth, 5xx after retries).
+
+    ``kind`` separates the causes that need different human responses:
+
+    * ``auth``     — the key is missing, wrong, or revoked. Nobody is coming to
+                     fix this on its own; it needs an operator.
+    * ``credits``  — the account is out of money or over quota. Also an
+                     operator, and retrying is just a slower failure.
+    * ``upstream`` — the provider is having a bad day. Worth trying later.
+
+    All three used to arrive as one undifferentiated error, which meant a dead
+    API key and a dead provider looked identical in the logs.
+
+    ``retryable`` marks the upstream faults that are worth trying again: a
+    502/503/504 or a dropped connection is usually a blip, and one of those
+    should not end a merchant's turn. auth and credits are never retryable —
+    nothing changes between attempts except the wait.
+    """
+
+    def __init__(
+        self, message: str, kind: str = "upstream", *, retryable: bool = False
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.retryable = retryable
 
 
 class LLMProvider(Protocol):

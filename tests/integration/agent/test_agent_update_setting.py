@@ -123,6 +123,7 @@ async def test_update_setting_propose_confirm_undo(test_session, monkeypatch):
                 tool_name="update_theme_setting",
                 params=result.proposal["params"],
                 diff=result.proposal["diff"],
+                store_id=store_id,
                 based_on_theme_version=result.proposal["based_on_theme_version"],
             )
         )
@@ -135,7 +136,8 @@ async def test_update_setting_propose_confirm_undo(test_session, monkeypatch):
             conversation_id=None,
             proposal_id=proposal.id,
         )
-        assert fake.published["global_settings"]["hero_title"] == "Summer Sale"
+        assert fake.draft["global_settings"]["hero_title"] == "Summer Sale"
+        assert fake.published["global_settings"]["hero_title"] == "Old heading"
 
         await undo_last(
             test_session,
@@ -144,6 +146,6 @@ async def test_update_setting_propose_confirm_undo(test_session, monkeypatch):
             tenant_id=tenant_id,
             conversation_id=conv.id,
         )
-        assert fake.published["global_settings"]["hero_title"] == "Old heading"
+        assert fake.draft["global_settings"]["hero_title"] == "Old heading"
     finally:
         set_tenant_id(None)

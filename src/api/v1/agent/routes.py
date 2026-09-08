@@ -18,6 +18,7 @@ from starlette.responses import StreamingResponse
 from src.api.v1.agent.deps import AgentRequestContext, get_agent_context
 from src.application.agent.proposals import (
     NothingToUndoError,
+    PermissionDeniedError,
     ProposalError,
     StaleProposalError,
     apply_proposal,
@@ -29,10 +30,9 @@ from src.core.logging import get_logger
 from src.infrastructure.agent.persistence.repositories import (
     AuditRepository,
     ConversationRepository,
+    TurnRepository,
 )
 from src.infrastructure.database.connection import set_tenant_id
-
-_WRITE_PERMISSION = "themes.edit"
 
 logger = get_logger(__name__)
 
@@ -94,6 +94,16 @@ async def chat(
     )
 
 
+@router.get("/digest")
+async def daily_digest(
+    ctx: Annotated[AgentRequestContext, Depends(get_agent_context)],
+) -> dict:
+    """Proactive 'since yesterday' digest the panel greets the merchant with."""
+    from src.application.agent.digest import build_daily_digest
+
+    return await build_daily_digest(ctx.session, store_id=ctx.store_id)
+
+
 @router.get("/conversations")
 async def list_conversations(
     ctx: Annotated[AgentRequestContext, Depends(get_agent_context)],
@@ -113,6 +123,40 @@ async def list_conversations(
     }
 
 
+@router.get("/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: UUID,
+    ctx: Annotated[AgentRequestContext, Depends(get_agent_context)],
+) -> dict:
+    """One conversation + its turns, for resuming a thread in the panel.
+
+    RLS scopes the lookup to the tenant; we additionally require the caller to
+    be the thread's owner so staff members can't read each other's chats.
+    """
+    conversation = await ConversationRepository(ctx.session).get(conversation_id)
+    if conversation is None or conversation.staff_id != ctx.staff_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "not_found", "message": "Conversation not found"},
+        )
+    turns = await TurnRepository(ctx.session).list_for_conversation(conversation_id)
+    return {
+        "id": str(conversation.id),
+        "title": conversation.title,
+        "status": conversation.status.value,
+        "turns": [
+            {
+                "role": t.role.value,
+                "content": t.content,
+                "tool_calls": [tc.name for tc in t.tool_calls],
+                "model_used": t.model_used,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in turns
+        ],
+    }
+
+
 class ConfirmRequest(BaseModel):
     proposal_id: UUID
     decision: Literal["confirm", "decline"] = "confirm"
@@ -120,18 +164,6 @@ class ConfirmRequest(BaseModel):
 
 class UndoRequest(BaseModel):
     conversation_id: UUID
-
-
-async def _require_write(ctx: AgentRequestContext) -> None:
-    # Re-check at apply time (fail closed) — never trust the proposal step alone.
-    if not await ctx.has_permission(_WRITE_PERMISSION):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "forbidden",
-                "message": f"Missing permission: {_WRITE_PERMISSION}",
-            },
-        )
 
 
 @router.post("/confirm")
@@ -142,7 +174,6 @@ async def confirm(
     if body.decision == "decline":
         return await decline_proposal(ctx.session, proposal_id=body.proposal_id)
 
-    await _require_write(ctx)
     try:
         return await apply_proposal(
             ctx.session,
@@ -151,6 +182,12 @@ async def confirm(
             tenant_id=ctx.tenant_id,
             conversation_id=None,
             proposal_id=body.proposal_id,
+            has_permission=ctx.has_permission,
+        )
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "message": exc.message},
         )
     except StaleProposalError as exc:
         raise HTTPException(
@@ -202,7 +239,6 @@ async def undo(
     body: UndoRequest,
     ctx: Annotated[AgentRequestContext, Depends(get_agent_context)],
 ) -> dict:
-    await _require_write(ctx)
     try:
         return await undo_last(
             ctx.session,
@@ -210,6 +246,12 @@ async def undo(
             staff_id=ctx.staff_id,
             tenant_id=ctx.tenant_id,
             conversation_id=body.conversation_id,
+            has_permission=ctx.has_permission,
+        )
+    except PermissionDeniedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "message": exc.message},
         )
     except NothingToUndoError as exc:
         raise HTTPException(
