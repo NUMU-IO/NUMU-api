@@ -31,6 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services import admin_notifications
 from src.application.use_cases.billing.activate_instapay_subscription import (
     ActivationResult,
     activate_verified_subscription_payment,
@@ -316,6 +317,14 @@ class SubmitSubscriptionPaymentProofUseCase:
                     "proof_id": str(proof.id),
                     "reasons": decision.reasons,
                 },
+            )
+            # Only the queued branch: an auto-approved proof has already
+            # activated the plan and there is nothing for an operator to do.
+            admin_notifications.subscription_proof_submitted(
+                self.session,
+                store_name=await admin_notifications.store_name_for_tenant(
+                    self.session, tenant_id
+                ),
             )
 
         await self.session.flush()

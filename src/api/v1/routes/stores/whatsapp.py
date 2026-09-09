@@ -36,6 +36,7 @@ from src.api.v1.schemas.stores.whatsapp_connection import (
     WhatsAppSettingsUpdate,
     WhatsAppStatus,
 )
+from src.application.services import admin_notifications
 from src.config import settings
 from src.core.entities.store import Store
 from src.infrastructure.database.models.public.whatsapp_access import (
@@ -1004,6 +1005,8 @@ async def request_whatsapp_access(
                 ),
             },
         )
+
+    admin_notifications.whatsapp_access_requested(db, store_name=store.name)
 
     await db.commit()
     await db.refresh(row)

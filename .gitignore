@@ -36,6 +36,8 @@ venv.bak/
 *.db
 *.sqlite3
 *.sql
+# …except the admin dev seed, which is a checked-in tool rather than a dump.
+!scripts/seed_admin_dev.sql
 
 # Alembic
 alembic.ini.local

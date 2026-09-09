@@ -24,6 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services import admin_notifications
 from src.application.use_cases.wallet.credit_wallet import credit_topup_intent
 from src.config.settings import get_settings
 from src.core.entities.wallet import (
@@ -377,6 +378,14 @@ class SubmitTopupProofUseCase:
                     "proof_id": str(proof.id),
                     "reasons": decision.reasons,
                 },
+            )
+            # Only the queued branch: an auto-approved top-up is already
+            # credited and there is nothing for an operator to do.
+            admin_notifications.wallet_topup_submitted(
+                self.session,
+                store_name=await admin_notifications.store_name_for_tenant(
+                    self.session, tenant_id
+                ),
             )
 
         await self.session.flush()

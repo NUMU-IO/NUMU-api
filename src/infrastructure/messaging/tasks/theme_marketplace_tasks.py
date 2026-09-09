@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 from uuid import UUID
 
+from src.application.services import admin_notifications
 from src.core.entities.marketplace_theme import MarketplaceVersionStatus
 from src.core.interfaces.services.storage_service import StorageBucket
 from src.core.theme_contract import validate_navigability_source
@@ -226,6 +227,21 @@ async def _update_version_status(version_id: UUID, **fields) -> None:
         repo = MarketplaceRepository(session)
         await repo.update_version(version_id, fields)
         await session.commit()
+
+
+async def _theme_name(theme_id: UUID) -> str:
+    """Listing name for the review notification. Never raises."""
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            theme = await MarketplaceRepository(session).get_theme_by_id(theme_id)
+            return getattr(theme, "name", None) or "A theme"
+    except Exception:  # noqa: BLE001 — a name is never worth failing a build
+        return "A theme"
 
 
 async def _load_version(version_id: UUID):
@@ -625,6 +641,15 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 certification_tier=tier,
                 build_log=f"Build succeeded at {datetime.now(UTC).isoformat()}",
             )
+        )
+
+        # Notify HERE rather than at submit: a version only enters the review
+        # queue once its build has passed, so submitting is not yet work an
+        # operator can pick up.
+        admin_notifications.theme_submitted(
+            None,
+            theme_name=_run_async(_theme_name(version.theme_id)),
+            version=version.version_string,
         )
 
         logger.info(

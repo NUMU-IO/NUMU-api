@@ -369,13 +369,18 @@ async def lead_stats(
     # "unattributed" is not "direct": it is every lead recorded before
     # the landing page started sending UTMs, plus genuine direct traffic.
     # Collapsing the two would overstate direct for months.
+    # The coalesce is built once and reused. Written twice, SQLAlchemy emits a
+    # separate bind parameter for each literal, so the SELECT and the GROUP BY
+    # are no longer the same expression to Postgres and it rejects the query
+    # with "utm_source must appear in the GROUP BY clause".
+    channel_expr = func.coalesce(MerchantLeadModel.utm_source, "unattributed")
     channel_rows = (
         await db.execute(
             select(
-                func.coalesce(MerchantLeadModel.utm_source, "unattributed"),
+                channel_expr,
                 func.count(),
                 func.count(MerchantLeadModel.store_created_at),
-            ).group_by(func.coalesce(MerchantLeadModel.utm_source, "unattributed"))
+            ).group_by(channel_expr)
         )
     ).all()
 
