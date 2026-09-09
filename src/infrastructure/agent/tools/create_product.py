@@ -6,9 +6,16 @@ builds a preview, and creates nothing. The merchant confirms via
 `CreateProductUseCase` that `POST /stores/{id}/products` runs
 (Constitution III).
 
-New products land as **drafts**. A model that misheard a price should not be
-able to put a live, buyable product in front of shoppers on one confirmation;
-publishing stays the merchant's separate, deliberate act in the dashboard.
+New products go **live on confirm**. The confirmation step is the review — the
+merchant reads the price, the name and the images in the proposal card before
+anything is written, so a second trip to the dashboard to flip a switch only
+made the tool feel broken. `status: "draft"` is still available for a merchant
+who says they want to finish it later.
+
+The tool also fills the SEO a product needs to be findable — title, meta
+description, tags and slug. The model supplies them when it has something
+better to say; anything it leaves out is derived from the name and description
+here, so a product is never created with empty SEO.
 """
 
 from __future__ import annotations
@@ -62,16 +69,81 @@ INPUT_SCHEMA: dict[str, Any] = {
                 "attached to the conversation."
             ),
         },
+        "status": {
+            "type": "string",
+            "enum": ["active", "draft"],
+            "description": (
+                "'active' (default) publishes it on confirm. Use 'draft' only "
+                "when the merchant says they want to finish it later."
+            ),
+        },
+        "seo_title": {
+            "type": "string",
+            "description": (
+                "Search-result title, at most 60 characters. Lead with the "
+                "product name. Derived from the name when omitted."
+            ),
+        },
+        "seo_description": {
+            "type": "string",
+            "description": (
+                "Search-result summary, at most 160 characters — what the "
+                "product is and why to buy it. Derived when omitted."
+            ),
+        },
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Up to 10 short search keywords a shopper would actually type."
+            ),
+        },
     },
     "required": ["name", "price"],
     "additionalProperties": False,
 }
 
 
-def _summary(locale: str, name: str, price: float, currency: str) -> str:
+_SEO_TITLE_MAX = 60
+_SEO_DESC_MAX = 160
+_MAX_TAGS = 10
+
+
+def _clip(value: str, limit: int) -> str:
+    """Trim to `limit`, on a word boundary where one is close to the end."""
+    value = " ".join(value.split())
+    if len(value) <= limit:
+        return value
+    cut = value[:limit].rstrip()
+    space = cut.rfind(" ")
+    return cut[:space] if space > limit * 0.6 else cut
+
+
+def _seo(args: dict[str, Any], name: str, description: str | None) -> dict[str, Any]:
+    """SEO the model supplied, filled in from the product where it is missing.
+
+    Empty SEO is the default a merchant never goes back to fix, so the fallback
+    matters more than the ideal: a title and a description that name the product
+    beat two empty columns.
+    """
+    title = str(args.get("seo_title") or "").strip() or name
+    desc = str(args.get("seo_description") or "").strip() or (description or name)
+    tags = [str(t).strip() for t in (args.get("tags") or []) if str(t).strip()][
+        :_MAX_TAGS
+    ]
+    return {
+        "seo_title": _clip(title, _SEO_TITLE_MAX),
+        "seo_description": _clip(desc, _SEO_DESC_MAX),
+        "tags": tags,
+    }
+
+
+def _summary(locale: str, name: str, price: float, currency: str, status: str) -> str:
     if locale == "ar":
-        return f"إضافة منتج «{name}» بسعر {price:g} {currency} (مسودة)"
-    return f"Add product “{name}” at {price:g} {currency} (draft)"
+        state = "مسودة" if status == "draft" else "منشور"
+        return f"إضافة منتج «{name}» بسعر {price:g} {currency} ({state})"
+    state = "draft" if status == "draft" else "published"
+    return f"Add product “{name}” at {price:g} {currency} ({state})"
 
 
 async def create_product(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
@@ -156,20 +228,27 @@ async def create_product(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
     except Exception:  # noqa: BLE001 — the preview is still useful without it
         logger.warning("agent_tool_currency_lookup_failed", tool="create_product")
 
+    description = (
+        (str(args.get("description")).strip() or None)
+        if args.get("description")
+        else None
+    )
+    # Live on confirm unless the merchant asked to keep it a draft.
+    status = "draft" if str(args.get("status") or "").lower() == "draft" else "active"
+
     product = {
         "name": name,
         "price": price,
         "compare_at_price": compare_at,
         "quantity": quantity,
-        "description": (str(args.get("description")).strip() or None)
-        if args.get("description")
-        else None,
+        "description": description,
         "category_id": str(category_id) if category_id else None,
         "images": images,
-        "status": "draft",
+        "status": status,
         "currency": currency,
+        **_seo(args, name, description),
     }
-    summary = _summary(ctx.locale, name, price, currency)
+    summary = _summary(ctx.locale, name, price, currency, status)
     diff = {"action": "create_product", "product": product}
 
     return ToolResult(
@@ -189,10 +268,12 @@ SPEC = {
     "name": "create_product",
     "description": (
         "Propose adding a NEW product to the store. Returns a preview for the "
-        "merchant to CONFIRM — it creates nothing until confirmed. The product is "
-        "created as a DRAFT, so it is not visible to shoppers until the merchant "
-        "publishes it. Use for 'add a product called Linen Scarf for 450'. To "
-        "change an existing product, use update_product instead."
+        "merchant to CONFIRM — it creates nothing until confirmed, and goes "
+        "live on the storefront when they do. Fill seo_title, seo_description "
+        "and tags so the product is findable; pass status 'draft' only if the "
+        "merchant says they want to finish it later. Use for 'add a product "
+        "called Linen Scarf for 450'. To change an existing product, use "
+        "update_product instead."
     ),
     "input_schema": INPUT_SCHEMA,
     "risk_tier": RiskTier.CONFIRM,

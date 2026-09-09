@@ -32,11 +32,22 @@ SIGNAL_DETECTORS: set[str] = {
 
 
 async def _safe_scalar(session: AsyncSession, sql: str, params: dict) -> int:
+    """Run one detector query; 0 when it cannot be answered.
+
+    The savepoint is what makes "best effort" true on Postgres. A failed
+    statement aborts the whole transaction, so catching the error and returning
+    0 is not enough — every later statement on the same session, including the
+    INSERT that persists the merchant's turn, then dies with
+    InFailedSQLTransactionError and the turn ends in "the assistant failed
+    unexpectedly". begin_nested() rolls back to the savepoint instead, leaving
+    the surrounding transaction usable.
+    """
     try:
-        row = await session.execute(text(sql), params)
-        val = row.scalar()
-        return int(val or 0)
-    except Exception:  # noqa: BLE001 — absent table/column → treat as no signal
+        async with session.begin_nested():
+            row = await session.execute(text(sql), params)
+            return int(row.scalar() or 0)
+    except Exception as exc:  # noqa: BLE001 — absent table/column → no signal
+        logger.warning("agent_growth_detector_failed", error=str(exc))
         return 0
 
 
@@ -44,10 +55,14 @@ async def detect_metrics(session: AsyncSession, store_id) -> dict[str, int]:
     """Best-effort live metrics for the known detectors (0 when unavailable)."""
     sid = {"sid": str(store_id)}
     return {
+        # Abandoned carts are their own table, not an order status. The old
+        # query compared orderstatus against 'abandoned'/'pending'/'cart',
+        # none of which are labels in that enum (they are PENDING, CONFIRMED,
+        # …), so Postgres rejected it every time and the signal was always 0.
         "orders.abandoned_count": await _safe_scalar(
             session,
-            "SELECT COUNT(*) FROM public.orders "
-            "WHERE store_id = :sid AND status IN ('abandoned', 'pending', 'cart')",
+            "SELECT COUNT(*) FROM public.abandoned_checkouts "
+            "WHERE store_id = :sid AND recovered_at IS NULL",
             sid,
         ),
         "catalog.bundle_like_count": await _safe_scalar(

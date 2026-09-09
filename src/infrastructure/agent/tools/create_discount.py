@@ -9,6 +9,7 @@ the use-case; the LLM never supplies tenancy.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from src.application.agent.tools import ToolContext, ToolResult
@@ -44,10 +45,42 @@ INPUT_SCHEMA: dict[str, Any] = {
             "minimum": 1,
             "description": "Optional cap on how many times the coupon can be used.",
         },
+        "starts_at": {
+            "type": "string",
+            "description": (
+                "Optional ISO-8601 datetime the sale starts. Omit to start "
+                "immediately. Use for 'run a 20% sale from Friday'."
+            ),
+        },
+        "ends_at": {
+            "type": "string",
+            "description": (
+                "Optional ISO-8601 datetime the sale ends. Must be after "
+                "starts_at. Omit for a sale with no end date."
+            ),
+        },
     },
     "required": ["code", "discount_type", "value"],
     "additionalProperties": False,
 }
+
+
+def _window(args: dict) -> tuple[dict, str | None]:
+    """Parse the optional sale window; ({}, None) when the merchant gave none."""
+    out: dict = {}
+    for key in ("starts_at", "ends_at"):
+        raw = args.get(key)
+        if raw in (None, ""):
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except ValueError:
+            return {}, f"'{key}' must be an ISO-8601 datetime."
+        # A naive datetime here would compare wrongly against stored UTC.
+        out[key] = (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).isoformat()
+    if "starts_at" in out and "ends_at" in out and out["ends_at"] <= out["starts_at"]:
+        return {}, "'ends_at' must be after 'starts_at'."
+    return out, None
 
 
 def _summary(locale: str, code: str, discount_type: str, value: float) -> str:
@@ -92,6 +125,14 @@ async def create_discount(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
             params["usage_limit"] = int(args["usage_limit"])
         except (TypeError, ValueError):
             return ToolResult.invalid_args("'usage_limit' must be an integer.")
+
+    # A scheduled sale is the same coupon with a window; CreateCouponDTO has
+    # carried valid_from/valid_until all along, so nothing new is needed to
+    # persist it.
+    window, err = _window(args)
+    if err:
+        return ToolResult.invalid_args(err)
+    params.update(window)
 
     summary = _summary(ctx.locale, code, discount_type, value)
     diff = {"action": "create_coupon", **params}
