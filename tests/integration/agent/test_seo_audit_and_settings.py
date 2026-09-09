@@ -87,6 +87,19 @@ def test_defaults_favour_being_found():
     assert m.llms_txt_enabled is True
 
 
+def test_training_is_the_one_default_that_says_no():
+    """Being read to answer a question and being trained on are different
+    bargains. The merchant gets nothing back for the second, so silence
+    means no — the opposite of every other default here."""
+    assert StoreSeoSettings().ai_training_allowed is False
+
+
+def test_opting_into_training_is_surfaced_not_buried():
+    seo = StoreSeoSettings(**_COMPLETE, ai_training_allowed=True).model_dump()
+    findings = _audit(seo, "Vionne")
+    assert [f["fix_with_key"] for f in findings] == ["ai_training_allowed"]
+
+
 def test_normalize_survives_a_malformed_blob():
     """A bad settings blob must degrade, never break the storefront payload."""
     assert normalize_store_seo("not a dict")["robots_indexing_enabled"] is True

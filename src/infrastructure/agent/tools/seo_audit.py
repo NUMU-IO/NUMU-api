@@ -151,6 +151,19 @@ def _audit(seo: dict, store_name: str | None) -> list[dict[str, str]]:
                 "oversight — but worth confirming it was chosen.",
             )
         )
+    if seo.get("ai_training_allowed"):
+        out.append(
+            _finding(
+                "geo",
+                "low",
+                "ai_training_allowed",
+                "Store content may be used for AI training",
+                "The merchant has opted in, so their product photography and "
+                "copy can be absorbed into model weights. A real choice, and "
+                "not the default — surfaced so it is a decision they remember "
+                "making rather than one they find out about later.",
+            )
+        )
     if not seo.get("same_as"):
         out.append(
             _finding(
