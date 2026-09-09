@@ -27,6 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
+from src.infrastructure.database.models.public.merchant_lead import MerchantLeadModel
 from src.infrastructure.database.models.public.referral import MerchantReferralModel
 from src.infrastructure.database.models.public.tenant import TenantModel
 
@@ -52,10 +53,18 @@ def tier_for(count: int) -> tuple[str, float]:
 async def resolve_referrer(db: AsyncSession, code: str) -> UUID | None:
     """The tenant behind a referral code, or None.
 
-    Two lookups, because a code exists before anyone has used it: the first
-    referral through a code has no `merchant_referrals` row to match against,
-    so it falls back to the subdomain the code was minted from
-    (`STORENAME-NUMU-XXXX`). Same order the route used.
+    Three lookups, narrowest first.
+
+    1. An existing `merchant_referrals` row with this code — the cheapest
+       answer, and the only one that works for the historical
+       `STORENAME-NUMU-XXXX` codes minted before codes were persisted.
+    2. The lead that owns this code, and the tenant it became. This is the
+       path every code takes now: one code per merchant, stored on the lead,
+       sent by the referral email and shown on the merchant's page.
+    3. The old subdomain guess, kept only for codes issued by the previous
+       unpersisted generator. It matches on a LIKE and can therefore match
+       the wrong store, so it runs last and only when the first two find
+       nothing — it is a compatibility shim, not a lookup.
     """
     referrer = (
         await db.execute(
@@ -67,6 +76,21 @@ async def resolve_referrer(db: AsyncSession, code: str) -> UUID | None:
     if referrer:
         return referrer
 
+    owner_tenant = (
+        await db.execute(
+            select(MerchantLeadModel.tenant_id)
+            .where(
+                MerchantLeadModel.referral_code == code,
+                MerchantLeadModel.tenant_id.isnot(None),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if owner_tenant:
+        return owner_tenant
+
+    if "-NUMU-" not in code:
+        return None
     prefix = code.split("-NUMU-")[0].strip().lower()
     if not prefix:
         return None
@@ -136,3 +160,39 @@ async def apply_referral(
     except Exception:
         logger.warning("referral_apply_failed", exc_info=True)
         return False
+
+
+async def code_for_tenant(db: AsyncSession, tenant_id: UUID) -> str | None:
+    """THE referral code for a merchant. One code, persisted, shared.
+
+    There used to be two. `merchant_leads.referral_code` is minted by
+    `ensure_referral_code`, stored, uniquely indexed, and is what the
+    marketing referral email sends. The merchant's own page minted a second
+    one — `STORENAME-NUMU-XXXX` — and never saved it, so a fresh random
+    suffix came back on every request: a merchant who shared their link on
+    Monday had a different code by Tuesday, and the Monday link named
+    something that existed nowhere. That is what the subdomain LIKE fallback
+    in `resolve_referrer` was compensating for.
+
+    Both programmes now key off the same string: the email sends it, the page
+    shows it, lead attribution resolves it, and store creation redeems it.
+
+    Returns None when the tenant has no lead row — merchants created by an
+    admin, or before leads shipped. The caller decides what to show.
+    """
+    from src.application.services import referral_service
+
+    # ORM, not raw SQL with a hardcoded `public.` prefix: the tests run on
+    # SQLite, which has no schemas, and the literal string worked only on
+    # Postgres.
+    lead_id = (
+        await db.execute(
+            select(MerchantLeadModel.id)
+            .where(MerchantLeadModel.tenant_id == tenant_id)
+            .order_by(MerchantLeadModel.created_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if lead_id is None:
+        return None
+    return await referral_service.ensure_referral_code(db, lead_id)

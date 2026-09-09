@@ -28,8 +28,12 @@ import secrets
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.infrastructure.database.models.public.merchant_lead import (
+    MerchantLeadModel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,38 +110,47 @@ def generate_referral_code() -> str:
 async def ensure_referral_code(db: AsyncSession, lead_id: UUID) -> str | None:
     """Give a lead a code to share, if they do not have one. Never raises.
 
+    THE code for that merchant: the referral email sends it, the merchant's
+    own page shows it, lead attribution resolves it and store creation
+    redeems it against the merchant referral programme.
+
     Retries on collision rather than pre-checking: the unique index is the
     authority, and a SELECT-then-INSERT would race with a second request for
     the same merchant.
+
+    Written through the ORM rather than raw SQL. The previous version bound
+    `str(lead_id)` against `public.merchant_leads` — correct only on Postgres,
+    where UUID is native and `public` exists. SQLAlchemy stores UUIDs as
+    CHAR(32) without dashes on SQLite, so the comparison never matched, and
+    the blanket `except` below turned that into a silent None. The function
+    had therefore never run under test, which is how the merchant page came to
+    mint a second throwaway code of its own.
     """
     try:
-        existing = (
+        lead = (
             await db.execute(
-                text("SELECT referral_code FROM public.merchant_leads WHERE id = :id"),
-                {"id": str(lead_id)},
+                select(MerchantLeadModel).where(MerchantLeadModel.id == lead_id)
             )
-        ).first()
-        if existing is None:
+        ).scalar_one_or_none()
+        if lead is None:
             return None
-        if existing[0]:
-            return str(existing[0])
+        if lead.referral_code:
+            return str(lead.referral_code)
 
         for _ in range(5):
             code = generate_referral_code()
-            row = (
+            taken = (
                 await db.execute(
-                    text(
-                        "UPDATE public.merchant_leads SET referral_code = :c "
-                        "WHERE id = :id AND referral_code IS NULL "
-                        "AND NOT EXISTS ("
-                        "  SELECT 1 FROM public.merchant_leads WHERE referral_code = :c"
-                        ") RETURNING referral_code"
-                    ),
-                    {"c": code, "id": str(lead_id)},
+                    select(MerchantLeadModel.id)
+                    .where(MerchantLeadModel.referral_code == code)
+                    .limit(1)
                 )
-            ).first()
-            if row is not None:
-                return code
+            ).scalar_one_or_none()
+            if taken is not None:
+                continue
+            lead.referral_code = code
+            await db.flush()
+            return code
         logger.warning("referral_code_generation_exhausted lead_id=%s", lead_id)
         return None
     except Exception as exc:  # noqa: BLE001 — a code is never worth a 500
