@@ -535,3 +535,48 @@ async def test_ocr_text_without_amount_gets_specific_reason(test_session):
     assert result.on_hold is True
     assert "ocr_no_amount_found" in result.decision.reasons
     assert "ocr_verification_unavailable" not in result.decision.reasons
+
+
+@pytest.mark.asyncio
+async def test_a_live_trial_can_take_orders(test_session, monkeypatch):
+    """The hub promises a trialling merchant "every feature open" for 37 days.
+
+    The gate answered their shoppers with "not accepting orders yet — opening
+    soon" for the whole of it, so the trial was 37 days of building a shop that
+    could never make a sale. Payment is enforced by the trial's own expiry
+    instead: `expire_trials` moves the tenant to read_only the day it lapses.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from src.config.settings import get_settings
+
+    monkeypatch.setattr(get_settings(), "ff_golive_gate", True)
+    service = WalletService(test_session, cache=None)
+    service._cache = None
+
+    live = await _mk_tenant(test_session, plan="trial")
+    live.lifecycle_state = "trial"
+    live.expires_at = datetime.now(UTC) + timedelta(days=20)
+    await test_session.commit()
+    assert await service.checkout_gate_state(live.id) == "ok"
+
+    # Expired, but `expire_trials` has not run yet — the hourly gap must not be
+    # an hour in which a lapsed trial still sells.
+    lapsed = await _mk_tenant(test_session, plan="trial")
+    lapsed.lifecycle_state = "trial"
+    lapsed.expires_at = datetime.now(UTC) - timedelta(minutes=5)
+    await test_session.commit()
+    assert await service.checkout_gate_state(lapsed.id) == "not_live"
+
+    # A tenant that never entered the trial lifecycle is still gated: `free` is
+    # what a merchant lands on when their trial is long gone.
+    never = await _mk_tenant(test_session, plan="free")
+    await test_session.commit()
+    assert await service.checkout_gate_state(never.id) == "not_live"
+
+    # The demo sandbox is never live, whatever its expiry says.
+    demo = await _mk_tenant(test_session, plan="demo")
+    demo.lifecycle_state = "demo"
+    demo.expires_at = datetime.now(UTC) + timedelta(days=5)
+    await test_session.commit()
+    assert await service.checkout_gate_state(demo.id) == "not_live"

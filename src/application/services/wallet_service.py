@@ -16,6 +16,7 @@ Cache invalidation is the caller's post-commit responsibility via
 """
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -33,7 +34,10 @@ from src.core.entities.wallet import (
     WalletTransactionKind,
 )
 from src.infrastructure.cache.redis_cache import RedisCacheService
-from src.infrastructure.database.models.public.tenant import TenantModel
+from src.infrastructure.database.models.public.tenant import (
+    TenantLifecycleState,
+    TenantModel,
+)
 from src.infrastructure.database.models.public.wallet import (
     MerchantWalletModel,
     WalletTransactionModel,
@@ -341,8 +345,24 @@ class WalletService:
         # New tenants (created after the golive_exempt backfill) can build
         # their store but cannot take orders until they choose a paid plan
         # or Pay as you Grow. Existing tenants carry golive_exempt=true.
+        #
+        # A LIVE TRIAL is exempt. The hub tells a trialling merchant they have
+        # 37 days with "every feature open", and this gate answered their
+        # shoppers with "not accepting orders yet — opening soon": the trial
+        # was 37 days of building a shop that could never take a sale, which is
+        # not a trial of the product. The trial's own expiry is what enforces
+        # payment now — `expire_trials` moves the tenant to read_only on the
+        # day it lapses, and the storefront lock takes over from there.
+        #
+        # Checked against the clock rather than the lifecycle alone: expiry and
+        # the hourly task are up to an hour apart, and that hour must not be a
+        # window where an expired trial still sells.
+        on_live_trial = tenant.lifecycle_state == TenantLifecycleState.TRIAL and (
+            tenant.expires_at is None or tenant.expires_at > datetime.now(UTC)
+        )
         if (
             (admin.golive_gate_enabled or settings.ff_golive_gate)
+            and not on_live_trial
             and tenant.plan in ("trial", "demo", "free")
             and not flags.get("golive_exempt")
         ):
