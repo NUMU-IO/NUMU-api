@@ -6,7 +6,6 @@ POST /api/v1/referrals/apply         — apply a referral code during signup
 """
 
 import logging
-import secrets
 from typing import Annotated
 from uuid import UUID
 
@@ -99,21 +98,31 @@ async def get_referral_code(
     if not tenant:
         raise HTTPException(status_code=404, detail="No tenant found")
 
-    # Check if this tenant has any referral rows as referrer — derive code from first one
-    q = (
-        select(MerchantReferralModel.referral_code)
-        .where(MerchantReferralModel.referrer_tenant_id == tenant.id)
-        .limit(1)
-    )
-    existing_code = (await db.execute(q)).scalar_one_or_none()
+    # One code per merchant, and it is the one already stored on their lead —
+    # the same string the referral email sends and lead attribution resolves.
+    #
+    # This used to mint `STORENAME-NUMU-XXXX` with a random suffix and never
+    # save it, so every call returned a DIFFERENT code unless the merchant
+    # already had a referral row. A merchant who copied their link, shared it,
+    # and came back the next day was handing out a code that matched nothing.
+    from src.application.services.merchant_referrals import code_for_tenant
 
-    if existing_code:
-        code = existing_code
-    else:
-        # Generate a new code: STORENAME-NUMU-XXXX
-        safe_name = tenant.subdomain.upper().replace("-", "")[:8]
-        suffix = secrets.token_hex(2).upper()
-        code = f"{safe_name}-NUMU-{suffix}"
+    existing_code = (
+        await db.execute(
+            select(MerchantReferralModel.referral_code)
+            .where(MerchantReferralModel.referrer_tenant_id == tenant.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    # An existing row wins: codes already shared must keep working.
+    code = existing_code or await code_for_tenant(db, tenant.id)
+    if not code:
+        raise HTTPException(
+            status_code=404,
+            detail="No referral code yet — this store has no lead record.",
+        )
+    await db.commit()
 
     return SuccessResponse(
         data=ReferralCodeResponse(
