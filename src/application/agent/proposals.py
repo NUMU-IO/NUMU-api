@@ -410,9 +410,10 @@ async def _apply_create_product(
 ) -> dict:
     """Create the proposed product through the same use case the API route runs.
 
-    Drafts by default (the tool sets it): a model that misheard a price must not
-    be able to put a live, buyable product in front of shoppers on one
-    confirmation. Publishing stays a deliberate act in the dashboard.
+    Live by default (the tool sets it): the confirmation card IS the review, so
+    requiring a second trip to the dashboard to publish only made the tool look
+    broken. The merchant can still ask for a draft, and undo deletes whatever
+    was created either way.
     """
     from src.application.dto.product import CreateProductDTO
     from src.application.use_cases.products.create_product import (
@@ -437,7 +438,10 @@ async def _apply_create_product(
             UUID(str(params["category_id"])) if params.get("category_id") else None
         ),
         images=list(params.get("images") or []),
-        status=params.get("status") or "draft",
+        status=params.get("status") or "active",
+        seo_title=params.get("seo_title"),
+        seo_description=params.get("seo_description"),
+        tags=list(params.get("tags") or []),
     )
     use_case = CreateProductUseCase(
         product_repository=ProductRepository(session),
