@@ -67,6 +67,12 @@ class AdminStoreListItem(BaseModel):
     owner_email: str | None = None
     plan: str | None = None
     lifecycle_state: str | None = None
+    # Days until the trial expires and the storefront locks — null for anyone
+    # not on a trial. The list showed the plan alone, which says a merchant is
+    # trialling but never how long is left, so "who do I call this week" could
+    # not be answered from this screen.
+    trial_days_remaining: int | None = None
+    trial_ends_at: str | None = None
     is_internal: bool = False
     # Founder-merchant cohort year ("2025"), or null. Lives on the tenant.
     founder_cohort: str | None = None
@@ -98,6 +104,14 @@ def _ts(dt) -> str | None:
     return dt.isoformat() if dt else None
 
 
+def _enum(v) -> str | None:
+    """Lifecycle/status columns are sometimes a StrEnum and sometimes a plain
+    string, depending on whether the row came through the ORM or a raw select."""
+    if v is None:
+        return None
+    return v.value if hasattr(v, "value") else str(v)
+
+
 def _store_to_list_item(
     store: StoreModel,
     owner: UserModel | None = None,
@@ -120,6 +134,19 @@ def _store_to_list_item(
         owner_email=owner.email if owner else None,
         plan=tenant.plan if tenant else None,
         lifecycle_state=tenant.lifecycle_state if tenant else None,
+        # `days_remaining` is derived from `expires_at`, which only a trial or
+        # a demo carries; gating on the lifecycle keeps a converted merchant's
+        # leftover date from rendering as a countdown they are not on.
+        trial_days_remaining=(
+            tenant.days_remaining
+            if tenant and _enum(tenant.lifecycle_state) == "trial"
+            else None
+        ),
+        trial_ends_at=(
+            _ts(tenant.expires_at)
+            if tenant and _enum(tenant.lifecycle_state) == "trial"
+            else None
+        ),
         is_internal=tenant.is_internal if tenant else False,
         founder_cohort=tenant.founder_cohort if tenant else None,
         logo_url=store.logo_url,
@@ -338,11 +365,6 @@ async def get_store_detail(
 
     def _iso(dt) -> str | None:
         return dt.isoformat() if dt else None
-
-    def _enum(v) -> str | None:
-        if v is None:
-            return None
-        return v.value if hasattr(v, "value") else str(v)
 
     data = {
         "store": {

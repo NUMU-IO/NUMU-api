@@ -965,6 +965,11 @@ async def get_current_user(
                 is_writable=tenant.is_writable,
                 expires_at=tenant.expires_at.isoformat() if tenant.expires_at else None,
                 days_remaining=tenant.days_remaining,
+                trial_started_at=(
+                    tenant.trial_started_at.isoformat()
+                    if tenant.trial_started_at
+                    else None
+                ),
                 demo_email=tenant.demo_email,
                 feature_flags={**(tenant.feature_flags or {}), **platform_flags},
                 founder_cohort=tenant.founder_cohort,
