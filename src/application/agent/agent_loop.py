@@ -125,11 +125,60 @@ class AgentLoop:
         ]
         tools = self._registry.openai_tools()
 
-        for _ in range(self._max_iterations):
+        for iteration in range(self._max_iterations):
+            # On the final allowed iteration the loop cannot execute another
+            # tool, so advertising 22 of them invites a call that would be
+            # silently dropped and leaves the merchant with a reply that says
+            # it is about to do something it never did.
+            #
+            # This is a correctness fix, not a speed one. It also drops ~4,200
+            # tokens of schema from that request, but with max_iterations at 5
+            # and a typical turn using two calls, it fires only on a runaway
+            # turn. The prompt cost on the calls that DO run every time is
+            # still there; see the streaming work for the latency the merchant
+            # actually feels.
+            last_iteration = iteration == self._max_iterations - 1
+            call_tools = None if last_iteration else tools
+
+            # Stream once the tools have run. The first call usually returns a
+            # tool request and no prose, so streaming it shows the merchant
+            # nothing; every call after that is the answer being written, and
+            # that is the wait worth filling.
+            #
+            # The capability is DECLARED by the provider, not sniffed with
+            # hasattr: a MagicMock answers yes to every attribute, so the test
+            # doubles all took the streaming path and the suite went from 79s
+            # to 577s before this was explicit.
+            # `is True`, not truthiness: a MagicMock returns a Mock for any
+            # attribute and a Mock is truthy, so `getattr(...)` alone would
+            # have kept every test double on the streaming path — the same
+            # trap as hasattr, one layer down.
+            streaming = (
+                iteration > 0
+                and getattr(self._provider, "supports_streaming", False) is True
+            )
+            streamed_any = False
             try:
-                response = await self._provider.chat(
-                    messages, tools=tools, temperature=self._temperature
-                )
+                if streaming:
+                    response = None
+                    async for chunk in self._provider.chat_stream(
+                        messages, tools=call_tools, temperature=self._temperature
+                    ):
+                        if isinstance(chunk, str):
+                            streamed_any = True
+                            yield AgentEvent("token", {"text": chunk})
+                        else:
+                            response = chunk
+                    if response is None:
+                        raise LLMProviderError(
+                            "stream ended without a response", kind="upstream"
+                        )
+                else:
+                    response = await self._provider.chat(
+                        messages,
+                        tools=call_tools,
+                        temperature=self._temperature,
+                    )
             except LLMRateLimitError:
                 # The route/use-case decides whether to queue+retry; surface a soft state.
                 yield AgentEvent(
@@ -169,7 +218,11 @@ class AgentLoop:
 
             if not response.tool_calls:
                 result.reply_text = response.content or ""
-                if result.reply_text:
+                # Only send the whole text when it has NOT been streamed —
+                # otherwise the merchant would watch it type and then see it
+                # replaced by an identical copy. The client already holds the
+                # tokens; `done` tells it the text is final.
+                if result.reply_text and not streamed_any:
                     yield AgentEvent("message", {"text": result.reply_text})
                 yield AgentEvent("done", {"model_used": response.model})
                 return
