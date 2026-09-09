@@ -125,6 +125,20 @@ class StoreSeoSettings(BaseModel):
     # than the copy is worth withholding.
     ai_crawlers_allowed: bool = True
 
+    # Whether the store's text and photography may be used as TRAINING data,
+    # expressed as the `ai-train` Content-Signal. Deliberately a third
+    # decision, not a consequence of the two above: being read to answer a
+    # shopper's question today and being absorbed into a model's weights
+    # forever are different bargains, and a merchant can rationally want the
+    # first without the second.
+    #
+    # Defaults to False, unlike its siblings. Everywhere else here the default
+    # favours being found, because obscurity costs a shop sales. This one is
+    # the merchant's own product photography and copy, and the merchant gets
+    # nothing back for it — so silence means no. Was hardcoded `ai-train=no`
+    # platform-wide in the storefront; this makes it theirs to change.
+    ai_training_allowed: bool = False
+
     # Serve /llms.txt — a short, plain-text map of the store for models that
     # cannot afford to crawl the whole site.
     llms_txt_enabled: bool = True

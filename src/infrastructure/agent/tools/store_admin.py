@@ -72,6 +72,11 @@ WRITABLE_SETTINGS: dict[str, tuple[tuple[str, ...], str, str]] = {
         "bool",
     ),
     "llms_txt_enabled": (("seo", "llms_txt_enabled"), "llms.txt", "bool"),
+    "ai_training_allowed": (
+        ("seo", "ai_training_allowed"),
+        "AI training on store content",
+        "bool",
+    ),
     "contact_email": (("seo", "contact_email"), "Contact email", "text"),
     "contact_phone": (("seo", "contact_phone"), "Contact phone", "text"),
     # JSON values: validated through StoreSeoSettings itself, so the agent can
