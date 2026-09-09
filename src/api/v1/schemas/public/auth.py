@@ -206,6 +206,12 @@ class TenantInfoResponse(BaseModel):
     is_writable: bool
     expires_at: str | None = None
     days_remaining: int | None = None
+    # When the trial began. The hub's countdown draws one mark per day of the
+    # WHOLE trial and fills the days still left, so it needs the length as well
+    # as the remainder — and the length is per-merchant, since the admin can
+    # change `signup_settings.trial_days` at any time and merchants who signed
+    # up under the old value keep the window they were given.
+    trial_started_at: str | None = None
     # Captured email from the Try-a-Demo form, so the merchant hub can
     # prefill the demo\u2192trial upgrade form. Only populated for demo tenants.
     demo_email: str | None = None
