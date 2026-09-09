@@ -22,6 +22,7 @@ from src.api.dependencies.permissions import get_current_membership
 from src.api.dependencies.tenant import get_current_tenant
 from src.config import settings as app_settings
 from src.infrastructure.cache.redis_cache import RedisCacheService
+from src.infrastructure.database.connection import set_tenant_id
 from src.infrastructure.database.models import StoreModel
 from src.infrastructure.database.models.public import TenantModel
 from src.infrastructure.database.models.public.tenant_membership import (
@@ -74,6 +75,17 @@ async def get_agent_context(
         if membership.is_owner:
             return True
         return effective.has_permission(code)
+
+    # Seed the tenant ContextVar the agent repositories read via get_tenant_id.
+    # The tenant middleware only sets it when the request carries a tenant host,
+    # which a hub call to the shared API domain does not, so every agent route
+    # except /chat was failing closed with "No tenant context" — the history
+    # list came back empty and the digest never rendered. /chat happened to work
+    # because it re-seeds this itself: a StreamingResponse body is iterated
+    # after the endpoint returns, once the request-scoped value is already gone.
+    # Setting it here covers every route that shares this dependency; /chat
+    # still needs its own call for that later-context reason.
+    set_tenant_id(tenant.id)
 
     return AgentRequestContext(
         tenant_id=tenant.id,
