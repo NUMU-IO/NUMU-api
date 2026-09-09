@@ -3,6 +3,7 @@
 import logging
 import re
 import uuid
+from datetime import UTC, datetime
 from uuid import UUID
 
 from slugify import slugify
@@ -16,6 +17,7 @@ from src.core.interfaces.repositories.onboarding_repository import (
 )
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.value_objects.money import Currency
+from src.infrastructure.database.models.public.tenant import TenantLifecycleState
 from src.infrastructure.tenancy.service import TenantService
 
 logger = logging.getLogger(__name__)
@@ -133,8 +135,19 @@ class CreateStoreUseCase:
         dto: CreateStoreDTO,
         owner_id: UUID,
         plan: str = "free",
+        trial_expires_at: datetime | None = None,
     ) -> StoreDTO:
-        """Create a new store for the given owner."""
+        """Create a new store for the given owner.
+
+        `trial_expires_at` puts the new tenant into the `trial` lifecycle with
+        a real expiry. Without it a tenant is born `active` with no expiry,
+        which is what every direct signup produced: `expire_trials` selects on
+        `lifecycle_state = trial AND expires_at < now()`, so it never had a row
+        to find and no merchant was ever asked to subscribe. The date comes
+        from the user's signup, not from this call, so a merchant who signs up
+        and opens their store a week later gets the remainder of their trial
+        rather than a fresh one.
+        """
         # Validate and normalize subdomain
         subdomain = validate_subdomain(dto.subdomain)
 
@@ -213,6 +226,13 @@ class CreateStoreUseCase:
             owner_id=owner_id,
             plan=plan,
             is_active=True,
+            lifecycle_state=(
+                TenantLifecycleState.TRIAL
+                if trial_expires_at
+                else TenantLifecycleState.ACTIVE
+            ),
+            expires_at=trial_expires_at,
+            trial_started_at=datetime.now(UTC) if trial_expires_at else None,
         )
 
         store = Store(

@@ -184,14 +184,26 @@ async def create_store(
 
     from src.infrastructure.database.models.public.user import UserModel
 
-    # Determine plan based on user's trial status
+    # Determine plan based on user's trial status.
+    #
+    # The plan used to be stamped "demo", which read in admin as though the
+    # merchant were in a throwaway sandbox — they are on the paid product for
+    # free, which is a different thing and a different conversation. It is
+    # "trial", the same word the lifecycle column, the billing page and the
+    # merchant's own banner use.
     user_result = await db.execute(select(UserModel).where(UserModel.id == user_id))
     user = user_result.scalar_one_or_none()
-    plan = (
-        "demo"
+    # The signup stamp is the authority on when this trial ends: a merchant who
+    # registers on the 1st and opens their store on the 8th gets the remaining
+    # 30 days, not a fresh 37 from today. `None` once it has passed, so a
+    # returning merchant with a long-dead trial opens a store on `free` rather
+    # than one that expired before it existed.
+    trial_expires_at = (
+        user.trial_ends_at
         if user and user.trial_ends_at and user.trial_ends_at > datetime.now(UTC)
-        else "free"
+        else None
     )
+    plan = "trial" if trial_expires_at else "free"
 
     # Enforce the plan's max_stores before doing any work.
     #
@@ -267,7 +279,9 @@ async def create_store(
         contact_phone=request.contact_phone,
     )
 
-    result = await use_case.execute(dto, owner_id=user_id, plan=plan)
+    result = await use_case.execute(
+        dto, owner_id=user_id, plan=plan, trial_expires_at=trial_expires_at
+    )
 
     # Landing plan intent: a visitor who clicked "Pay as you Grow" on the
     # pricing page goes straight onto payg — no billing page detour. The
