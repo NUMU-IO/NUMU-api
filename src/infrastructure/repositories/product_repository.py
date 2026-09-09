@@ -78,6 +78,12 @@ class ProductRepository(IProductRepository):
             category_id=model.category_id,
             tags=model.tags or [],
             attributes=model.attributes,
+            # Phase 8.1 option axes. Omitting this left Product.options at its
+            # [] default on every repository read, so the storefront's
+            # _resolve_options_for_product could never see the axes the hub
+            # and the product CRUD write — no V3 theme could render a
+            # size/colour selector even with a fully populated variant matrix.
+            options=list(model.options or []),
             metadata=model.extra_data or {},
             brand=model.brand,
             robots_noindex=model.robots_noindex,

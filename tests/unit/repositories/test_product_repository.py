@@ -390,3 +390,74 @@ class TestProductRepository:
         results = await self.repository.search(store_id, query)
 
         assert len(results) == 2
+
+    @pytest.mark.parametrize(
+        "stored,expected",
+        [
+            (
+                [{"name": "Color", "position": 0, "values": ["Denim", "Navy Blue"]}],
+                [{"name": "Color", "position": 0, "values": ["Denim", "Navy Blue"]}],
+            ),
+            (None, []),
+            ([], []),
+        ],
+    )
+    def test_to_entity_maps_option_axes(self, stored, expected):
+        """`_to_entity` must carry `options` onto the domain entity.
+
+        It didn't, so Product.options sat at its [] default on every
+        repository read. The storefront's _resolve_options_for_product reads
+        exactly that field, so a fully populated variant matrix still rendered
+        no size/colour selector in any V3 theme.
+        """
+        model = MagicMock()
+        model.id = uuid4()
+        model.store_id = uuid4()
+        model.tenant_id = uuid4()
+        model.name = "Elegance - Royal Blue"
+        model.slug = "elegance-royal-blue"
+        model.previous_slugs = []
+        model.sku = "SKU-3VRT18RY"
+        model.description = None
+        model.short_description = None
+        model.product_type = ProductType.PHYSICAL
+        model.status = ProductStatus.ACTIVE
+        model.price_amount = 25000
+        model.price_currency = "EGP"
+        model.compare_at_price = None
+        model.cost_price = None
+        model.sale_price = None
+        model.sale_starts_at = None
+        model.sale_ends_at = None
+        model.requires_shipping = True
+        model.tax_exempt = False
+        model.related_product_ids = None
+        model.quantity = 15
+        model.low_stock_threshold = 10
+        model.weight = None
+        model.dimensions = {}
+        model.images = []
+        model.category_id = None
+        model.tags = []
+        model.attributes = {}
+        model.options = stored
+        model.extra_data = {}
+        model.brand = None
+        model.robots_noindex = False
+        model.canonical_url = None
+        model.sitemap_exclude = False
+        model.seo_title = None
+        model.seo_description = None
+        model.template_suffix = None
+        model.meta_catalog_id = None
+        model.created_at = datetime.utcnow()
+        model.updated_at = datetime.utcnow()
+
+        entity = self.repository._to_entity(model)
+
+        assert entity.options == expected
+        # A copy, not the model's own list — mutating the entity must not
+        # write through to the ORM row.
+        if stored:
+            entity.options.append({"name": "Size"})
+            assert len(model.options) == 1
