@@ -42,62 +42,91 @@ async def _deliver(
     important: bool = False,
 ) -> dict[str, int]:
     from src.infrastructure.database.connection import AsyncSessionLocal
-    from src.infrastructure.external_services.notifications.web_push_service import (
-        PushOutcome,
-        PushSubscription,
-        build_payload,
-        send_web_push,
-    )
     from src.infrastructure.repositories.device_registration_repository import (
         DeviceRegistrationRepository,
     )
-
-    stats = {"delivered": 0, "revoked": 0, "failed": 0, "skipped": 0}
 
     async with AsyncSessionLocal() as session:
         repo = DeviceRegistrationRepository(session)
         devices = await repo.list_active_for_users(
             tenant_id=tenant_id, user_ids=user_ids
         )
+        return await _fan_out(
+            session=session,
+            repo=repo,
+            devices=devices,
+            title=title,
+            body=body,
+            url=url,
+            tag=tag,
+            important=important,
+        )
 
-        for device in devices:
-            if device.provider != "webpush":
-                # Expo delivery is a separate transport; the mobile app is not
-                # shipping push yet, so those rows are recorded and skipped
-                # rather than silently dropped.
-                stats["skipped"] += 1
-                continue
 
-            payload = build_payload(
-                title=title,
-                body=body,
-                url=url,
-                tag=tag,
-                locale=device.locale,
-                important=important,
-            )
-            outcome = send_web_push(
-                PushSubscription(
-                    endpoint=device.endpoint, p256dh=device.p256dh, auth=device.auth
-                ),
-                payload,
-            )
+async def _fan_out(
+    *,
+    session: Any,
+    repo: Any,
+    devices: list[Any],
+    title: str,
+    body: str,
+    url: str,
+    tag: str,
+    important: bool,
+) -> dict[str, int]:
+    """Deliver to an already-resolved device list.
 
-            if outcome is PushOutcome.DELIVERED:
-                stats["delivered"] += 1
-            elif outcome is PushOutcome.GONE:
-                # The push service says this subscription no longer exists.
-                # Revoke immediately — dead endpoints otherwise accumulate
-                # forever and every future fan-out pays for them.
-                await repo.revoke_endpoint(device.endpoint)
-                stats["revoked"] += 1
-            elif outcome is PushOutcome.RETRYABLE:
-                await repo.record_failure(device.endpoint)
-                stats["failed"] += 1
-            else:
-                stats["skipped"] += 1
+    The audience is chosen by the caller, never in here. Merchant devices and
+    platform-staff devices come from two different reads for exactly that
+    reason.
+    """
+    from src.infrastructure.external_services.notifications.web_push_service import (
+        PushOutcome,
+        PushSubscription,
+        build_payload,
+        send_web_push,
+    )
 
-        await session.commit()
+    stats = {"delivered": 0, "revoked": 0, "failed": 0, "skipped": 0}
+
+    for device in devices:
+        if device.provider != "webpush":
+            # Expo delivery is a separate transport; the mobile app is not
+            # shipping push yet, so those rows are recorded and skipped
+            # rather than silently dropped.
+            stats["skipped"] += 1
+            continue
+
+        payload = build_payload(
+            title=title,
+            body=body,
+            url=url,
+            tag=tag,
+            locale=device.locale,
+            important=important,
+        )
+        outcome = send_web_push(
+            PushSubscription(
+                endpoint=device.endpoint, p256dh=device.p256dh, auth=device.auth
+            ),
+            payload,
+        )
+
+        if outcome is PushOutcome.DELIVERED:
+            stats["delivered"] += 1
+        elif outcome is PushOutcome.GONE:
+            # The push service says this subscription no longer exists.
+            # Revoke immediately — dead endpoints otherwise accumulate
+            # forever and every future fan-out pays for them.
+            await repo.revoke_endpoint(device.endpoint)
+            stats["revoked"] += 1
+        elif outcome is PushOutcome.RETRYABLE:
+            await repo.record_failure(device.endpoint)
+            stats["failed"] += 1
+        else:
+            stats["skipped"] += 1
+
+    await session.commit()
 
     return stats
 
@@ -153,3 +182,87 @@ def send_push_notification_task(
             "push_fanout_failed", tenant_id=tenant_id, tag=tag, error=str(exc)
         )
         raise self.retry(exc=exc) from exc
+
+
+async def _deliver_admin(
+    *,
+    title: str,
+    body: str,
+    url: str,
+    tag: str,
+    important: bool = False,
+) -> dict[str, int]:
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories.device_registration_repository import (
+        DeviceRegistrationRepository,
+    )
+
+    async with AsyncSessionLocal() as session:
+        repo = DeviceRegistrationRepository(session)
+        devices = await repo.list_active_platform()
+        return await _fan_out(
+            session=session,
+            repo=repo,
+            devices=devices,
+            title=title,
+            body=body,
+            url=url,
+            tag=tag,
+            important=important,
+        )
+
+
+@celery_app.task(
+    name="tasks.send_admin_push_notification",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+)
+def send_admin_push_notification_task(
+    self: Any,
+    title: str,
+    body: str,
+    url: str,
+    tag: str,
+    important: bool = False,
+) -> dict[str, int]:
+    """Fan out one notification to every PLATFORM operator's registered device.
+
+    Audience is every staff device rather than a chosen operator: the whole
+    point of the admin queues is that whoever is free picks the work up. A
+    per-operator routing model would need an assignment concept the backoffice
+    does not have.
+
+    ``url`` is a relative admin path and ``tag`` collapses duplicates at the OS
+    level, both enforced the same way as the merchant fan-out.
+    """
+    try:
+        stats = run_async(
+            _deliver_admin(
+                title=title, body=body, url=url, tag=tag, important=important
+            )
+        )
+        logger.info("admin_push_fanout_complete", tag=tag, **stats)
+        return stats
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("admin_push_fanout_failed", tag=tag, error=str(exc))
+        raise self.retry(exc=exc) from exc
+
+
+def notify_admins(
+    *, title: str, body: str, url: str, tag: str, important: bool = False
+) -> None:
+    """Enqueue an operator notification. NEVER raises.
+
+    Every caller is a merchant-facing write — a top-up proof, an access
+    request, a theme submission. A broker that is down, or a Celery worker that
+    is not running in dev, must not be able to fail the merchant's action; the
+    notification is a courtesy on top of a business event that already
+    committed.
+    """
+    try:
+        send_admin_push_notification_task.delay(
+            title=title, body=body, url=url, tag=tag, important=important
+        )
+    except Exception as exc:  # noqa: BLE001 — never break the producer
+        logger.warning("admin_push_enqueue_failed", tag=tag, error=str(exc))

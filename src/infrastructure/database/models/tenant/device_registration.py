@@ -14,6 +14,10 @@ to prune dead endpoints, for one product behaviour.
 Tenant-scoped (RLS) like every other merchant-owned row, and additionally
 scoped to a ``user_id`` so a staff member is only notified about stores they can
 actually access.
+
+``tenant_id`` is NULLABLE, and NULL means the device belongs to the PLATFORM
+rather than to a store — a NUMU operator's admin backoffice, which has no
+tenant. See the RLS note on the column.
 """
 
 from datetime import datetime
@@ -26,6 +30,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -53,7 +58,24 @@ class DeviceRegistrationModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
             "user_id",
             "revoked_at",
         ),
+        # Platform (staff) devices, which the composite index above cannot
+        # serve because a NULL leading column is not a selective prefix.
+        Index(
+            "idx_device_registrations_platform_active",
+            "revoked_at",
+            postgresql_where=text("tenant_id IS NULL"),
+        ),
         {"schema": "public"},
+    )
+
+    # NULL = a platform operator's device, which belongs to no store. The RLS
+    # policy exposes those rows only when no `app.current_tenant` is set, so a
+    # merchant session can never reach a staff device and vice versa.
+    tenant_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
 
     user_id: Mapped[PyUUID] = mapped_column(

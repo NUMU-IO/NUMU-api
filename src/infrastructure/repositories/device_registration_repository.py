@@ -2,6 +2,11 @@
 
 Serves both push clients from one table: the merchant-hub PWA (``webpush``)
 and numu-merchant-app (``expo``).
+
+A row with ``tenant_id`` NULL is a PLATFORM device — a NUMU operator's admin
+backoffice, which belongs to no store. ``list_active_platform`` is the only
+read that returns those, and the tenant-scoped read cannot: ``tenant_id ==
+tenant_id`` never matches NULL.
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ class DeviceRegistrationRepository:
     async def upsert(
         self,
         *,
-        tenant_id: UUID,
+        tenant_id: UUID | None,
         user_id: UUID,
         endpoint: str,
         provider: str,
@@ -38,6 +43,8 @@ class DeviceRegistrationRepository:
         user_agent: str | None = None,
     ) -> DeviceRegistrationModel:
         """Create or refresh the row for ``endpoint``.
+
+        ``tenant_id`` is None for a platform operator's device.
 
         Keyed on endpoint, NOT on (user, device): browsers re-issue the same
         endpoint on every ``subscribe()`` call, so keying any other way would
@@ -143,4 +150,22 @@ class DeviceRegistrationRepository:
             query = query.where(DeviceRegistrationModel.user_id.in_(user_ids))
 
         result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def list_active_platform(self) -> list[DeviceRegistrationModel]:
+        """Active registrations for PLATFORM staff (``tenant_id`` NULL).
+
+        Separate from ``list_active_for_users`` rather than a nullable
+        argument: the two are different audiences and conflating them is how a
+        merchant fan-out ends up on an operator's phone. SQL would not save us
+        either — ``tenant_id == None`` renders as ``IS NULL`` only because
+        SQLAlchemy special-cases it, and a caller passing a variable that
+        happens to be None would silently switch audiences.
+        """
+        result = await self.session.execute(
+            select(DeviceRegistrationModel).where(
+                DeviceRegistrationModel.tenant_id.is_(None),
+                DeviceRegistrationModel.revoked_at.is_(None),
+            )
+        )
         return list(result.scalars().all())

@@ -1,9 +1,16 @@
 """Admin merchant-hub nav configuration.
 
 URL: /api/v1/admin/merchant-hub-nav
-Lets platform admins hide, mark "coming soon", or reorder any tab in the
-merchant hub left sidebar. Stored as a single JSON blob in platform_config
+Lets platform admins hide, rename, mark "coming soon", or reorder any tab in
+the merchant hub left sidebar. Stored as a single JSON blob in platform_config
 under key "merchant_hub_nav".
+
+`label` is an OVERRIDE, not a name. Empty means "use whatever the hub calls
+this tab", which is the translated string from its own i18n bundle — so an
+override that is set replaces both languages, and clearing it gives the
+translations back. That is the honest trade: one field here cannot hold a
+name in two languages, and a half-Arabic sidebar reads worse than an English
+word in an Arabic one.
 """
 
 from __future__ import annotations
@@ -122,7 +129,8 @@ _KEYS: list[str] = [
 ]
 
 DEFAULT_TABS: list[dict[str, object]] = [
-    {"key": key, "visible": True, "coming_soon": False, "order": i}
+    # `label` empty = the hub's own translated name for this tab.
+    {"key": key, "visible": True, "coming_soon": False, "order": i, "label": ""}
     for i, key in enumerate(_KEYS)
 ]
 
@@ -138,6 +146,10 @@ class NavTab(BaseModel):
     visible: bool = True
     coming_soon: bool = False
     order: int = 0
+    #: Renames the tab in the merchant hub. Empty = the hub's own translated
+    #: name. Capped short because the sidebar is a fixed width and a long
+    #: label truncates into something nobody can read.
+    label: str = Field(default="", max_length=32)
 
 
 class NavConfig(BaseModel):
@@ -158,8 +170,8 @@ async def _get_config_row(db: AsyncSession) -> PlatformConfigModel:
             .values(
                 key=CONFIG_KEY,
                 value=DEFAULT_CONFIG,
-                description="Per-tab visibility / coming-soon / order for the "
-                "merchant hub left sidebar.",
+                description="Per-tab visibility / coming-soon / order / name "
+                "override for the merchant hub left sidebar.",
             )
             .on_conflict_do_nothing(index_elements=["key"])
         )
@@ -194,6 +206,7 @@ def _merge_with_defaults(stored: dict) -> dict:
                 "visible": bool(s.get("visible", default["visible"])),
                 "coming_soon": bool(s.get("coming_soon", default["coming_soon"])),
                 "order": int(s.get("order", default["order"])),
+                "label": str(s.get("label") or "")[:32],
             })
         else:
             merged.append(default.copy())
@@ -235,6 +248,8 @@ async def update_merchant_hub_nav(
             "visible": bool(t.visible) if t else bool(default["visible"]),
             "coming_soon": bool(t.coming_soon) if t else bool(default["coming_soon"]),
             "order": int(t.order) if t else int(default["order"]),
+            # Whitespace-only is not a rename; it would blank the tab.
+            "label": (t.label.strip()[:32] if t else "") or "",
         })
 
     config = await _get_config_row(db)

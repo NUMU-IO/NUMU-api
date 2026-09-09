@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
+from src.application.services import referral_service
 from src.core.events.order_events import OrderPaidEvent
 from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
@@ -83,6 +84,12 @@ async def handle_lead_activation_on_order_paid(event: OrderPaidEvent) -> None:
                     lead.first_order_at = datetime.now(UTC)
                 lead.advance_status("activated")
                 lead.last_seen_at = datetime.now(UTC)
+
+                # The milestone the referral programme is built around: a
+                # referrer earns when the merchant they brought actually
+                # sells, not when they sign up.
+                await session.flush()
+                await referral_service.accrue_for_lead(session, lead.id)
 
             if not already:
                 log.insight(

@@ -30,6 +30,7 @@ from src.api.v1.routes.admin.email_templates import router as email_templates_ro
 from src.api.v1.routes.admin.feedback import router as feedback_router
 from src.api.v1.routes.admin.landing_page import router as landing_page_router
 from src.api.v1.routes.admin.leads import router as leads_router
+from src.api.v1.routes.admin.marketing import router as marketing_router
 from src.api.v1.routes.admin.merchant_hub_nav import (
     router as merchant_hub_nav_router,
 )
@@ -43,6 +44,7 @@ from src.api.v1.routes.admin.platform_settings import (
     router as platform_settings_router,
 )
 from src.api.v1.routes.admin.products import router as products_router
+from src.api.v1.routes.admin.push import router as push_router
 from src.api.v1.routes.admin.reconciliation import router as reconciliation_router
 from src.api.v1.routes.admin.risk import router as risk_router
 from src.api.v1.routes.admin.stores import router as stores_router
@@ -67,6 +69,7 @@ router = APIRouter()
 router.include_router(waitlist_router, prefix="/waitlist", tags=["Admin - Waitlist"])
 router.include_router(demos_router, prefix="/demos", tags=["Admin - Demos"])
 router.include_router(leads_router, prefix="/leads", tags=["Admin - Leads"])
+router.include_router(marketing_router, prefix="/marketing", tags=["Admin - Marketing"])
 router.include_router(feedback_router, prefix="/feedback", tags=["Admin - Feedback"])
 router.include_router(orders_router, prefix="/orders", tags=["Admin - Orders"])
 router.include_router(customers_router, prefix="/customers", tags=["Admin - Customers"])
@@ -82,6 +85,7 @@ router.include_router(
     support_cases_router, prefix="/support-cases", tags=["Admin - Support cases"]
 )
 router.include_router(products_router, prefix="/products", tags=["Admin - Products"])
+router.include_router(push_router, prefix="/push", tags=["Admin - Push"])
 router.include_router(email_templates_router, tags=["Admin - Email Templates"])
 router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
 router.include_router(

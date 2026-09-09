@@ -28,6 +28,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services import referral_service
 from src.core.events.product_events import ProductCreatedEvent
 from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
@@ -65,7 +66,13 @@ async def stamp_lead_milestone(
             return False
         setattr(lead, field, datetime.now(UTC))
         lead.last_seen_at = datetime.now(UTC)
-        return True
+
+    # Outside the savepoint above: the milestone is what we were asked to
+    # record, and a referral reward failing must not undo it. `accrue_for_lead`
+    # opens its own savepoint and never raises.
+    await session.flush()
+    await referral_service.accrue_for_lead(session, lead.id)
+    return True
 
 
 async def handle_lead_first_product(event: ProductCreatedEvent) -> None:

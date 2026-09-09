@@ -22,6 +22,7 @@ except for the handful of fields that legitimately change — see
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -30,6 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services import admin_notifications, referral_service
 from src.infrastructure.database.models.public.merchant_lead import MerchantLeadModel
 
 logger = logging.getLogger(__name__)
@@ -118,6 +120,7 @@ async def record_lead(
     language: str | None = None,
     plan_intent: str | None = None,
     attribution: Attribution | None = None,
+    referral_code: str | None = None,
     tenant_id: UUID | None = None,
     user_id: UUID | None = None,
     store_subdomain: str | None = None,
@@ -146,6 +149,7 @@ async def record_lead(
         ).scalar_one_or_none()
 
         now = datetime.now(UTC)
+        created = lead is None
 
         if lead is None:
             lead = MerchantLeadModel(
@@ -170,6 +174,9 @@ async def record_lead(
                 ).scalar_one_or_none()
                 if lead is None:
                     return None
+                # Lost the race — the row already existed, so this is a
+                # second touch and not a new lead to announce.
+                created = False
 
         # ── Additive fields ───────────────────────────────────────
         _merge(lead, "name", _clip("name", name))
@@ -206,7 +213,27 @@ async def record_lead(
         if status:
             lead.advance_status(status)
 
+        # First touch only, exactly like UTM attribution above. A merchant who
+        # arrives on a friend's link, leaves, and returns direct a week later
+        # was still brought by the friend.
+        if created:
+            await _attribute_referral(db, lead, referral_code, attribution)
+
         await db.flush()
+
+        # A lead whose referrer just became known, or whose status just moved,
+        # may have crossed a milestone. Cheap and idempotent when neither is
+        # true, which is the common case.
+        await referral_service.accrue_for_lead(db, lead.id)
+
+        # Only a first touch. `record_lead` is called again on the demo, the
+        # signup and the store creation, and notifying on each would turn one
+        # merchant's journey into four buzzes on an operator's phone.
+        if created:
+            admin_notifications.lead_captured(
+                db, email=normalized, source=lead.source or source
+            )
+
         return lead
 
     except Exception:
@@ -215,6 +242,55 @@ async def record_lead(
             "merchant_lead_record_failed", extra={"source": source}, exc_info=True
         )
         return None
+
+
+_REF_IN_PATH = re.compile(r"[?&]ref=([A-Za-z0-9]{4,16})")
+
+
+def _referral_code_from(
+    explicit: str | None, attribution: Attribution | None
+) -> str | None:
+    """The code the visitor arrived with.
+
+    Falls back to reading `?ref=` out of the landing path so a referral link
+    attributes correctly without the landing page or the signup schema
+    learning a new field — the path is already captured for every lead.
+    """
+    if explicit:
+        return explicit.strip().upper()
+    path = (attribution.landing_path if attribution else None) or ""
+    found = _REF_IN_PATH.search(path)
+    return found.group(1).upper() if found else None
+
+
+async def _attribute_referral(
+    db: AsyncSession,
+    lead: MerchantLeadModel,
+    referral_code: str | None,
+    attribution: Attribution | None,
+) -> None:
+    """Record who brought this lead. Silent when nothing matches.
+
+    An unknown code is NOT an error: codes get mistyped, forwarded and
+    truncated, and none of that should cost someone their signup.
+    """
+    code = _referral_code_from(referral_code, attribution)
+    if not code:
+        return
+    try:
+        referrer = (
+            await db.execute(
+                select(MerchantLeadModel.id).where(
+                    MerchantLeadModel.referral_code == code
+                )
+            )
+        ).scalar_one_or_none()
+        # Self-referral is the first thing anyone tries.
+        if referrer is None or referrer == lead.id:
+            return
+        lead.referred_by_lead_id = referrer
+    except Exception:
+        logger.warning("merchant_lead_referral_attribution_failed", exc_info=True)
 
 
 async def attach_tenant_to_lead(
@@ -250,6 +326,7 @@ async def attach_tenant_to_lead(
         lead.advance_status("store_created")
         lead.last_seen_at = datetime.now(UTC)
         await db.flush()
+        await referral_service.accrue_for_lead(db, lead.id)
     except Exception:
         logger.warning("merchant_lead_attach_failed", exc_info=True)
 
