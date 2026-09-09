@@ -76,6 +76,17 @@ class RegisterRequest(BaseModel):
             "creation; paid intents are recorded for attribution."
         ),
     )
+    referral_code: str | None = Field(
+        None,
+        max_length=32,
+        description=(
+            "The code from a referral link (numueg.app/signup?ref=CODE). "
+            "Attributed first-touch: a merchant who arrives on a friend's "
+            "link, leaves, and returns direct a week later was still brought "
+            "by the friend. An unknown code is ignored rather than rejected — "
+            "a mistyped referral must never block a registration."
+        ),
+    )
     whatsapp_same_as_phone: bool = Field(
         True,
         description=(

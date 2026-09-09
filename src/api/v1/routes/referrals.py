@@ -248,19 +248,25 @@ async def apply_referral_code(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    from datetime import UTC, datetime, timedelta
+    # One implementation of the rules, shared with the store-creation path.
+    # This endpoint had the only copy, and nothing called it — the merchant
+    # referral programme recorded nothing in production as a result. Store
+    # creation now redeems the code parked at signup; this stays for the
+    # explicit "I have a code" case.
+    from src.application.services.merchant_referrals import (
+        apply_referral,
+        resolve_referrer,
+    )
 
-    # Find the current user's tenant
     tenant = (
         await db.execute(select(TenantModel).where(TenantModel.owner_id == user_id))
     ).scalar_one_or_none()
     if not tenant:
         raise HTTPException(status_code=404, detail="No tenant found")
 
-    # Check if already referred
     existing = (
         await db.execute(
-            select(MerchantReferralModel).where(
+            select(MerchantReferralModel.id).where(
                 MerchantReferralModel.referred_tenant_id == tenant.id
             )
         )
@@ -270,62 +276,21 @@ async def apply_referral_code(
             status_code=409, detail="This store has already been referred."
         )
 
-    # Find the referrer by code — search across all referral rows
-    referrer_q = (
-        select(MerchantReferralModel.referrer_tenant_id)
-        .where(MerchantReferralModel.referral_code == request.referral_code)
-        .limit(1)
-    )
-    referrer_tenant_id = (await db.execute(referrer_q)).scalar_one_or_none()
-
-    if not referrer_tenant_id:
-        # Code might be new — try to find a tenant whose subdomain matches the prefix
-        code_parts = request.referral_code.split("-NUMU-")
-        if code_parts:
-            prefix = code_parts[0].lower()
-            referrer = (
-                await db.execute(
-                    select(TenantModel).where(
-                        TenantModel.subdomain.ilike(f"%{prefix}%")
-                    )
-                )
-            ).scalar_one_or_none()
-            if referrer:
-                referrer_tenant_id = referrer.id
-
-    if not referrer_tenant_id:
+    # Resolved here as well as inside apply_referral, because a caller who
+    # typed a code deserves "that code does not exist" rather than a silent
+    # no-op. The store-creation path wants the opposite and gets it: there,
+    # a bad code must never interrupt opening a shop.
+    referrer_id = await resolve_referrer(db, request.referral_code)
+    if referrer_id is None:
         raise HTTPException(status_code=404, detail="Invalid referral code.")
-
-    if referrer_tenant_id == tenant.id:
+    if referrer_id == tenant.id:
         raise HTTPException(status_code=422, detail="Cannot refer yourself.")
 
-    # Count referrer's existing referrals for tier
-    count_q = select(func.count(MerchantReferralModel.id)).where(
-        MerchantReferralModel.referrer_tenant_id == referrer_tenant_id
-    )
-    count = (await db.execute(count_q)).scalar() or 0
-    tier = _tier(count + 1)
-    rate = _tier_rate(tier)
-
-    referral = MerchantReferralModel(
-        referrer_tenant_id=referrer_tenant_id,
-        referred_tenant_id=tenant.id,
-        referral_code=request.referral_code,
-        status="pending",
-        commission_rate=rate,
-        commission_expires_at=datetime.now(UTC) + timedelta(days=365),
-    )
-    db.add(referral)
+    if not await apply_referral(
+        db, code=request.referral_code, referred_tenant_id=tenant.id
+    ):
+        raise HTTPException(status_code=409, detail="Could not apply this code.")
     await db.commit()
-
-    logger.info(
-        "referral_applied",
-        extra={
-            "referrer_tenant_id": str(referrer_tenant_id),
-            "referred_tenant_id": str(tenant.id),
-            "code": request.referral_code,
-        },
-    )
 
     return SuccessResponse(
         data={"applied": True}, message="Referral code applied successfully."

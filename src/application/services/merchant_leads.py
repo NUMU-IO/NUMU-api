@@ -277,6 +277,13 @@ async def _attribute_referral(
     code = _referral_code_from(referral_code, attribution)
     if not code:
         return
+
+    # Keep the raw code whatever it turns out to be. A merchant's own code
+    # (STORENAME-NUMU-XXXX) belongs to `merchant_referrals` and will never
+    # match a lead below, and discarding it here is what left the merchant
+    # referral programme with zero rows: the only record of the code was
+    # thrown away seconds after it arrived.
+    lead.referral_code_used = code
     try:
         referrer = (
             await db.execute(
@@ -325,6 +332,23 @@ async def attach_tenant_to_lead(
         _merge(lead, "store_created_at", datetime.now(UTC))
         lead.advance_status("store_created")
         lead.last_seen_at = datetime.now(UTC)
+
+        # The first moment a merchant referral CAN be redeemed: it is
+        # tenant-to-tenant, and until now this merchant had no tenant. The
+        # code has been waiting on the lead since signup.
+        if lead.referral_code_used:
+            from src.application.services.merchant_referrals import apply_referral
+
+            applied = await apply_referral(
+                db, code=lead.referral_code_used, referred_tenant_id=tenant_id
+            )
+            # Cleared only on success. A code that did not resolve stays put:
+            # it is the record of what this merchant arrived with, and an
+            # operator asking "who sent them" should see the code rather than
+            # a blank where one used to be.
+            if applied:
+                lead.referral_code_used = None
+
         await db.flush()
         await referral_service.accrue_for_lead(db, lead.id)
     except Exception:
