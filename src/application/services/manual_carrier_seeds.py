@@ -188,6 +188,20 @@ COURIER_SEEDS: tuple[CourierSeed, ...] = (
         ),
     ),
     CourierSeed(
+        key="egl",
+        name_en="Egyptian Global Logistics",
+        name_ar="إي جي إل",
+        note_en=(
+            "Freight forwarding, not parcels — sea and air cargo, containers "
+            "and heavy lift, with bonded warehousing. Pick them for a "
+            "shipment that moves by container, not for a customer delivery."
+        ),
+        note_ar=(
+            "شحن بضائع مش طرود — بحري وجوي وكونتينرات وحمولات تقيلة، ومخازن "
+            "جمركية. اختارهم للشحنات اللي بتتنقل بالكونتينر، مش لتوصيل عميل."
+        ),
+    ),
+    CourierSeed(
         key="own_courier",
         name_en="My own courier",
         name_ar="مندوب خاص",

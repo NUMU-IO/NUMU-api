@@ -420,3 +420,29 @@ class TestTheCourierSheetIsNotTruncated:
         from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
 
         assert "del shipments[limit:]" in inspect.getsource(export_shipment_manifest)
+
+
+class TestEglIsNotAParcelCourier:
+    """EGL was added with the logos, but it is a freight forwarder — sea
+    and air cargo, containers, heavy lift — not a last-mile courier. It
+    is seeded so a merchant who ships containers can pick it, and its
+    note says what it actually does so nobody picks it for a customer
+    delivery."""
+
+    def test_it_is_seeded(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        assert get_seed("egl") is not None
+
+    def test_the_note_says_it_is_freight_not_parcels(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        seed = get_seed("egl")
+        assert "freight" in seed.note_en.lower()
+        assert "parcel" in seed.note_en.lower()
+        assert seed.note_ar and any("؀" <= ch <= "ۿ" for ch in seed.note_ar)
+
+    def test_it_is_not_a_registry_carrier(self):
+        from src.application.services.carrier_registry import carrier_slugs
+
+        assert "egl" not in carrier_slugs()
