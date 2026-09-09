@@ -334,6 +334,9 @@ async def register(
         whatsapp_phone=divergent_whatsapp,
         language=request.language,
         plan_intent=request.plan_intent,
+        # record_lead resolves the code to the referrer and attributes it on
+        # first touch; accrue_for_lead then credits any milestone already met.
+        referral_code=request.referral_code,
         attribution=Attribution(**request.attribution.model_dump())
         if request.attribution is not None
         else None,
