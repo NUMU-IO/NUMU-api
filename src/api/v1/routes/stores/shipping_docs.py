@@ -234,6 +234,21 @@ async def delete_courier_profile(
 # ── Waybills ─────────────────────────────────────────────────────────
 
 
+def _courier_of(shipment: Any, store: Store) -> Any | None:
+    """Which of the merchant's couriers is carrying this parcel.
+
+    A manual shipment records its courier by appending the profile id to
+    ``shipping_method``. The label and the manifest have to agree on that
+    rule, or a merchant hands a courier a sheet of parcels that another
+    courier is holding.
+    """
+    method = getattr(shipment, "shipping_method", "") or ""
+    for profile in list_profiles(store.settings):
+        if method.endswith(profile.id):
+            return profile
+    return None
+
+
 async def _label_context(
     shipment: Any, store: Store, order_repo: OrderRepository
 ) -> dict[str, Any]:
@@ -244,11 +259,8 @@ async def _label_context(
     parts = []
     if address:
         parts = [address.address_line1, address.address_line2, address.city]
-    courier_name = ""
-    for profile in list_profiles(store.settings):
-        if (shipment.shipping_method or "").endswith(profile.id):
-            courier_name = profile.name_ar or profile.name_en
-            break
+    profile = _courier_of(shipment, store)
+    courier_name = (profile.name_ar or profile.name_en) if profile else ""
 
     return build_context(
         tracking_number=shipment.tracking_number or "",
@@ -410,6 +422,9 @@ async def print_waybill(
     )
 
 
+#: Rows read per page when scanning for one courier's parcels.
+_PAGE = 500
+
 # ── CSV round-trip ───────────────────────────────────────────────────
 
 
@@ -424,15 +439,63 @@ async def export_shipment_manifest(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     status: str = Query("created", description="Shipment status to include"),
     limit: int = Query(500, ge=1, le=2000),
+    courier: str | None = Query(
+        None,
+        description=(
+            "Courier profile id. Returns only that courier's parcels — "
+            "omit for every parcel in the status."
+        ),
+    ),
 ):
     """The sheet the merchant hands the courier.
+
+    ``courier`` is what makes this usable with more than one company. A
+    merchant running Barashout and Waselha at once must not hand either
+    of them a sheet listing the other's parcels, so the filter uses the
+    same rule the label does — see :func:`_courier_of`.
 
     Written UTF-8 **with a BOM** so Excel opens Arabic correctly — the
     opposite of the rule for source files, and deliberate.
     """
-    shipments = await shipment_repo.get_by_store(
-        store_id=store.id, status=status, skip=0, limit=limit
-    )
+    filename_courier = ""
+    if not courier:
+        shipments = await shipment_repo.get_by_store(
+            store_id=store.id, status=status, skip=0, limit=limit
+        )
+    else:
+        profile = next(
+            (p for p in list_profiles(store.settings) if p.id == courier), None
+        )
+        if profile is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "COURIER_NOT_FOUND",
+                    "message_en": "No such courier for this store.",
+                    "message_ar": "مفيش مندوب بالرقم ده في المتجر ده.",
+                },
+            )
+        filename_courier = f"-{profile.name_en or profile.id}".replace(" ", "-")
+
+        # Page until `limit` of *this courier's* parcels are found, rather
+        # than filtering one page of everybody's. A store shipping through
+        # three couriers would otherwise get roughly a third of a sheet and
+        # no sign that the rest exist — parcels missing from the sheet are
+        # parcels the courier never collects.
+        shipments, skip = [], 0
+        while len(shipments) < limit:
+            page = await shipment_repo.get_by_store(
+                store_id=store.id, status=status, skip=skip, limit=_PAGE
+            )
+            if not page:
+                break
+            shipments.extend(
+                s for s in page if (s.shipping_method or "").endswith(profile.id)
+            )
+            skip += len(page)
+            if len(page) < _PAGE:
+                break
+        del shipments[limit:]
 
     rows = []
     for shipment in shipments:
@@ -465,7 +528,11 @@ async def export_shipment_manifest(
     return Response(
         content=csv_bytes,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename=manifest-{stamp}.csv"},
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=manifest{filename_courier}-{stamp}.csv"
+            )
+        },
     )
 
 

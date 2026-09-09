@@ -287,3 +287,136 @@ class TestWhatTheLiveRunCaught:
         assert '<link rel="stylesheet"' not in out
         assert "unicode-bidi: isolate" in out  # the LTR rule, inlined
         assert "100mm 150mm" in out or "100mm" in out
+
+
+class TestManifestIsPerCourier:
+    """A merchant running Barashout and Waselha at once must not hand
+    either of them a sheet listing the other's parcels."""
+
+    def test_the_endpoint_takes_a_courier(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        assert "courier" in inspect.signature(export_shipment_manifest).parameters
+
+    def test_an_unknown_courier_is_a_bilingual_404_not_an_empty_sheet(self):
+        """An empty CSV would read as "nothing to collect today"."""
+        import inspect
+
+        source = inspect.getsource(
+            __import__(
+                "src.api.v1.routes.stores.shipping_docs",
+                fromlist=["export_shipment_manifest"],
+            ).export_shipment_manifest
+        )
+        assert "COURIER_NOT_FOUND" in source
+        assert "message_ar" in source
+
+    def test_the_label_and_the_manifest_share_one_matching_rule(self):
+        """Two copies of `endswith(profile.id)` would drift, and the label
+        would name a courier the sheet did not list."""
+        import inspect
+
+        from src.api.v1.routes.stores import shipping_docs as mod
+
+        assert "_courier_of" in inspect.getsource(mod._label_context)
+        assert inspect.getsource(mod._courier_of).count("endswith") == 1
+
+    def test_the_filename_names_the_courier(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        assert "filename_courier" in inspect.getsource(export_shipment_manifest)
+
+
+class TestTheFourAddedCouriers:
+    """Waselha, Flextock, Holy Ship and Barashout — Tier 3 by the same
+    rule as the rest: no public API, so NUMU issues the paperwork and the
+    merchant sends them a CSV."""
+
+    KEYS = ("waselha", "flextock", "holyship", "barashout")
+
+    def test_all_four_are_seeded(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        for key in self.KEYS:
+            assert get_seed(key) is not None, key
+
+    def test_each_has_a_real_arabic_name(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        for key in self.KEYS:
+            seed = get_seed(key)
+            assert any("؀" <= ch <= "ۿ" for ch in seed.name_ar), key
+            assert seed.name_en
+
+    def test_coverage_is_unconfirmed_not_invented(self):
+        """Nobody checked their governorate lists, so each ships covering
+        everywhere and says so — a courier wrongly limited hides
+        deliveries silently."""
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        for key in self.KEYS:
+            seed = get_seed(key)
+            assert seed.data_verified is False, key
+            assert seed.governorate_codes == (), key
+
+    def test_a_phone_still_needs_a_source(self):
+        """The module raises at import if one does not; this pins that the
+        four new rows obey it rather than relying on the loop staying."""
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        for key in self.KEYS:
+            seed = get_seed(key)
+            if seed.contact_phone:
+                assert seed.contact_source, key
+
+    def test_none_of_them_became_a_registry_carrier(self):
+        """They have no API. A registry entry would offer a merchant a
+        credentials form for something that cannot be connected."""
+        from src.application.services.carrier_registry import carrier_slugs
+
+        slugs = carrier_slugs()
+        for key in self.KEYS:
+            assert key not in slugs, key
+
+    def test_they_appear_in_the_hubs_picker(self):
+        from src.application.services.manual_carrier_seeds import seed_catalog
+
+        keys = {s["key"] for s in seed_catalog()}
+        assert set(self.KEYS) <= keys
+
+
+class TestTheCourierSheetIsNotTruncated:
+    """Filtering after the fetch limit is how a courier silently stops
+    collecting parcels."""
+
+    def test_it_pages_for_this_couriers_parcels(self):
+        """A store shipping through three couriers would otherwise get
+        roughly a third of a sheet, with nothing saying rows were cut."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        source = inspect.getsource(export_shipment_manifest)
+        assert "while len(shipments) < limit" in source
+        assert "skip=skip" in source
+
+    def test_the_page_loop_ends_on_a_short_page(self):
+        """No page bound would spin forever on a store with no matches."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        source = inspect.getsource(export_shipment_manifest)
+        assert "if not page:" in source
+        assert "if len(page) < _PAGE:" in source
+
+    def test_the_caller_still_gets_at_most_limit_rows(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        assert "del shipments[limit:]" in inspect.getsource(export_shipment_manifest)
