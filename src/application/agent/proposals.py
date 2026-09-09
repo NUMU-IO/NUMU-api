@@ -8,6 +8,7 @@ rejected-at-apply) write produces exactly one immutable audit record (FR-010).
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from uuid import UUID, uuid4
@@ -206,6 +207,13 @@ def _to_decimal(value) -> Decimal:
         raise ProposalError("bad_params", f"Invalid numeric value: {value!r}") from exc
 
 
+def _to_dt(value) -> datetime | None:
+    """ISO string from a proposal back into a datetime; None when unset."""
+    if not value:
+        return None
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
 async def _apply_create_discount(
     session, *, store_id: UUID, staff_id: UUID, params: dict
 ) -> dict:
@@ -223,6 +231,8 @@ async def _apply_create_discount(
             else None
         ),
         usage_limit=params.get("usage_limit"),
+        valid_from=_to_dt(params.get("starts_at")),
+        valid_until=_to_dt(params.get("ends_at")),
     )
     coupon = await use_case.execute(dto, store_id, staff_id)
     return {
@@ -485,12 +495,121 @@ async def _undo_create_product(
     }
 
 
+async def _apply_update_store_settings(
+    session, *, store_id: UUID, staff_id: UUID, params: dict
+) -> dict:
+    """Write one whitelisted key into store.settings."""
+    from src.infrastructure.agent.tools.store_admin import WRITABLE_SETTINGS
+
+    entry = WRITABLE_SETTINGS.get(str(params.get("key")))
+    if entry is None:
+        raise ProposalError("invalid", "Not a settable store setting.")
+    path, _label = entry
+
+    repo = StoreRepository(session)
+    store = await repo.get_by_id(store_id)
+    if store is None:
+        raise ProposalError("not_found", "Store no longer exists.")
+
+    # settings is a JSONB column: mutating the loaded dict in place leaves
+    # SQLAlchemy unaware, so build a copy and reassign.
+    settings = dict(store.settings or {})
+    node = settings
+    for part in path[:-1]:
+        child = node.get(part)
+        node[part] = dict(child) if isinstance(child, dict) else {}
+        node = node[part]
+    before = node.get(path[-1])
+    node[path[-1]] = params["value"]
+
+    store.settings = settings
+    await repo.update(store)
+    return {
+        "summary": f"Updated store {params['key']}",
+        "before_state": {"key": params["key"], "value": before},
+        "after_state": {"key": params["key"], "value": params["value"]},
+        "result": {"key": params["key"], "value": params["value"]},
+    }
+
+
+async def _undo_update_store_settings(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    before = audit.before_state or {}
+    if "key" not in before:
+        raise NothingToUndoError("nothing_to_undo", "No previous setting recorded.")
+    await _apply_update_store_settings(
+        session,
+        store_id=store_id,
+        staff_id=staff_id,
+        params={"key": before["key"], "value": before.get("value") or ""},
+    )
+    return {"undid": "update_store_settings", "key": before["key"]}
+
+
+async def _apply_set_store_availability(
+    session, *, store_id: UUID, staff_id: UUID, params: dict
+) -> dict:
+    """Open or close the storefront.
+
+    The storefront already refuses any store whose status is not ACTIVE, so
+    closing is a status change rather than a second closed-flag it would have
+    to learn. `reopen_at` is parked in settings for the beat task to pick up.
+    """
+    from src.core.entities.store import StoreStatus
+
+    repo = StoreRepository(session)
+    store = await repo.get_by_id(store_id)
+    if store is None:
+        raise ProposalError("not_found", "Store no longer exists.")
+
+    before_status = getattr(store.status, "value", str(store.status))
+    closing = params.get("state") == "closed"
+
+    settings = dict(store.settings or {})
+    if closing and params.get("reopen_at"):
+        settings["reopen_at"] = params["reopen_at"]
+    else:
+        settings.pop("reopen_at", None)
+
+    store.status = StoreStatus.INACTIVE if closing else StoreStatus.ACTIVE
+    store.settings = settings
+    await repo.update(store)
+
+    return {
+        "summary": "Closed the storefront" if closing else "Reopened the storefront",
+        "before_state": {"status": before_status},
+        "after_state": {
+            "status": getattr(store.status, "value", str(store.status)),
+            "reopen_at": settings.get("reopen_at"),
+        },
+        "result": {"status": getattr(store.status, "value", str(store.status))},
+    }
+
+
+async def _undo_set_store_availability(
+    session, *, store_id: UUID, staff_id: UUID, audit
+) -> dict:
+    before = (audit.before_state or {}).get("status")
+    if not before:
+        raise NothingToUndoError("nothing_to_undo", "No previous status recorded.")
+    await _apply_set_store_availability(
+        session,
+        store_id=store_id,
+        staff_id=staff_id,
+        params={"state": "open" if before == "active" else "closed"},
+    )
+    return {"undid": "set_store_availability", "restored_status": before}
+
+
 # tool_name → applier. Tools listed here follow the generic (non-theme) path.
 ACTION_APPLIERS = {
     "create_discount": _apply_create_discount,
     "create_product": _apply_create_product,
     "update_product": _apply_update_product,
     "send_cart_recovery": _apply_send_cart_recovery,
+    "update_store_settings": _apply_update_store_settings,
+    "set_store_availability": _apply_set_store_availability,
 }
 
 # tool_name → undoer for applied action audits. Anything not listed here that
@@ -500,6 +619,8 @@ ACTION_UNDOERS = {
     "create_discount": _undo_create_discount,
     "create_product": _undo_create_product,
     "update_product": _undo_update_product,
+    "update_store_settings": _undo_update_store_settings,
+    "set_store_availability": _undo_set_store_availability,
     "send_cart_recovery": _undo_send_cart_recovery,
 }
 

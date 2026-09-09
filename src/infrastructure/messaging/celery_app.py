@@ -63,6 +63,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks",
         # log.alert(...) webhook delivery (src.core.logging).
         "src.infrastructure.messaging.tasks.log_alert_task",
+        # Reopens storefronts closed with a scheduled reopen_at.
+        "src.infrastructure.messaging.tasks.store_reopen_task",
         "src.infrastructure.messaging.tasks.fraud_tasks",
         "src.infrastructure.messaging.tasks.risk_scoring_tasks",
         "src.infrastructure.messaging.tasks.whatsapp_nudge_task",
@@ -239,6 +241,12 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.trust_network.reconcile_missed_events",
         "schedule": crontab(hour=3, minute=45),  # Every day at 03:45 UTC
         "kwargs": {"lookback_days": 7},
+    },
+    "reopen-scheduled-stores": {
+        # A merchant who closed "until 2pm" means 2pm; nightly would cost them
+        # a day of orders.
+        "task": "tasks.reopen_scheduled_stores",
+        "schedule": 900.0,  # every 15 minutes
     },
     "process-slack-alert-queue": {
         "task": "tasks.process_slack_alert_queue",
