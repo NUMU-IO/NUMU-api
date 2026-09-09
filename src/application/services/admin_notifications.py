@@ -36,9 +36,27 @@ _LISTENER_FLAG = "_admin_push_listener_installed"
 
 
 def _send(payload: dict) -> None:
+    """Fan one notification out to both operator channels.
+
+    Push alone left this feature delivering nothing: it reaches registered
+    devices, and production had zero platform registrations, so every
+    notification since launch went to an empty audience. Email needs no
+    registration and reaches a phone that has never opened the backoffice.
+
+    Both are enqueued from here rather than at each call site, so a new
+    notification type cannot ship with only one channel wired.
+    """
+    from src.infrastructure.messaging.tasks.admin_alert_email_task import email_admins
     from src.infrastructure.messaging.tasks.push_tasks import notify_admins
 
     notify_admins(**payload)
+    # `tag` is a push concept (OS-level collapsing); an inbox has no equivalent.
+    email_admins(
+        title=payload["title"],
+        body=payload["body"],
+        url=payload["url"],
+        important=payload.get("important", False),
+    )
 
 
 def _drain(sync_session: SyncSession) -> list[dict]:
@@ -217,4 +235,35 @@ def lead_captured(db: AsyncSession, *, email: str, source: str) -> None:
         # Row-level tag: leads are individually actionable, and collapsing them
         # would hide the second one behind the first.
         tag=f"admin:lead:{email}",
+    )
+
+
+# The two milestones an operator wants to know about by name. A lead that
+# merely reappears is not news; a lead that just became a merchant is the
+# moment to call them, and it was silent because `lead_captured` fires on
+# first touch only — a visitor who tried the demo in the morning and signed
+# up in the afternoon announced the demo and never the signup.
+_MILESTONE_COPY = {
+    "registered": ("Merchant registered", "created an account"),
+    "store_created": ("Store created", "opened their store"),
+}
+
+
+def lead_advanced(db: AsyncSession, *, email: str, status: str) -> None:
+    """A lead crossed a funnel milestone. Fires once per milestone.
+
+    `advance_status` only ever moves forward, and the caller passes the status
+    it actually moved to, so a merchant re-entering a flow they already
+    finished cannot re-announce it.
+    """
+    copy = _MILESTONE_COPY.get(status)
+    if copy is None:
+        return
+    title, did = copy
+    notify(
+        db,
+        title=title,
+        body=f"{email} {did}.",
+        url="/leads",
+        tag=f"admin:lead-milestone:{status}:{email}",
     )

@@ -139,6 +139,9 @@ celery_app.conf.update(
         # PWA Phase 2 — Web Push / Expo fan-out. Always async: a slow push
         # service must never be able to delay an order webhook.
         "src.infrastructure.messaging.tasks.push_tasks",
+        # Operator alert emails — the second channel for everything in
+        # application/services/admin_notifications.py.
+        "src.infrastructure.messaging.tasks.admin_alert_email_task",
         # Merchant notification feed — nightly retention prune.
         "src.infrastructure.messaging.tasks.notification_center_tasks",
         # Subscription payments via InstaPay — intent expiry + dunning nudge.

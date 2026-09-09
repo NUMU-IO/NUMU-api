@@ -210,8 +210,13 @@ async def record_lead(
         # ── Fields that legitimately change ───────────────────────
         lead.last_source = _clip("source", source)
         lead.last_seen_at = now
+        status_before = lead.status
         if status:
             lead.advance_status(status)
+        # Compared rather than assumed: `advance_status` ignores a status that
+        # would move the lead backwards, so "the caller asked for registered"
+        # is not the same as "the lead became registered".
+        advanced_to = lead.status if lead.status != status_before else None
 
         # First touch only, exactly like UTM attribution above. A merchant who
         # arrives on a friend's link, leaves, and returns direct a week later
@@ -233,6 +238,11 @@ async def record_lead(
             admin_notifications.lead_captured(
                 db, email=normalized, source=lead.source or source
             )
+        elif advanced_to:
+            # A first touch that arrives already registered announces itself
+            # once, as a lead — `elif` keeps the same event from producing two
+            # notifications a second apart.
+            admin_notifications.lead_advanced(db, email=normalized, status=advanced_to)
 
         return lead
 

@@ -49,6 +49,12 @@ DEFAULTS: dict[str, Any] = {
     "maintenance_mode": False,
     "session_timeout_minutes": 60,
     "max_login_attempts": 5,
+    # Who gets emailed when an admin queue receives work — new leads, a
+    # merchant registering, payment proofs, theme submissions. Web push was
+    # the only channel and it delivers to registered devices only; production
+    # had none, so every operator notification went nowhere. Editable here so
+    # adding a colleague never needs a deploy.
+    "alert_emails": ["yahya@numueg.app"],
 }
 
 
@@ -67,6 +73,7 @@ class PlatformSettingsResponse(BaseModel):
     maintenance_mode: bool
     session_timeout_minutes: int
     max_login_attempts: int
+    alert_emails: list[str]
 
 
 class PlatformSettingsUpdate(BaseModel):
@@ -81,6 +88,10 @@ class PlatformSettingsUpdate(BaseModel):
     maintenance_mode: bool | None = None
     session_timeout_minutes: int | None = Field(None, ge=5, le=24 * 60)
     max_login_attempts: int | None = Field(None, ge=1, le=100)
+    # An empty list is a meaningful value here — it is how an operator turns
+    # the emails off — so this one is distinguished by `exclude_unset`, not by
+    # being falsy like the fields below.
+    alert_emails: list[EmailStr] | None = Field(None, max_length=20)
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +205,14 @@ async def update_platform_settings_route(
         patch["support_email"] = str(patch["support_email"])
     if "default_currency" in patch and patch["default_currency"]:
         patch["default_currency"] = str(patch["default_currency"]).upper()
+
+    if "alert_emails" in patch and patch["alert_emails"] is not None:
+        # EmailStr instances are pydantic types; store plain strings, lowercased
+        # and de-duplicated so the same person cannot be added twice.
+        seen: dict[str, None] = {}
+        for address in patch["alert_emails"]:
+            seen.setdefault(str(address).strip().lower(), None)
+        patch["alert_emails"] = list(seen)
 
     current.update({k: v for k, v in patch.items() if v is not None})
     row.value = current
