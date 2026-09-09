@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, create_autospec, patch
 from uuid import uuid4
 
 import pytest
@@ -152,3 +153,113 @@ def test_registered_with_applier_and_undoer():
     # Guard: every action applier MUST have an undoer, or undo_last would push
     # its audit's before_state through the theme-restore path (theme corruption).
     assert set(ACTION_APPLIERS) <= set(ACTION_UNDOERS)
+
+
+# ── Apply path ───────────────────────────────────────────────────────────────
+# The propose path above was covered from the start; the apply path was not,
+# and it was broken in production the whole time. Confirming a stock change
+# raised `TypeError: execute() missing 1 required positional argument:
+# 'store_id'` — the cross-store guard added `store_id` to the use case and
+# updated the REST route, but not the two agent call sites. The merchant saw
+# the preview card, pressed confirm, and got "something went wrong".
+#
+# `create_autospec` is the point of these tests: it binds against the REAL
+# signature, so a use case that grows or reorders a parameter fails here
+# instead of at a merchant's confirm button.
+
+
+def _apply_env(*, product, store):
+    """Patch the three collaborators an applier reaches for."""
+    from src.application.use_cases.products.update_product import UpdateProductUseCase
+
+    use_case = create_autospec(UpdateProductUseCase, instance=True)
+    use_case.execute.return_value = SimpleNamespace(
+        id=product.id,
+        name=product.name,
+        price=Decimal("450"),
+        compare_at_price=None,
+        quantity=500,
+    )
+    return use_case, (
+        patch(
+            "src.infrastructure.repositories.product_repository.ProductRepository",
+            return_value=_repo_returning(product),
+        ),
+        patch(
+            "src.application.agent.proposals.StoreRepository",
+            return_value=_repo_returning(store),
+        ),
+        patch(
+            "src.application.use_cases.products.update_product.UpdateProductUseCase",
+            return_value=use_case,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_passes_the_path_store_and_the_owner():
+    from src.application.agent.proposals import _apply_update_product
+
+    store_id, owner_id, staff_id, pid = uuid4(), uuid4(), uuid4(), uuid4()
+    product = _Product(
+        id=pid,
+        store_id=store_id,
+        name="Hoodie",
+        price=_Money(Decimal("300")),
+        compare_at_price=None,
+        quantity=3,
+    )
+    use_case, patches = _apply_env(
+        product=product, store=SimpleNamespace(id=store_id, owner_id=owner_id)
+    )
+    with patches[0], patches[1], patches[2]:
+        out = await _apply_update_product(
+            None,
+            store_id=store_id,
+            staff_id=staff_id,
+            params={"product_id": str(pid), "quantity": 500},
+        )
+
+    args = use_case.execute.await_args.args
+    assert args[0] == pid
+    assert args[1].quantity == 500
+    # The use case authorises by comparing to store.owner_id, so a staff member
+    # confirming their own proposal must not be the identity handed over.
+    assert args[2] == owner_id != staff_id
+    # The authorised path store — without it the product's own store_id was
+    # trusted, which is the cross-store write this argument exists to stop.
+    assert args[3] == store_id
+
+    # before_state is what makes the change undoable; it must be the values as
+    # they were at APPLY time, not the ones previewed.
+    assert out["before_state"]["quantity"] == 3
+    assert out["after_state"]["quantity"] == 500
+
+
+@pytest.mark.asyncio
+async def test_undo_restores_through_the_same_signature():
+    from src.application.agent.proposals import _undo_update_product
+
+    store_id, owner_id, pid = uuid4(), uuid4(), uuid4()
+    product = _Product(
+        id=pid,
+        store_id=store_id,
+        name="Hoodie",
+        price=_Money(Decimal("450")),
+        compare_at_price=None,
+        quantity=500,
+    )
+    use_case, patches = _apply_env(
+        product=product, store=SimpleNamespace(id=store_id, owner_id=owner_id)
+    )
+    audit = SimpleNamespace(
+        before_state={"product_id": str(pid), "price": "300", "quantity": 3}
+    )
+    with patches[0], patches[1], patches[2]:
+        await _undo_update_product(
+            None, store_id=store_id, staff_id=uuid4(), audit=audit
+        )
+
+    args = use_case.execute.await_args.args
+    assert args[1].quantity == 3
+    assert (args[2], args[3]) == (owner_id, store_id)
