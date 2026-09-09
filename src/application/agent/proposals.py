@@ -214,6 +214,23 @@ def _to_dt(value) -> datetime | None:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
+async def _authorising_user(session, store_id: UUID) -> UUID:
+    """The identity the write use-cases authorise against.
+
+    Every use-case reached from here compares its `user_id` argument against
+    `store.owner_id` — a legacy check predating store-scoped path authorisation,
+    which the REST routes satisfy by passing `store.owner_id` rather than the
+    caller. These appliers passed `staff_id`, so a staff member holding
+    `product.update` could preview a change and then be told "You don't have
+    permission" the instant they confirmed it. Permission for the agent is
+    already settled before this point, by `_require_tool_permission`.
+    """
+    store = await StoreRepository(session).get_by_id(store_id)
+    if store is None:
+        raise ProposalError("not_found", "Store not found.")
+    return store.owner_id
+
+
 async def _apply_create_discount(
     session, *, store_id: UUID, staff_id: UUID, params: dict
 ) -> dict:
@@ -234,7 +251,9 @@ async def _apply_create_discount(
         valid_from=_to_dt(params.get("starts_at")),
         valid_until=_to_dt(params.get("ends_at")),
     )
-    coupon = await use_case.execute(dto, store_id, staff_id)
+    coupon = await use_case.execute(
+        dto, store_id, await _authorising_user(session, store_id)
+    )
     return {
         "summary": f"Created coupon {coupon.code}",
         "after_state": {
@@ -286,7 +305,12 @@ async def _apply_update_product(
         product_repository=product_repo,
         store_repository=StoreRepository(session),
     )
-    updated = await use_case.execute(product_id, dto, staff_id)
+    updated = await use_case.execute(
+        product_id,
+        dto,
+        await _authorising_user(session, store_id),
+        store_id,
+    )
     return {
         "summary": f"Updated product {updated.name}",
         "after_state": {
@@ -315,7 +339,7 @@ async def _undo_create_discount(
         coupon_repository=CouponRepository(session),
         store_repository=StoreRepository(session),
     )
-    await use_case.execute(UUID(coupon_id), staff_id)
+    await use_case.execute(UUID(coupon_id), await _authorising_user(session, store_id))
     return {"undid": "create_discount", "deleted_coupon_id": coupon_id}
 
 
@@ -346,7 +370,12 @@ async def _undo_update_product(
         product_repository=ProductRepository(session),
         store_repository=StoreRepository(session),
     )
-    await use_case.execute(UUID(product_id), dto, staff_id)
+    await use_case.execute(
+        UUID(product_id),
+        dto,
+        await _authorising_user(session, store_id),
+        store_id,
+    )
     return {"undid": "update_product", "product_id": product_id}
 
 
@@ -458,7 +487,9 @@ async def _apply_create_product(
         store_repository=StoreRepository(session),
         category_repository=CategoryRepository(session),
     )
-    created = await use_case.execute(dto, store_id, staff_id)
+    created = await use_case.execute(
+        dto, store_id, await _authorising_user(session, store_id)
+    )
     return {
         "summary": f"Created product {created.name}",
         "after_state": {
@@ -488,7 +519,11 @@ async def _undo_create_product(
         product_repository=ProductRepository(session),
         store_repository=StoreRepository(session),
     )
-    await use_case.execute(UUID(str(product_id)), staff_id, store_id)
+    await use_case.execute(
+        UUID(str(product_id)),
+        await _authorising_user(session, store_id),
+        store_id,
+    )
     return {
         "summary": f"Deleted product {after.get('name') or product_id}",
         "after_state": {},
