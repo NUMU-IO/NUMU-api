@@ -107,6 +107,28 @@ class MerchantLeadModel(Base, UUIDMixin, TimestampMixin):
     monthly_orders_band: Mapped[str | None] = mapped_column(String(20), nullable=True)
     city: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
+    # ── Referral ──────────────────────────────────────────────────
+    # These three exist in the database (migration
+    # marketing_referrals_20260909) but were never mapped here, so
+    # `_attribute_referral`'s `lead.referred_by_lead_id = referrer` set a plain
+    # Python attribute on an object SQLAlchemy was not tracking. No UPDATE was
+    # ever emitted, and production sat at zero attributed leads while the code
+    # read as though it worked.
+    #
+    #: This lead's own code, to share.
+    referral_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: Who brought them, once a code resolved to another lead.
+    referred_by_lead_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    #: The raw code they arrived with, kept whether or not it matched a lead.
+    #: A merchant's own code (STORENAME-NUMU-XXXX) belongs to
+    #: `merchant_referrals` and never matches a lead, and it cannot be redeemed
+    #: at signup because a referral is tenant-to-tenant and there is no tenant
+    #: until the store exists. Parked here, applied at store creation, cleared
+    #: on success.
+    referral_code_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # ── What the lead became ──────────────────────────────────────
     # Deliberately NOT foreign keys. See the module docstring.
     tenant_id: Mapped[PyUUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
