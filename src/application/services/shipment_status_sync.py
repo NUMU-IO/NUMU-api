@@ -35,6 +35,7 @@ async def apply_carrier_status(
     description: str = "",
     cod_amount: float | None = None,
     failure_reason: str = "",
+    status: ShipmentStatus | None = None,
 ) -> ShipmentStatus | None:
     """Transition a shipment from a carrier-reported status.
 
@@ -46,6 +47,13 @@ async def apply_carrier_status(
     an unknown carrier string to IN_TRANSIT would silently invent
     progress the carrier never reported — and the log line is how we find
     out a carrier added a status we don't handle yet.
+
+    ``status`` short-circuits that lookup for a caller that has already
+    resolved the word through a different vocabulary. The CSV importer is
+    the case that matters: a Tier 3 sheet is written by the merchant, not
+    the carrier, so it says "delivered" or "تم التسليم" — and the manual
+    carrier has an empty ``status_map`` precisely because it has no
+    carrier vocabulary of its own.
     """
     if shipment is None:
         return None
@@ -56,7 +64,7 @@ async def apply_carrier_status(
         shipment_id=str(getattr(shipment, "id", "")),
     )
 
-    new_status = map_carrier_status(carrier, raw_status)
+    new_status = status or map_carrier_status(carrier, raw_status)
     if new_status is None:
         log.warning("carrier_status_unmapped")
         return None

@@ -20,6 +20,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, UploadFile
 from fastapi import File as FileParam
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from src.api.dependencies import get_current_store, get_order_repository
@@ -40,6 +41,7 @@ from src.application.services.shipment_csv import (
     CsvFormatError,
     build_manifest_csv,
     parse_status_sheet,
+    resolve_status,
 )
 from src.application.services.shipment_status_sync import apply_carrier_status
 from src.core.entities.store import Store
@@ -50,6 +52,11 @@ from src.infrastructure.external_services.waybill import (
     generate_waybill_batch_pdf,
     generate_waybill_pdf,
     generate_waybill_sheet_pdf,
+    render_html,
+    render_sheet_html,
+)
+from src.infrastructure.external_services.waybill.generator import (
+    TEMPLATE_DIR as WAYBILL_TEMPLATE_DIR,
 )
 from src.infrastructure.repositories import (
     OrderRepository,
@@ -227,6 +234,21 @@ async def delete_courier_profile(
 # ── Waybills ─────────────────────────────────────────────────────────
 
 
+def _courier_of(shipment: Any, store: Store) -> Any | None:
+    """Which of the merchant's couriers is carrying this parcel.
+
+    A manual shipment records its courier by appending the profile id to
+    ``shipping_method``. The label and the manifest have to agree on that
+    rule, or a merchant hands a courier a sheet of parcels that another
+    courier is holding.
+    """
+    method = getattr(shipment, "shipping_method", "") or ""
+    for profile in list_profiles(store.settings):
+        if method.endswith(profile.id):
+            return profile
+    return None
+
+
 async def _label_context(
     shipment: Any, store: Store, order_repo: OrderRepository
 ) -> dict[str, Any]:
@@ -237,11 +259,8 @@ async def _label_context(
     parts = []
     if address:
         parts = [address.address_line1, address.address_line2, address.city]
-    courier_name = ""
-    for profile in list_profiles(store.settings):
-        if (shipment.shipping_method or "").endswith(profile.id):
-            courier_name = profile.name_ar or profile.name_en
-            break
+    profile = _courier_of(shipment, store)
+    courier_name = (profile.name_ar or profile.name_en) if profile else ""
 
     return build_context(
         tracking_number=shipment.tracking_number or "",
@@ -261,10 +280,39 @@ async def _label_context(
             else None
         ),
         courier_name=courier_name,
+        # `OrderLineItem` has no `name` — this read `li.name` and 500'd
+        # every waybill print. The variant matters on a label: two sizes of
+        # the same product are indistinguishable to whoever packs the box.
         items=[
-            {"name": li.name, "quantity": li.quantity}
+            {
+                "name": " — ".join(p for p in (li.product_name, li.variant_name) if p),
+                "quantity": li.quantity,
+            }
             for li in (getattr(order, "line_items", None) or [])
         ],
+    )
+
+
+def _label_html_response(html: str) -> HTMLResponse:
+    """The same label, rendered by the browser instead of WeasyPrint.
+
+    WeasyPrint needs cairo/pango, which the Docker image has and a Windows
+    dev box does not — the 503 below used to tell merchants to "use the
+    HTML preview" when no such thing existed. It is also a real fallback:
+    the stylesheet sizes the page at 100×150mm, so Ctrl+P gives the same
+    label off any printer.
+
+    The template links `label.css` relatively, which WeasyPrint resolves
+    against the template directory. A browser would resolve it against the
+    API host and 404 — an unstyled label, which is worse than none. So the
+    stylesheet is inlined here and only here; the PDF path is untouched.
+    """
+    css = (WAYBILL_TEMPLATE_DIR / "label.css").read_text(encoding="utf-8")
+    return HTMLResponse(
+        content=html.replace(
+            '<link rel="stylesheet" href="label.css">',
+            f"<style>{css}</style>",
+        )
     )
 
 
@@ -278,6 +326,11 @@ async def print_waybills(
     store: Annotated[Store, Depends(get_current_store)],
     shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    as_html: bool = Query(
+        False,
+        alias="html",
+        description="Return the printable HTML instead of a PDF.",
+    ),
 ):
     """One PDF for the day's parcels.
 
@@ -303,6 +356,13 @@ async def print_waybills(
                 status_code=404, detail=f"Shipment {shipment_id} not found"
             )
         contexts.append(await _label_context(shipment, store, order_repo))
+
+    if as_html:
+        return _label_html_response(
+            render_sheet_html(contexts)
+            if request.format == "sheet"
+            else render_html(contexts)
+        )
 
     try:
         pdf = (
@@ -332,12 +392,20 @@ async def print_waybill(
     shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     shipment_id: Annotated[UUID, Path()],
+    as_html: bool = Query(
+        False,
+        alias="html",
+        description="Return the printable HTML instead of a PDF.",
+    ),
 ):
     shipment = await shipment_repo.get_by_id(shipment_id)
     if not shipment or shipment.store_id != store.id:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
     context = await _label_context(shipment, store, order_repo)
+    if as_html:
+        return _label_html_response(render_html([context]))
+
     try:
         pdf = generate_waybill_pdf(context)
     except WaybillRenderError as e:
@@ -354,6 +422,9 @@ async def print_waybill(
     )
 
 
+#: Rows read per page when scanning for one courier's parcels.
+_PAGE = 500
+
 # ── CSV round-trip ───────────────────────────────────────────────────
 
 
@@ -368,15 +439,63 @@ async def export_shipment_manifest(
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     status: str = Query("created", description="Shipment status to include"),
     limit: int = Query(500, ge=1, le=2000),
+    courier: str | None = Query(
+        None,
+        description=(
+            "Courier profile id. Returns only that courier's parcels — "
+            "omit for every parcel in the status."
+        ),
+    ),
 ):
     """The sheet the merchant hands the courier.
+
+    ``courier`` is what makes this usable with more than one company. A
+    merchant running Barashout and Waselha at once must not hand either
+    of them a sheet listing the other's parcels, so the filter uses the
+    same rule the label does — see :func:`_courier_of`.
 
     Written UTF-8 **with a BOM** so Excel opens Arabic correctly — the
     opposite of the rule for source files, and deliberate.
     """
-    shipments = await shipment_repo.get_by_store(
-        store_id=store.id, status=status, skip=0, limit=limit
-    )
+    filename_courier = ""
+    if not courier:
+        shipments = await shipment_repo.get_by_store(
+            store_id=store.id, status=status, skip=0, limit=limit
+        )
+    else:
+        profile = next(
+            (p for p in list_profiles(store.settings) if p.id == courier), None
+        )
+        if profile is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "COURIER_NOT_FOUND",
+                    "message_en": "No such courier for this store.",
+                    "message_ar": "مفيش مندوب بالرقم ده في المتجر ده.",
+                },
+            )
+        filename_courier = f"-{profile.name_en or profile.id}".replace(" ", "-")
+
+        # Page until `limit` of *this courier's* parcels are found, rather
+        # than filtering one page of everybody's. A store shipping through
+        # three couriers would otherwise get roughly a third of a sheet and
+        # no sign that the rest exist — parcels missing from the sheet are
+        # parcels the courier never collects.
+        shipments, skip = [], 0
+        while len(shipments) < limit:
+            page = await shipment_repo.get_by_store(
+                store_id=store.id, status=status, skip=skip, limit=_PAGE
+            )
+            if not page:
+                break
+            shipments.extend(
+                s for s in page if (s.shipping_method or "").endswith(profile.id)
+            )
+            skip += len(page)
+            if len(page) < _PAGE:
+                break
+        del shipments[limit:]
 
     rows = []
     for shipment in shipments:
@@ -409,7 +528,11 @@ async def export_shipment_manifest(
     return Response(
         content=csv_bytes,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment; filename=manifest-{stamp}.csv"},
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=manifest{filename_courier}-{stamp}.csv"
+            )
+        },
     )
 
 
@@ -475,6 +598,19 @@ async def apply_status_import(
             skipped.append({"tracking_number": tracking, "reason": "not this store"})
             continue
 
+        # Resolve through the sheet's vocabulary, the same one the preview
+        # showed the merchant — not the carrier's. A Tier 3 sheet is written
+        # by the merchant ("delivered", "تم التسليم"), and `manual` has an
+        # empty carrier status_map by design, so routing this through
+        # `map_carrier_status` skipped every row as unmapped.
+        resolved = resolve_status(raw_status)
+        if resolved is None:
+            skipped.append({
+                "tracking_number": tracking,
+                "reason": f"unmapped '{raw_status}'",
+            })
+            continue
+
         status = await apply_carrier_status(
             shipment=shipment,
             shipment_repo=shipment_repo,
@@ -482,6 +618,7 @@ async def apply_status_import(
             raw_status=raw_status,
             description=row.get("note") or "",
             cod_amount=row.get("cod_amount"),
+            status=resolved,
         )
         if status is None:
             skipped.append({

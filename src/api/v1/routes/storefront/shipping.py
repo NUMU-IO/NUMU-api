@@ -3,9 +3,6 @@
 No auth — called from the checkout page. Paths:
     * GET  /storefront/store/{store_id}/shipping/governorates
     * POST /storefront/store/{store_id}/shipping/options
-
-The legacy `/shipping/quote` endpoint in `shipping_quote.py` is kept
-untouched for back-compat with the merchant rate calculator.
 """
 
 import logging

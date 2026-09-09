@@ -125,6 +125,82 @@ COURIER_SEEDS: tuple[CourierSeed, ...] = (
     CourierSeed(key="apex", name_en="Apex Delivery", name_ar="أبيكس"),
     CourierSeed(key="xceed", name_en="Xceed Courier", name_ar="إكسيد"),
     CourierSeed(key="door_to_door", name_en="Door To Door Egypt", name_ar="دور تو دور"),
+    # ── Companies a merchant can hand a sheet to today ───────────────
+    #
+    # Added 2026-09-09 at Yousef's request. None of the four publishes an
+    # API, so they are Tier 3 by the same rule as the rest of this file:
+    # NUMU issues the waybill and the tracking number, the merchant sends
+    # the company a CSV of the day's parcels, and status comes back
+    # through the CSV import.
+    #
+    # Details are what each company publishes on its own site, read
+    # 2026-09-09. Arabic names are transliterations except Waselha
+    # (وصلها) and Barashout (براشوت), which the companies write
+    # themselves. Coverage is unverified for all four, so each ships with
+    # the full 27 governorates and is labelled unconfirmed in the hub.
+    CourierSeed(
+        key="waselha",
+        name_en="Waselha",
+        name_ar="وصلها",
+        note_en=(
+            "A platform that matches merchants with couriers, with its own "
+            "tracking and settlement. Cairo-based, no public API."
+        ),
+        note_ar=(
+            "منصة بتوصّل التجار بالمندوبين، وعندها تتبّع وتسويات خاصة بيها. "
+            "مقرها القاهرة، ومفيش API."
+        ),
+    ),
+    CourierSeed(
+        key="flextock",
+        name_en="Flextock",
+        name_ar="فليكستوك",
+        note_en=(
+            "Fulfilment as well as delivery — they can hold your stock and "
+            "ship from their warehouse. Operates in Egypt, Saudi Arabia "
+            "and the UAE."
+        ),
+        note_ar=(
+            "بيعملوا تخزين وشحن مع بعض — ممكن يمسكوا بضاعتك ويشحنوا من "
+            "مخزنهم. شغالين في مصر والسعودية والإمارات."
+        ),
+    ),
+    CourierSeed(
+        key="holyship",
+        name_en="Holy Ship",
+        name_ar="هولي شيب",
+        note_en="Last-mile delivery and warehousing for online stores.",
+        note_ar="توصيل الميل الأخير وتخزين للمتاجر الأونلاين.",
+    ),
+    CourierSeed(
+        key="barashout",
+        name_en="Barashout",
+        name_ar="براشوت",
+        contact_phone="+201099541922",
+        contact_source="Published on barashout.com's contact page, read 2026-09-09.",
+        note_en=(
+            "Same-day inside a governorate, and they handle fragile goods. "
+            "Based in Mansoura, delivering nationwide through partners."
+        ),
+        note_ar=(
+            "توصيل في نفس اليوم جوه المحافظة، وبيشيلوا البضاعة القابلة "
+            "للكسر. مقرهم المنصورة وبيوصّلوا كل مصر عن طريق شركاء."
+        ),
+    ),
+    CourierSeed(
+        key="egl",
+        name_en="Egyptian Global Logistics",
+        name_ar="إي جي إل",
+        note_en=(
+            "Freight forwarding, not parcels — sea and air cargo, containers "
+            "and heavy lift, with bonded warehousing. Pick them for a "
+            "shipment that moves by container, not for a customer delivery."
+        ),
+        note_ar=(
+            "شحن بضائع مش طرود — بحري وجوي وكونتينرات وحمولات تقيلة، ومخازن "
+            "جمركية. اختارهم للشحنات اللي بتتنقل بالكونتينر، مش لتوصيل عميل."
+        ),
+    ),
     CourierSeed(
         key="own_courier",
         name_en="My own courier",

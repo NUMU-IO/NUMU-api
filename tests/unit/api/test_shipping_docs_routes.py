@@ -210,3 +210,239 @@ class TestCourierProfileRoutes:
         source = inspect.getsource(create_courier_profile)
         assert "message_ar" in source
         assert "UNKNOWN_COURIER_SEED" in source
+
+
+class TestWhatTheLiveRunCaught:
+    """Three defects that every unit test above was blind to, because each
+    one only appears when a real order, a real courier sheet and a real
+    browser are on the other end. Found by running the branch against a
+    live API; pinned here so they cannot come back."""
+
+    def test_the_label_reads_a_field_the_line_item_actually_has(self):
+        """`_label_context` read `li.name`. `OrderLineItem` has no `name`,
+        so **every** waybill print raised AttributeError → 500."""
+        from src.core.entities.order import OrderLineItem
+
+        fields = set(OrderLineItem.model_fields)
+        assert "name" not in fields
+        assert {"product_name", "variant_name", "quantity"} <= fields
+
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import _label_context
+
+        source = inspect.getsource(_label_context)
+        # The prose above mentions the old field, so match the code shape.
+        assert '"name": li.name' not in source
+        assert "li.product_name" in source
+
+    def test_the_import_resolves_the_sheets_words_not_the_carriers(self):
+        """A Tier 3 sheet is written by the merchant, and `manual` has an
+        empty carrier `status_map` by design — so routing the sheet
+        through `map_carrier_status` skipped every row as unmapped and the
+        CSV round-trip moved nothing."""
+        from src.application.services.carrier_registry import get_spec
+        from src.application.services.shipment_csv import resolve_status
+        from src.core.entities.shipment import ShipmentStatus
+
+        assert get_spec("manual").status_map == {}
+        assert resolve_status("delivered") is ShipmentStatus.DELIVERED
+        assert resolve_status("تم التسليم") is ShipmentStatus.DELIVERED
+
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import apply_status_import
+
+        source = inspect.getsource(apply_status_import)
+        assert "resolve_status(raw_status)" in source
+        assert "status=resolved" in source
+
+    def test_an_unresolvable_word_still_moves_nothing(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import apply_status_import
+
+        source = inspect.getsource(apply_status_import)
+        assert "unmapped" in source
+
+    def test_the_status_override_does_not_bypass_the_carrier_map(self):
+        """`status=` is an override for a caller with its own vocabulary,
+        not a way to skip mapping — omit it and the carrier map still
+        decides."""
+        import inspect
+
+        from src.application.services.shipment_status_sync import apply_carrier_status
+
+        source = inspect.getsource(apply_carrier_status)
+        assert "status or map_carrier_status(carrier, raw_status)" in source
+
+    def test_the_html_label_carries_its_own_stylesheet(self):
+        """The template links `label.css` relatively — WeasyPrint resolves
+        that against the template dir, a browser would resolve it against
+        the API host and 404, leaving an unstyled label."""
+        from src.api.v1.routes.stores.shipping_docs import _label_html_response
+
+        html = '<link rel="stylesheet" href="label.css"><div class="label"></div>'
+        out = _label_html_response(html).body.decode()
+        assert '<link rel="stylesheet"' not in out
+        assert "unicode-bidi: isolate" in out  # the LTR rule, inlined
+        assert "100mm 150mm" in out or "100mm" in out
+
+
+class TestManifestIsPerCourier:
+    """A merchant running Barashout and Waselha at once must not hand
+    either of them a sheet listing the other's parcels."""
+
+    def test_the_endpoint_takes_a_courier(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        assert "courier" in inspect.signature(export_shipment_manifest).parameters
+
+    def test_an_unknown_courier_is_a_bilingual_404_not_an_empty_sheet(self):
+        """An empty CSV would read as "nothing to collect today"."""
+        import inspect
+
+        source = inspect.getsource(
+            __import__(
+                "src.api.v1.routes.stores.shipping_docs",
+                fromlist=["export_shipment_manifest"],
+            ).export_shipment_manifest
+        )
+        assert "COURIER_NOT_FOUND" in source
+        assert "message_ar" in source
+
+    def test_the_label_and_the_manifest_share_one_matching_rule(self):
+        """Two copies of `endswith(profile.id)` would drift, and the label
+        would name a courier the sheet did not list."""
+        import inspect
+
+        from src.api.v1.routes.stores import shipping_docs as mod
+
+        assert "_courier_of" in inspect.getsource(mod._label_context)
+        assert inspect.getsource(mod._courier_of).count("endswith") == 1
+
+    def test_the_filename_names_the_courier(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        assert "filename_courier" in inspect.getsource(export_shipment_manifest)
+
+
+class TestTheFourAddedCouriers:
+    """Waselha, Flextock, Holy Ship and Barashout — Tier 3 by the same
+    rule as the rest: no public API, so NUMU issues the paperwork and the
+    merchant sends them a CSV."""
+
+    KEYS = ("waselha", "flextock", "holyship", "barashout")
+
+    def test_all_four_are_seeded(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        for key in self.KEYS:
+            assert get_seed(key) is not None, key
+
+    def test_each_has_a_real_arabic_name(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        for key in self.KEYS:
+            seed = get_seed(key)
+            assert any("؀" <= ch <= "ۿ" for ch in seed.name_ar), key
+            assert seed.name_en
+
+    def test_coverage_is_unconfirmed_not_invented(self):
+        """Nobody checked their governorate lists, so each ships covering
+        everywhere and says so — a courier wrongly limited hides
+        deliveries silently."""
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        for key in self.KEYS:
+            seed = get_seed(key)
+            assert seed.data_verified is False, key
+            assert seed.governorate_codes == (), key
+
+    def test_a_phone_still_needs_a_source(self):
+        """The module raises at import if one does not; this pins that the
+        four new rows obey it rather than relying on the loop staying."""
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        for key in self.KEYS:
+            seed = get_seed(key)
+            if seed.contact_phone:
+                assert seed.contact_source, key
+
+    def test_none_of_them_became_a_registry_carrier(self):
+        """They have no API. A registry entry would offer a merchant a
+        credentials form for something that cannot be connected."""
+        from src.application.services.carrier_registry import carrier_slugs
+
+        slugs = carrier_slugs()
+        for key in self.KEYS:
+            assert key not in slugs, key
+
+    def test_they_appear_in_the_hubs_picker(self):
+        from src.application.services.manual_carrier_seeds import seed_catalog
+
+        keys = {s["key"] for s in seed_catalog()}
+        assert set(self.KEYS) <= keys
+
+
+class TestTheCourierSheetIsNotTruncated:
+    """Filtering after the fetch limit is how a courier silently stops
+    collecting parcels."""
+
+    def test_it_pages_for_this_couriers_parcels(self):
+        """A store shipping through three couriers would otherwise get
+        roughly a third of a sheet, with nothing saying rows were cut."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        source = inspect.getsource(export_shipment_manifest)
+        assert "while len(shipments) < limit" in source
+        assert "skip=skip" in source
+
+    def test_the_page_loop_ends_on_a_short_page(self):
+        """No page bound would spin forever on a store with no matches."""
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        source = inspect.getsource(export_shipment_manifest)
+        assert "if not page:" in source
+        assert "if len(page) < _PAGE:" in source
+
+    def test_the_caller_still_gets_at_most_limit_rows(self):
+        import inspect
+
+        from src.api.v1.routes.stores.shipping_docs import export_shipment_manifest
+
+        assert "del shipments[limit:]" in inspect.getsource(export_shipment_manifest)
+
+
+class TestEglIsNotAParcelCourier:
+    """EGL was added with the logos, but it is a freight forwarder — sea
+    and air cargo, containers, heavy lift — not a last-mile courier. It
+    is seeded so a merchant who ships containers can pick it, and its
+    note says what it actually does so nobody picks it for a customer
+    delivery."""
+
+    def test_it_is_seeded(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        assert get_seed("egl") is not None
+
+    def test_the_note_says_it_is_freight_not_parcels(self):
+        from src.application.services.manual_carrier_seeds import get_seed
+
+        seed = get_seed("egl")
+        assert "freight" in seed.note_en.lower()
+        assert "parcel" in seed.note_en.lower()
+        assert seed.note_ar and any("؀" <= ch <= "ۿ" for ch in seed.note_ar)
+
+    def test_it_is_not_a_registry_carrier(self):
+        from src.application.services.carrier_registry import carrier_slugs
+
+        assert "egl" not in carrier_slugs()
