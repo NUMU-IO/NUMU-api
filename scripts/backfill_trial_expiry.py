@@ -134,18 +134,18 @@ async def _apply(rows) -> int:
     return written
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--apply", action="store_true", help="write the rows")
-    parser.add_argument(
-        "--grace-days",
-        type=int,
-        default=7,
-        help="window for merchants whose trial already lapsed (0 = lock next tick)",
-    )
-    args = parser.parse_args()
+async def _run(apply: bool, grace_days: int) -> None:
+    """Plan and write in ONE event loop.
 
-    rows = asyncio.run(_plan(args.grace_days))
+    Two `asyncio.run` calls opened two loops, and the shared engine's pooled
+    asyncpg connections are pinned to the loop that opened them — the second
+    call died on checkout with "got Future attached to a different loop"
+    (`connection.py` documents the same trap for Celery, which sidesteps it
+    with NullPool). Nothing was written, because the failure landed before the
+    commit; still, a backfill that half-runs is exactly the kind of thing this
+    must not be able to do.
+    """
+    rows = await _plan(grace_days)
     if not rows:
         print("Nothing to backfill.")
         return
@@ -157,12 +157,26 @@ def main() -> None:
             f"expires={expires_at:%Y-%m-%d}  ({why})"
         )
 
-    if not args.apply:
+    if not apply:
         print("\nDry run — nothing written. Pass --apply to write.")
         return
 
-    written = asyncio.run(_apply(rows))
+    written = await _apply(rows)
     print(f"\nWrote {written} tenant(s).")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--apply", action="store_true", help="write the rows")
+    parser.add_argument(
+        "--grace-days",
+        type=int,
+        default=7,
+        help="window for merchants whose trial already lapsed (0 = lock next tick)",
+    )
+    args = parser.parse_args()
+
+    asyncio.run(_run(args.apply, args.grace_days))
 
 
 if __name__ == "__main__":
