@@ -136,6 +136,12 @@ class ActivityEntry(BaseModel):
     created_at: datetime
 
 
+#: How far back the orders chart reaches. Two weeks: long enough that a bad
+#: day is visibly a dip rather than the whole chart, short enough that a bar
+#: is still one readable day.
+ORDERS_CHART_DAYS = 14
+
+
 class HealthSignal(BaseModel):
     """A degradation derived from measurements, not from an incident record."""
 
@@ -262,29 +268,42 @@ async def get_overview(
         cut=day_start - timedelta(days=1) + (now - day_start),
     )
 
-    # ── Orders per hour, today, zero-filled so the axis is a real day ───────
-    hourly = (
+    # ── Orders per day, zero-filled so the axis is a real fortnight ────────
+    #
+    # Per DAY, not per hour. A platform this size takes single-digit orders in
+    # an hour, so an hourly axis was 24 buckets of zero with one bar somewhere
+    # — it read as "nothing is happening" on a day that was ordinary. Days
+    # carry enough volume per bucket to show a trend, which is the only
+    # question this chart answers.
+    chart_start = day_start - timedelta(days=ORDERS_CHART_DAYS - 1)
+    daily = (
         await db.execute(
             text(
                 f"""
-                SELECT g.h AS hour,
+                SELECT g.d AS day_offset,
                        count(o.id) AS orders,
                        coalesce(sum(o.total), 0) AS value
-                FROM generate_series(0, 23) AS g(h)
+                FROM generate_series(0, :days - 1) AS g(d)
                 LEFT JOIN public.orders o
-                  ON o.created_at >= CAST(:d AS timestamptz) + (g.h || ' hours')::interval
-                 AND o.created_at <  CAST(:d AS timestamptz) + ((g.h + 1) || ' hours')::interval
+                  ON o.created_at >= CAST(:start AS timestamptz)
+                                     + (g.d || ' days')::interval
+                 AND o.created_at <  CAST(:start AS timestamptz)
+                                     + ((g.d + 1) || ' days')::interval
                  AND {orders_live}
-                GROUP BY g.h ORDER BY g.h
+                GROUP BY g.d ORDER BY g.d
                 """  # nosec B608 - interpolates module literals only; values are bound
             ),
-            {"d": day_start},
+            {"start": chart_start, "days": ORDERS_CHART_DAYS},
         )
     ).all()
     orders_per_hour = [
-        Bucket(label=f"{h:02d}", value=float(count)) for h, count, _ in hourly
+        Bucket(
+            label=(chart_start + timedelta(days=int(offset))).strftime("%d %b"),
+            value=float(count),
+        )
+        for offset, count, _ in daily
     ]
-    value_spark = [float(v) for _, _, v in hourly]
+    value_spark = [float(v) for _, _, v in daily]
 
     # ── Trial → paid over the last 30 days ─────────────────────────────────
     trial_started = await _scalar(
@@ -449,7 +468,12 @@ async def get_overview(
                      OR o.payment_status = 'FAILED'
                      OR r.risk_level IN ('high', 'critical')
                   )
-                ORDER BY coalesce(r.risk_score, 0) DESC, o.created_at DESC
+                -- NEWEST FIRST, not highest risk first. Sorting by score put
+                -- the same handful of old high-risk orders at the top every
+                -- day, so an order that needed a human this morning never
+                -- reached the screen. Risk is still shown per row and the
+                -- Trust & risk queue exists for working it by score.
+                ORDER BY o.created_at DESC
                 LIMIT 8
                 """  # nosec B608 - interpolates module literals only; values are bound
                 ),
@@ -483,7 +507,14 @@ async def get_overview(
 
     # ── Derived health ─────────────────────────────────────────────────────
     # Not incident records — this platform has no incident table. These are
-    # measurements that crossed a line, phrased so an operator can act.
+    # measurements, phrased so an operator can act.
+    #
+    # EVERY SIGNAL IS ALWAYS RETURNED, with its current reading, including
+    # when it is fine. The card used to be empty until something broke, which
+    # meant "healthy" and "the query silently returned nothing" looked
+    # identical — and an operator could not tell a 2% payment-failure rate
+    # from a 9% one on its way to breaching. `severity` carries the state;
+    # `ok` means measured and within tolerance.
     health: list[HealthSignal] = []
     paid_or_failed_24h = await _scalar(
         db,
@@ -493,29 +524,83 @@ async def get_overview(
         """,  # nosec B608 - interpolates module literals only; values are bound
         since=now - timedelta(hours=24),
     )
-    if paid_or_failed_24h and failed_payments:
-        failure_rate = failed_payments / paid_or_failed_24h * 100
-        if failure_rate >= 10:
-            health.append(
-                HealthSignal(
-                    id="payment_failure_rate",
-                    severity="danger" if failure_rate >= 25 else "warning",
-                    title=f"Payment failure rate is {failure_rate:.0f}% over 24 hours",
-                    detail=(
-                        f"{failed_payments} of {paid_or_failed_24h} settled orders failed. "  # nosec B608 - interpolates module literals only; values are bound
-                        "Cash on delivery is unaffected."
-                    ),
-                )
-            )
-    if failed_hooks_24h and failed_hooks_24h >= 20:
+
+    if paid_or_failed_24h:
+        failure_rate = (failed_payments or 0) / paid_or_failed_24h * 100
         health.append(
             HealthSignal(
-                id="webhook_backlog",
-                severity="warning",
-                title=f"{failed_hooks_24h} webhook deliveries failed in 24 hours",
-                detail="Merchant integrations may be missing order events. Open the queue to retry.",
+                id="payment_failure_rate",
+                severity=(
+                    "danger"
+                    if failure_rate >= 25
+                    else "warning"
+                    if failure_rate >= 10
+                    else "ok"
+                ),
+                title=f"Payment failure rate is {failure_rate:.0f}% over 24 hours",
+                detail=(
+                    f"{failed_payments or 0} of {paid_or_failed_24h} settled orders "
+                    "failed. Cash on delivery is unaffected."
+                ),
             )
         )
+    else:
+        # No settled orders at all in 24 hours. Saying so is the honest
+        # reading; a 0% failure rate on zero orders would be a false all-clear.
+        health.append(
+            HealthSignal(
+                id="payment_failure_rate",
+                severity="ok",
+                title="No card or wallet orders settled in the last 24 hours",
+                detail="Nothing to measure a failure rate against.",
+            )
+        )
+
+    awaiting_risk = await _scalar(
+        db,
+        """
+        SELECT count(*) FROM public.risk_assessments r
+        JOIN public.tenants t ON t.id = r.tenant_id
+        WHERE r.action_taken IS NULL
+          AND NOT (t.lifecycle_state = 'demo' OR t.is_internal IS TRUE)
+        """,
+    )
+
+    hooks = failed_hooks_24h or 0
+    health.append(
+        HealthSignal(
+            id="webhook_backlog",
+            severity="danger" if hooks >= 100 else "warning" if hooks >= 20 else "ok",
+            title=(
+                f"{hooks} webhook deliveries failed in 24 hours"
+                if hooks
+                else "No webhook delivery failures in 24 hours"
+            ),
+            detail=(
+                "Merchant integrations may be missing order events. "
+                "Open the queue to retry."
+                if hooks >= 20
+                else "Merchant integrations are receiving order events."
+            ),
+        )
+    )
+
+    health.append(
+        HealthSignal(
+            id="risk_queue",
+            severity="warning" if (awaiting_risk or 0) >= 25 else "ok",
+            title=(
+                f"{awaiting_risk} cash-on-delivery orders awaiting a decision"
+                if awaiting_risk
+                else "No cash-on-delivery orders awaiting a decision"
+            ),
+            detail=(
+                "Every hour one waits is an hour the merchant cannot ship."
+                if awaiting_risk
+                else "The trust queue is clear."
+            ),
+        )
+    )
 
     # ── What NUMU earns ────────────────────────────────────────────────────
     # Three separate things that are easy to conflate: recurring subscription

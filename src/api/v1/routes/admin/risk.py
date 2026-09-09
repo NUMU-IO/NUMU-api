@@ -7,9 +7,12 @@ drives, and the shopper decides at the door. ``risk_assessments`` already
 scores every order; this is the queue where a human agrees or disagrees with
 that score.
 
-The queue is deliberately oldest-first. A risk queue sorted by score looks
-decisive and quietly starves the orders that have been waiting longest, which
-are the ones about to ship regardless of what the reviewer decides.
+The queue is NEWEST FIRST. It was oldest-first on the reasoning that the
+longest-waiting orders are about to ship regardless — but with a real backlog
+that put four-month-old assessments at the top of every page, so the order
+that came in this morning, the one a decision can still change, was never on
+screen. A stale COD assessment has already been resolved by the courier;
+today's has not. Sort by `oldest` to get the original behaviour back.
 
 Every decision requires a reason. The score is a judgement a human can
 override, so the override has to say why — the reason is what a later
@@ -36,6 +39,7 @@ router = APIRouter()
 
 LevelFilter = Literal["all", "low", "medium", "high", "critical"]
 StateFilter = Literal["open", "decided", "all"]
+SortOrder = Literal["newest", "oldest"]
 
 #: What a reviewer can decide. `accept` releases the order, `reject` holds it,
 #: `escalate` keeps it open but marks it for a second pair of eyes.
@@ -89,6 +93,7 @@ async def list_risk(
     level: Annotated[LevelFilter, Query()] = "all",
     state: Annotated[StateFilter, Query()] = "open",
     search: Annotated[str | None, Query(max_length=120)] = None,
+    sort: Annotated[SortOrder, Query()] = "newest",
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
@@ -110,6 +115,8 @@ async def list_risk(
         params["q"] = f"%{search}%"
 
     clause = " AND ".join(where)
+    # From a validated Literal, so only these two strings can ever reach SQL.
+    direction = "ASC" if sort == "oldest" else "DESC"
 
     rows = (
         (
@@ -126,9 +133,10 @@ async def list_risk(
                 LEFT JOIN public.stores s ON s.id = r.store_id
                 LEFT JOIN public.tenants t ON t.id = r.tenant_id
                 WHERE {clause}
-                -- Oldest first: the queue exists to stop orders aging out
-                -- unreviewed, not to work the scariest score first.
-                ORDER BY r.created_at ASC
+                -- Never by score: sorting that way looks decisive and starves
+                -- everything below the top band. Direction is the caller's,
+                -- and both values are module literals, not request text.
+                ORDER BY r.created_at {direction}
                 LIMIT :limit OFFSET :offset
                 """  # nosec B608 - interpolates module literals only; values are bound
                 ),
