@@ -28,11 +28,62 @@ logger = get_logger(__name__)
 
 REQUIRED_PERMISSION = "settings.manage"
 
-# key → (path inside store.settings, human label). Everything else is refused.
-WRITABLE_SETTINGS: dict[str, tuple[tuple[str, ...], str]] = {
-    "favicon_url": (("customization", "identity", "favicon_url"), "Favicon"),
-    "store_name": (("customization", "identity", "store_name"), "Store name"),
+# key → (path inside store.settings, human label, kind). Everything else is
+# refused. `kind` is "text" or "bool"; a bool key accepts true/false only.
+WRITABLE_SETTINGS: dict[str, tuple[tuple[str, ...], str, str]] = {
+    "favicon_url": (("customization", "identity", "favicon_url"), "Favicon", "text"),
+    "store_name": (("customization", "identity", "store_name"), "Store name", "text"),
+    # SEO / GEO / AEO. These live in the typed StoreSeoSettings blob the
+    # storefront already reads for meta tags, JSON-LD and robots.txt — the
+    # agent writes the same keys the SEO tab does, not a parallel set.
+    "seo_title": (("seo", "seo_title"), "SEO title", "text"),
+    "seo_description": (("seo", "seo_description"), "SEO description", "text"),
+    "social_image_url": (("seo", "social_image_url"), "Social share image", "text"),
+    "business_type": (("seo", "business_type"), "Business type", "text"),
+    "google_site_verification": (
+        ("seo", "google_site_verification"),
+        "Google verification",
+        "text",
+    ),
+    "bing_site_verification": (
+        ("seo", "bing_site_verification"),
+        "Bing verification",
+        "text",
+    ),
+    "robots_indexing_enabled": (
+        ("seo", "robots_indexing_enabled"),
+        "Search engine indexing",
+        "bool",
+    ),
+    "has_return_policy_30d": (
+        ("seo", "has_return_policy_30d"),
+        "30-day return policy",
+        "bool",
+    ),
+    "arabic_content_ready": (
+        ("seo", "arabic_content_ready"),
+        "Arabic content ready",
+        "bool",
+    ),
+    "short_answer": (("seo", "short_answer"), "Short answer", "text"),
+    "ai_crawlers_allowed": (
+        ("seo", "ai_crawlers_allowed"),
+        "AI crawler access",
+        "bool",
+    ),
+    "llms_txt_enabled": (("seo", "llms_txt_enabled"), "llms.txt", "bool"),
+    "contact_email": (("seo", "contact_email"), "Contact email", "text"),
+    "contact_phone": (("seo", "contact_phone"), "Contact phone", "text"),
+    # JSON values: validated through StoreSeoSettings itself, so the agent can
+    # never write a shape the storefront would later fail to read.
+    "faqs": (("seo", "faqs"), "FAQs", "json"),
+    "same_as": (("seo", "same_as"), "Official profiles", "json"),
+    "area_served": (("seo", "area_served"), "Areas served", "json"),
 }
+
+# Length caps mirror StoreSeoSettings, so a value the agent writes can never be
+# one the typed model would later reject.
+_MAX_LEN = {"seo_title": 70, "seo_description": 160, "short_answer": 320}
 
 UPDATE_SETTINGS_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -45,8 +96,10 @@ UPDATE_SETTINGS_INPUT_SCHEMA: dict[str, Any] = {
         "value": {
             "type": "string",
             "description": (
-                "New value. For favicon_url this must be an https URL — use "
-                "the URL of an image the merchant just attached."
+                "New value. For favicon_url and social_image_url this must be "
+                "an https URL. For the boolean keys pass 'true' or 'false' — "
+                "robots_indexing_enabled false takes the store out of Google "
+                "and puts Disallow: / in robots.txt."
             ),
         },
     },
@@ -100,14 +153,43 @@ async def update_store_settings(ctx: ToolContext, args: dict[str, Any]) -> ToolR
         return ToolResult.invalid_args(
             f"'{key}' is not a setting this tool can change."
         )
-    path, label = entry
+    path, label, kind = entry
 
-    value = str(args.get("value") or "").strip()
-    if not value:
+    raw = str(args.get("value") or "").strip()
+    if not raw:
         return ToolResult.invalid_args("'value' cannot be empty.")
-    if key.endswith("_url") and not value.startswith("https://"):
-        # http:// would be blocked as mixed content on the storefront anyway.
-        return ToolResult.invalid_args("Image URLs must start with https://.")
+
+    if kind == "json":
+        import json
+
+        try:
+            parsed_json = json.loads(raw)
+        except ValueError:
+            return ToolResult.invalid_args(f"'{key}' must be valid JSON.")
+        # Round-trip through the real model: whatever it accepts is exactly
+        # what the storefront can read back.
+        from src.api.v1.schemas.tenant.store_seo import StoreSeoSettings
+
+        try:
+            validated = StoreSeoSettings.model_validate({key: parsed_json})
+        except Exception as exc:  # noqa: BLE001 — surfaced to the model as-is
+            return ToolResult.invalid_args(f"'{key}' is not valid: {exc}")
+        value: Any = validated.model_dump()[key]
+    elif kind == "bool":
+        lowered = raw.lower()
+        if lowered not in ("true", "false"):
+            return ToolResult.invalid_args(f"'{key}' must be 'true' or 'false'.")
+        value = lowered == "true"
+    else:
+        if key.endswith("_url") and not raw.startswith("https://"):
+            # http:// is blocked as mixed content on the storefront anyway.
+            return ToolResult.invalid_args("Image URLs must start with https://.")
+        limit = _MAX_LEN.get(key)
+        if limit and len(raw) > limit:
+            return ToolResult.invalid_args(
+                f"'{key}' must be at most {limit} characters (got {len(raw)})."
+            )
+        value = raw
 
     store = await _load_store(ctx)
     if store is None:

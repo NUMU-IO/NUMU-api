@@ -45,6 +45,28 @@ BusinessTypeLiteral = Literal[
 ]
 
 
+class FaqEntry(BaseModel):
+    """One question/answer pair, emitted as FAQPage JSON-LD.
+
+    Kept deliberately small. A FAQ is only useful to an answer engine when it
+    is the question a shopper actually typed and an answer that stands alone
+    out of context, so there is nowhere for a longer body to go.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    question: str = Field(max_length=200)
+    answer: str = Field(max_length=800)
+
+    @field_validator("question", "answer", mode="after")
+    @classmethod
+    def _required_text(cls, v: str) -> str:
+        trimmed = v.strip()
+        if not trimmed:
+            raise ValueError("FAQ question and answer cannot be blank")
+        return trimmed
+
+
 class StoreSeoSettings(BaseModel):
     """Per-store SEO overrides + verification tokens.
 
@@ -83,12 +105,68 @@ class StoreSeoSettings(BaseModel):
     # advertising ar-* for that is scaled-content territory. Opt-in.
     arabic_content_ready: bool = False
 
+    # ── AEO: being the answer, not just a result ──────────────────────────
+    # Answer engines quote a passage; they do not summarise a whole page. A
+    # store with nothing quotable gets skipped in favour of one that wrote a
+    # straight answer to "what does this shop sell".
+    short_answer: str | None = Field(default=None, max_length=320)
+
+    # FAQ pairs, emitted as FAQPage JSON-LD. The single biggest AEO lever
+    # available to a store: it is the only structured place to say "do you
+    # deliver to Aswan" in the words a shopper actually asks it.
+    faqs: list[FaqEntry] = Field(default_factory=list, max_length=20)
+
+    # ── GEO: being citable by generative engines ──────────────────────────
+    # Whether GPTBot, ClaudeBot, PerplexityBot and Google-Extended may crawl.
+    # Default True and deliberately separate from `robots_indexing_enabled`:
+    # these are different decisions. A merchant can want Google's index and
+    # not want their catalogue in a training set, or the reverse — being
+    # cited by an assistant that sends buyers is worth more to most stores
+    # than the copy is worth withholding.
+    ai_crawlers_allowed: bool = True
+
+    # Serve /llms.txt — a short, plain-text map of the store for models that
+    # cannot afford to crawl the whole site.
+    llms_txt_enabled: bool = True
+
+    # ── Entity graph: what makes the store a known thing ──────────────────
+    # Organization.sameAs. Profiles that corroborate the store is real; this
+    # is how an engine decides two mentions are the same business.
+    same_as: list[str] = Field(default_factory=list, max_length=10)
+    contact_email: str | None = Field(default=None, max_length=254)
+    contact_phone: str | None = Field(default=None, max_length=32)
+    # Where the store actually ships, for "near me" and locality answers.
+    area_served: list[str] = Field(default_factory=list, max_length=20)
+    founding_year: int | None = Field(default=None, ge=1900, le=2100)
+
+    @field_validator("same_as", "area_served", mode="after")
+    @classmethod
+    def _clean_list(cls, v: list[str]) -> list[str]:
+        """Drop blanks and duplicates, preserving order."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in v or []:
+            trimmed = (item or "").strip()
+            if trimmed and trimmed not in seen:
+                seen.add(trimmed)
+                out.append(trimmed)
+        return out
+
+    @field_validator("same_as", mode="after")
+    @classmethod
+    def _https_profiles(cls, v: list[str]) -> list[str]:
+        """sameAs must be absolute URLs; a bare handle is not an identity."""
+        return [u for u in v if u.startswith(("https://", "http://"))]
+
     @field_validator(
         "seo_title",
         "seo_description",
         "social_image_url",
         "google_site_verification",
         "bing_site_verification",
+        "short_answer",
+        "contact_email",
+        "contact_phone",
         mode="after",
     )
     @classmethod

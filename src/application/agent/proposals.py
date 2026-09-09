@@ -504,7 +504,7 @@ async def _apply_update_store_settings(
     entry = WRITABLE_SETTINGS.get(str(params.get("key")))
     if entry is None:
         raise ProposalError("invalid", "Not a settable store setting.")
-    path, _label = entry
+    path = entry[0]
 
     repo = StoreRepository(session)
     store = await repo.get_by_id(store_id)
