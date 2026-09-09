@@ -24,6 +24,7 @@ sender: a promotion and a password reset should not share a reputation, and a
 merchant replying to a follow-up should reach a person.
 """
 
+import json
 import logging
 import re
 from datetime import UTC, datetime
@@ -41,7 +42,11 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.application.services import referral_service
+from src.application.services.marketing_links import new_token, rewrite_links
 from src.config import settings
+from src.infrastructure.external_services.resend.email_templates.marketing import (
+    render_marketing_email,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,13 @@ MARKETING_FROM_NAME = "NUMU"
 #: Where a shared referral link points. Public signup, with the code carried
 #: in the query so the landing page can attribute it.
 REFERRAL_LINK_BASE = "https://numueg.app/signup?ref="
+
+#: Base for the click-tracking redirect. On the sending domain deliberately —
+#: a tracking host that differs from the From domain is the mismatch Resend's
+#: own deliverability report flags. `/api/v1/public/r` rather than a bare `/r`
+#: because that route exists today; shortening it is one nginx alias, not a
+#: reason to hold the feature.
+CLICK_BASE_URL = "https://numueg.app/api/v1/public/r"
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 
@@ -325,11 +337,22 @@ async def preview(
     variables = await _variables(db, lead)
     recipient = _recipient(lead, payload.channel)
     rendered_body = render(body, variables)
+    # Email preview is the branded email, not the bare copy: an operator
+    # approving text that then ships inside a shell has not seen what they
+    # approved. Links are NOT rewritten here — a preview must not consume a
+    # tracking token, and a click from the operator is not a merchant's.
+    preview_body = (
+        render_marketing_email(
+            body=rendered_body, language=payload.language or _language_of(lead)
+        )
+        if payload.channel == "email"
+        else rendered_body
+    )
     return SuccessResponse(
         data=Preview(
             recipient=recipient or "(no address on this lead)",
             subject=render(subject, variables) if subject else None,
-            body=rendered_body,
+            body=preview_body,
             whatsapp_url=(
                 _whatsapp_link(recipient, rendered_body)
                 if payload.channel == "whatsapp" and recipient
@@ -447,11 +470,33 @@ async def send(
             })
             continue
 
+        # The operator writes copy; the brand comes from here. Sending the raw
+        # body was not a neutral default — an unstyled promotional email reads
+        # as spam, and for many merchants this is the first thing NUMU ever
+        # sends them.
+        language = payload.language or _language_of(lead)
+        branded = render_marketing_email(
+            body=rendered_body,
+            language=language,
+            unsubscribe_url=None,
+        )
+        # One token per recipient, so a click is attributable to a person
+        # rather than to a campaign.
+        token = new_token()
+        tracked_html, links = rewrite_links(
+            branded, token=token, base_url=CLICK_BASE_URL
+        )
+
         error = await _deliver(
             channel=payload.channel,
             recipient=recipient,
             subject=rendered_subject,
-            body=rendered_body,
+            body=tracked_html,
+            # Plain text from the copy, not from the tracked HTML: the text
+            # part should show a merchant the real URL, not a redirect with a
+            # token in it. Clicks there go uncounted, which is the honest
+            # trade for a readable fallback.
+            text_body=_plain_text(rendered_body),
         )
 
         await _log(
@@ -461,10 +506,14 @@ async def send(
             channel=payload.channel,
             template_key=payload.template_key,
             subject=rendered_subject,
+            # The COPY, not the shell. "What did we say to this merchant" is
+            # answered by the words; the shell is regenerated from them.
             body=rendered_body,
             status="failed" if error else "sent",
             error=error,
             sent_by=admin_id,
+            click_token=None if error else token,
+            links=[] if error else links,
         )
 
         if error:
@@ -600,17 +649,24 @@ async def _variables(db: AsyncSession, lead) -> dict[str, str]:
 
 
 async def _deliver(
-    *, channel: Channel, recipient: str, subject: str | None, body: str
+    *,
+    channel: Channel,
+    recipient: str,
+    subject: str | None,
+    body: str,
+    text_body: str | None = None,
 ) -> str | None:
     """Send one message. Returns an error string, or None on success.
 
     Email only. WhatsApp never reaches here — it is handed to the operator as
     a link rather than sent by the platform.
     """
-    return await _deliver_email(recipient, subject or "", body)
+    return await _deliver_email(recipient, subject or "", body, text_body)
 
 
-async def _deliver_email(recipient: str, subject: str, body: str) -> str | None:
+async def _deliver_email(
+    recipient: str, subject: str, body: str, text_body: str | None = None
+) -> str | None:
     from src.core.interfaces.services.email_service import EmailMessage
     from src.infrastructure.external_services.resend.email_service import (
         ResendEmailService,
@@ -627,7 +683,7 @@ async def _deliver_email(recipient: str, subject: str, body: str) -> str | None:
                 # a multipart message without one is a spam signal, and the
                 # templates are simple enough that stripping the tags gives a
                 # readable fallback rather than a wall of markup.
-                text_content=_plain_text(body),
+                text_content=text_body or _plain_text(body),
                 from_email=MARKETING_FROM_EMAIL,
                 from_name=MARKETING_FROM_NAME,
                 # Replies go to the mailbox the message came from, so a
@@ -696,14 +752,17 @@ async def _log(
     status: str,
     error: str | None,
     sent_by: UUID,
+    click_token: str | None = None,
+    links: list[str] | None = None,
 ) -> None:
     await db.execute(
         text(
             "INSERT INTO public.marketing_outreach "
             "(lead_id, recipient, channel, template_key, subject, body, status, "
-            " error, sent_by) "
+            " error, sent_by, click_token, links) "
             "VALUES (:lead_id, :recipient, :channel, :template_key, :subject, "
-            "        :body, :status, :error, :sent_by)"
+            "        :body, :status, :error, :sent_by, :click_token, "
+            "        CAST(:links AS jsonb))"
         ),
         {
             "lead_id": str(lead_id),
@@ -715,6 +774,8 @@ async def _log(
             "status": status,
             "error": error,
             "sent_by": str(sent_by),
+            "click_token": click_token,
+            "links": json.dumps(links or []),
         },
     )
 
@@ -734,6 +795,10 @@ class OutreachEntry(BaseModel):
     status: str
     error: str | None
     created_at: datetime
+    #: None until the merchant follows a link. The first click, not the last:
+    #: "did this land" is answered by the first one.
+    clicked_at: datetime | None = None
+    click_count: int = 0
 
 
 @router.get(
@@ -754,7 +819,7 @@ async def list_outreach(
             text(
                 "SELECT o.id, o.lead_id, l.email AS lead_email, o.recipient, "
                 "       o.channel, o.template_key, o.subject, o.body, o.status, "
-                "       o.error, o.created_at "
+                "       o.error, o.created_at, o.clicked_at, o.click_count "
                 "FROM public.marketing_outreach o "
                 "LEFT JOIN public.merchant_leads l ON l.id = o.lead_id "
                 f"{clause} ORDER BY o.created_at DESC LIMIT :limit"  # nosec B608 - literal clause; no caller value interpolated
@@ -777,6 +842,8 @@ async def list_outreach(
                 status=r["status"],
                 error=r["error"],
                 created_at=r["created_at"],
+                clicked_at=r["clicked_at"],
+                click_count=r["click_count"] or 0,
             )
             for r in rows
         ]
