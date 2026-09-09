@@ -263,3 +263,92 @@ async def test_undo_restores_through_the_same_signature():
     args = use_case.execute.await_args.args
     assert args[1].quantity == 3
     assert (args[2], args[3]) == (owner_id, store_id)
+
+
+# ── Rename, and the no-op it used to produce instead ─────────────────────────
+# Asked to "rename to test5", the model re-proposed the PREVIOUS turn's change
+# — stock 500 → 500 — because `update_product` had no `name` and it had
+# nothing else to offer. The merchant got a confirm card for a change that
+# would do nothing.
+
+
+@pytest.mark.asyncio
+async def test_renames_a_product():
+    ctx = _ctx()
+    pid = uuid4()
+    product = _Product(
+        id=pid,
+        store_id=ctx.store_id,
+        name="test",
+        price=_Money(Decimal("300")),
+        compare_at_price=None,
+        quantity=500,
+    )
+    with patch(
+        "src.infrastructure.agent.tools.update_product.ProductRepository",
+        return_value=_repo_returning(product),
+    ):
+        res = await update_product(ctx, {"product_id": str(pid), "name": "test5"})
+
+    assert res.ok
+    diff = res.proposal["diff"]
+    assert diff["before"] == {"name": "test"}
+    assert diff["after"] == {"name": "test5"}
+    # The slug is not in the params: renaming must not move the storefront URL.
+    assert "slug" not in res.proposal["params"]
+
+
+@pytest.mark.asyncio
+async def test_a_change_to_the_value_it_already_has_is_refused():
+    ctx = _ctx()
+    pid = uuid4()
+    product = _Product(
+        id=pid,
+        store_id=ctx.store_id,
+        name="test",
+        price=_Money(Decimal("300")),
+        compare_at_price=None,
+        quantity=500,
+    )
+    with patch(
+        "src.infrastructure.agent.tools.update_product.ProductRepository",
+        return_value=_repo_returning(product),
+    ):
+        res = await update_product(ctx, {"product_id": str(pid), "quantity": 500})
+
+    assert not res.ok and res.error_code == "invalid_args"
+    # The message is what the model reads back, so it has to say what to do
+    # next rather than only that the call failed.
+    assert "already" in res.error_message.lower()
+
+
+@pytest.mark.asyncio
+async def test_a_partial_no_op_keeps_only_what_actually_changes():
+    """Half a proposal is still a proposal: the card should show the price
+    moving and not carry a stock row that reads 500 → 500."""
+    ctx = _ctx()
+    pid = uuid4()
+    product = _Product(
+        id=pid,
+        store_id=ctx.store_id,
+        name="test",
+        price=_Money(Decimal("300")),
+        compare_at_price=None,
+        quantity=500,
+    )
+    with patch(
+        "src.infrastructure.agent.tools.update_product.ProductRepository",
+        return_value=_repo_returning(product),
+    ):
+        res = await update_product(
+            ctx, {"product_id": str(pid), "quantity": 500, "price": 450}
+        )
+
+    assert res.ok
+    assert res.proposal["diff"]["after"] == {"price": 450.0}
+
+
+@pytest.mark.asyncio
+async def test_a_blank_rename_is_rejected():
+    res = await update_product(_ctx(), {"product_id": str(uuid4()), "name": " "})
+    assert not res.ok and res.error_code == "invalid_args"

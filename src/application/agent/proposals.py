@@ -285,6 +285,7 @@ async def _apply_update_product(
         raise ProposalError("not_found", "Product no longer exists in this store.")
     before_state = {
         "product_id": str(product_id),
+        "name": current.name,
         "price": str(current.price.amount),
         "compare_at_price": (
             str(current.compare_at_price.amount) if current.compare_at_price else None
@@ -293,6 +294,10 @@ async def _apply_update_product(
     }
 
     dto = UpdateProductDTO(
+        # The slug is deliberately not derived from a rename: the storefront
+        # URL is built from it, and changing it would 301 every indexed link
+        # for a title tweak the merchant may make three times in a week.
+        name=params.get("name"),
         price=_to_decimal(params["price"]) if params.get("price") is not None else None,
         compare_at_price=(
             _to_decimal(params["compare_at_price"])
@@ -315,6 +320,7 @@ async def _apply_update_product(
         "summary": f"Updated product {updated.name}",
         "after_state": {
             "product_id": str(product_id),
+            "name": updated.name,
             "price": str(updated.price),
             "compare_at_price": (
                 str(updated.compare_at_price) if updated.compare_at_price else None
@@ -358,6 +364,7 @@ async def _undo_update_product(
     if not product_id:
         raise NothingToUndoError("nothing_to_undo", "No prior product state recorded.")
     dto = UpdateProductDTO(
+        name=before.get("name"),
         price=_to_decimal(before["price"]) if before.get("price") is not None else None,
         compare_at_price=(
             _to_decimal(before["compare_at_price"])
