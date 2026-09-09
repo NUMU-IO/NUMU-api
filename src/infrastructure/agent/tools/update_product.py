@@ -22,8 +22,14 @@ logger = get_logger(__name__)
 
 REQUIRED_PERMISSION = "product.update"
 
-# v1 scope: the pricing/inventory essentials. Anything else stays in the dashboard.
-_EDITABLE_FIELDS = ("price", "compare_at_price", "quantity")
+# v1 scope: the pricing/inventory essentials, plus the name. Anything else
+# stays in the dashboard.
+#
+# `name` was missing, and the model's response to "rename to test5" was not to
+# say so — it re-proposed the PREVIOUS change (quantity 500 → 500) and asked
+# the merchant to confirm a no-op. A tool that cannot do a thing has to be
+# able to say which thing, so the model can answer instead of improvising.
+_EDITABLE_FIELDS = ("name", "price", "compare_at_price", "quantity")
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -31,6 +37,15 @@ INPUT_SCHEMA: dict[str, Any] = {
         "product_id": {
             "type": "string",
             "description": "The product's id — get it from get_products first.",
+        },
+        "name": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": (
+                "New product name. The URL slug is deliberately left alone, so "
+                "existing links and search rankings survive a rename."
+            ),
         },
         "price": {
             "type": "number",
@@ -68,6 +83,13 @@ async def update_product(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         return ToolResult.invalid_args("'product_id' must be a valid product id.")
 
     changes: dict[str, Any] = {}
+    if args.get("name") is not None:
+        name = str(args["name"]).strip()
+        if len(name) < 2:
+            return ToolResult.invalid_args("'name' must be at least 2 characters.")
+        if len(name) > 200:
+            return ToolResult.invalid_args("'name' cannot exceed 200 characters.")
+        changes["name"] = name
     if args.get("price") is not None:
         try:
             price = float(args["price"])
@@ -113,6 +135,7 @@ async def update_product(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         )
 
     before = {
+        "name": product.name,
         "price": float(product.price.amount),
         "compare_at_price": (
             float(product.compare_at_price.amount) if product.compare_at_price else None
@@ -120,6 +143,18 @@ async def update_product(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         "quantity": product.quantity,
     }
     after = {**before, **changes}
+
+    # Drop anything already at the requested value. The model re-sends the
+    # previous turn's arguments when it cannot do what was actually asked, and
+    # a card reading "stock 500 → 500" asks the merchant to confirm nothing —
+    # it looks like the assistant misunderstood, and confirming it teaches them
+    # the previews cannot be trusted.
+    changes = {k: v for k, v in changes.items() if before[k] != v}
+    if not changes:
+        return ToolResult.invalid_args(
+            "Every value given already matches the product; nothing would change. "
+            "Tell the merchant it is already set, or ask which field to change."
+        )
     if (
         after.get("compare_at_price") is not None
         and after["compare_at_price"] <= after["price"]
@@ -151,10 +186,12 @@ async def update_product(ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
 SPEC = {
     "name": "update_product",
     "description": (
-        "Propose updating a product's price, compare-at price, or stock quantity. "
+        "Propose renaming a product or updating its price, compare-at price, "
+        "or stock quantity. "
         "Returns a before/after preview for the merchant to CONFIRM — it does NOT "
         "change anything until confirmed. Call get_products first to find the "
-        "product_id. Use for 'change the hoodie price to 450' or 'set stock to 20'."
+        "product_id. Use for 'rename it to Winter Hoodie', 'change the hoodie "
+        "price to 450' or 'set stock to 20'."
     ),
     "input_schema": INPUT_SCHEMA,
     "risk_tier": RiskTier.CONFIRM,
