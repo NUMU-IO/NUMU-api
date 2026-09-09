@@ -622,15 +622,44 @@ async def _deliver_email(recipient: str, subject: str, body: str) -> str | None:
             EmailMessage(
                 to=recipient,
                 subject=subject,
-                html_body=body,
+                html_content=body,
+                # A plain-text alternative is not optional for marketing mail:
+                # a multipart message without one is a spam signal, and the
+                # templates are simple enough that stripping the tags gives a
+                # readable fallback rather than a wall of markup.
+                text_content=_plain_text(body),
                 from_email=MARKETING_FROM_EMAIL,
                 from_name=MARKETING_FROM_NAME,
+                # Replies go to the mailbox the message came from, so a
+                # merchant answering a follow-up reaches a person.
+                reply_to=MARKETING_FROM_EMAIL,
             )
         )
         return None if ok else "the email provider rejected the message"
     except Exception as exc:  # noqa: BLE001 — reported per recipient, not raised
         logger.warning("marketing_email_failed recipient=%s error=%s", recipient, exc)
         return str(exc)[:300]
+
+
+_TAG = re.compile(r"<[^>]+>")
+_BLOCK_END = re.compile(r"</(p|div|li|h[1-6]|tr)>", re.IGNORECASE)
+_LINE_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
+
+
+def _plain_text(html: str) -> str:
+    """A readable text/plain alternative to an HTML body.
+
+    Not a general HTML-to-text converter — the input is our own templates,
+    which are paragraphs and lists. Block ends become newlines first so the
+    text does not collapse into one run-on line.
+    """
+    text = _BLOCK_END.sub("\n", html)
+    text = _LINE_BREAK.sub("\n", text)
+    text = _TAG.sub("", text)
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
+    lines = [line.strip() for line in text.split("\n")]
+    return "\n".join(line for line in lines if line)
 
 
 def _whatsapp_link(phone: str, body: str) -> str:
