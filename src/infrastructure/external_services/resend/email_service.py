@@ -1437,6 +1437,7 @@ class ResendEmailService(IEmailService):
         tenant_id: UUID | None = None,
         store_name: str = "NUMU",
         customer_name: str | None = None,
+        line_items: list[dict] | None = None,
     ) -> bool:
         """Phase 5.4 — abandoned-cart recovery email.
 
@@ -1446,34 +1447,23 @@ class ResendEmailService(IEmailService):
         invoked WhatsApp only, leaving email as a TODO. This method
         is the email wing.
         """
-        ar = language == "ar"
-        amt = f"{cart_total / 100:.2f}"
-        greet = (
-            f"مرحبًا {customer_name}"
-            if (ar and customer_name)
-            else (f"Hi {customer_name}" if customer_name else "Hi")
+        # One template, shared with the merchant-triggered send in
+        # `routes/stores/abandoned_checkouts.py`. This method used to carry its
+        # own markup — a heading, a sentence and a button — so the two paths
+        # sent visibly different emails for the same event, and this one had no
+        # items in it at all.
+        from src.infrastructure.external_services.resend.email_templates.abandoned_cart import (  # noqa: E501
+            abandoned_cart_email_html,
         )
-        subject = "أكمل عملية الشراء" if ar else "You left items in your cart"
-        cta = "أكمل الطلب" if ar else "Resume checkout"
-        body = (
-            f"{greet}، السلة التي تركتها بقيمة {amt} {currency} لا تزال متاحة "
-            "— احجز عناصرك قبل نفادها."
-            if ar
-            else (
-                f"{greet}, the items in your cart ({amt} {currency}) "
-                "are still waiting. Grab them before they sell out."
-            )
-        )
-        html = (
-            f'<div dir="{"rtl" if ar else "ltr"}" style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:24px;">'
-            f'<h1 style="font-size:20px;margin:0 0 12px;">{subject}</h1>'
-            f'<p style="margin:0 0 8px;color:#444;">{body}</p>'
-            f'<p style="margin:24px 0 0;"><a href="{recovery_url}" '
-            f'style="background:#111;color:#fff;text-decoration:none;'
-            f'padding:12px 20px;border-radius:6px;display:inline-block;">'
-            f"{cta}</a></p>"
-            f'<p style="margin:24px 0 0;color:#888;font-size:12px;">{store_name}</p>'
-            f"</div>"
+
+        subject, html = abandoned_cart_email_html(
+            store_name=store_name,
+            recovery_url=recovery_url,
+            line_items=list(line_items or []),
+            total_cents=cart_total,
+            currency=currency,
+            customer_name=customer_name,
+            language=language,
         )
         message = EmailMessage(to=email, subject=subject, html_content=html)
         try:
