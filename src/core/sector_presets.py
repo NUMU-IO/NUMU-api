@@ -115,6 +115,16 @@ SECTOR_PRESETS: dict[str, SectorPreset] = {
             PresetField("language", _TEXT, "Language", "اللغة"),
             PresetField("pages", _NUM, "Pages", "عدد الصفحات"),
             PresetField("edition_year", _NUM, "Edition year", "سنة الإصدار"),
+            # A used bookshop sells a COPY, not a title: where it sits and what
+            # shape it is in are part of the offer, and a bookseller's own
+            # recommendation is the thing that actually sells it. The rating
+            # pair is a fallback for stores with no review history yet — a
+            # store with reviews should show the real average instead.
+            PresetField("shelf_location", _TEXT, "Shelf location", "مكان الرف"),
+            PresetField("staff_pick", _LONG, "Staff pick note", "ملاحظة اختيار الفريق"),
+            PresetField("staff_pick_by", _TEXT, "Recommended by", "ترشيح من"),
+            PresetField("rating", _NUM, "Rating out of 5", "التقييم من ٥"),
+            PresetField("rating_count", _NUM, "Number of ratings", "عدد التقييمات"),
         ],
         categories=[
             PresetCategory("islamic", "Islamic", "إسلامي"),
