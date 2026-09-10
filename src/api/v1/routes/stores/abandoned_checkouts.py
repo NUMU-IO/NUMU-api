@@ -281,6 +281,9 @@ async def send_recovery_email(
     from src.infrastructure.external_services.resend.email_service import (
         ResendEmailService,
     )
+    from src.infrastructure.external_services.resend.email_templates.abandoned_cart import (  # noqa: E501
+        abandoned_cart_email_html,
+    )
 
     checkout = await repo.get_by_id(checkout_id)
     if not checkout or checkout.store_id != store.id:
@@ -311,19 +314,27 @@ async def send_recovery_email(
             detail="This checkout has already been recovered",
         )
 
-    # Minimal recovery email body — a real template lives in
-    # external_services/resend/email_templates and will be wired in alongside
-    # the Shopify Recovery flow later (out of scope for Phase 4).
-    subject = f"Complete your order at {store.name}"
-    items_html = "".join(
-        f"<li>{(li.get('product_name') or 'Item')} × {li.get('quantity', 1)}</li>"
-        for li in checkout.line_items
-    )
-    html = (
-        f"<p>Hi there,</p>"
-        f"<p>You left items in your cart at <strong>{store.name}</strong>.</p>"
-        f"<ul>{items_html}</ul>"
-        f"<p>Come back and finish your order whenever you're ready.</p>"
+    # The link back to the cart. `/api/cart/recover` rebuilds the shopper's
+    # session from this checkout and lands them on /cart with the items
+    # restored — the same route the WhatsApp nudge reaches through the apex
+    # redirector, taken directly here because an email has no reason to make
+    # an extra hop. Built from `store_url`, so a store on a custom domain
+    # links to its own domain rather than to numueg.app.
+    #
+    # Without this the email asked the shopper to come back and gave them no
+    # way to do it.
+    recovery_url = f"{store.store_url.rstrip('/')}/api/cart/recover?cart={checkout.id}"
+
+    subject, html = abandoned_cart_email_html(
+        store_name=store.name,
+        recovery_url=recovery_url,
+        line_items=list(checkout.line_items or []),
+        total_cents=checkout.total,
+        currency=checkout.currency or "EGP",
+        customer_name=_recipient_name_from_checkout(checkout),
+        # The shopper's language, not the merchant's dashboard language.
+        language=(store.default_language or "ar"),
+        logo_url=store.logo_url,
     )
 
     service = ResendEmailService()
