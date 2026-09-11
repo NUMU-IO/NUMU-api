@@ -17,7 +17,7 @@ Pricing model:
   wallet holds prepayment of NUMU's own service fees (not pass-through
   consumer funds) and balances are refundable on request, but this framing
   must be cleared by counsel before payg GA.
-* **30-day trial, then 30-day read-only grace, then hard delete.** The
+* **37-day trial, then 30-day read-only grace, then hard delete.** The
   lifecycle state machine on the tenant model handles the transitions; this
   module just defines what each plan can *do*.
 
@@ -76,7 +76,7 @@ PLAN_LIMITS: dict[str, PlanFeatures] = {
         monthly_price_piasters=0,
         annual_price_piasters=0,
     ),
-    # ─── 30-day free trial of Starter features (default for new signups) ──
+    # ─── 37-day free trial of Starter features (default for new signups) ──
     "trial": PlanFeatures(
         display_name="Trial",
         max_products=100,

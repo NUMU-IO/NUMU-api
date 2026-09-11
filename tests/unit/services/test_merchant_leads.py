@@ -134,7 +134,11 @@ async def test_attach_tenant_links_the_store(test_session):
     )
 
     await attach_tenant_to_lead(
-        test_session, user_id=user_id, tenant_id=tenant_id, subdomain="linkstore"
+        test_session,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        subdomain="linkstore",
+        phone="+201001234567",
     )
 
     lead = (
@@ -147,6 +151,7 @@ async def test_attach_tenant_links_the_store(test_session):
     assert lead is not None
     assert lead.tenant_id == tenant_id
     assert lead.store_subdomain == "linkstore"
+    assert lead.phone == "+201001234567"
     assert lead.status == "store_created"
 
 

@@ -100,7 +100,7 @@ class TenantRepository(ITenantRepository):
         return list(result.scalars().all())
 
     async def find_expired_trials(self, limit: int = 100) -> list[TenantModel]:
-        """Trial tenants whose 30-day expiry has elapsed but have not converted.
+        """Trial tenants whose 37-day expiry has elapsed but have not converted.
 
         These flip to ``read_only`` (not deleted) — the read-only purge task
         handles deletion 30 days later.

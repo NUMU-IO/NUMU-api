@@ -1,6 +1,6 @@
 """Celery task — transition expired trials to read-only state.
 
-Stream 4.6 of the NUMU plan. Trial tenants get 30 days. After expiry
+Stream 4.6 of the NUMU plan. Trial tenants get 37 days. After expiry
 without conversion, they transition to read_only for another 30 days
 (the grace period). Existing orders continue to fulfill; new orders
 are blocked. Runs hourly via Celery Beat.

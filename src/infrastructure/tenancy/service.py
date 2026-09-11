@@ -22,10 +22,10 @@ from src.infrastructure.tenancy.repository import TenantRepository
 logger = logging.getLogger(__name__)
 
 
-# Demo tenants live for 7 days. Trial tenants live for 30 days. Both then
+# Demo tenants live for 7 days. Trial tenants live for 37 days. Both then
 # enter the read-only state (trials only) for another 30 days before deletion.
 DEMO_LIFETIME_DAYS = 7
-TRIAL_LIFETIME_DAYS = 30
+TRIAL_LIFETIME_DAYS = 37
 READ_ONLY_GRACE_DAYS = 30
 
 
@@ -61,7 +61,7 @@ class TenantService:
             expires_at: When this tenant should be auto-cleaned (demo/trial)
             demo_email: Captured email for the Try-a-Demo flow
             demo_started_at: When the demo session started
-            trial_started_at: When the 30-day trial began
+            trial_started_at: When the 37-day trial began
 
         Returns:
             Created Tenant object

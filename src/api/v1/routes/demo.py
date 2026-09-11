@@ -1,6 +1,6 @@
 """Authenticated demo routes — requires a demo session cookie.
 
-POST /api/v1/demo/convert — promote demo tenant to real 30-day trial.
+POST /api/v1/demo/convert — promote demo tenant to real 37-day trial.
 """
 
 import logging
@@ -30,7 +30,7 @@ router = APIRouter()
     "/demo/convert",
     response_model=SuccessResponse[ConvertDemoResponse],
     status_code=status.HTTP_200_OK,
-    summary="Convert demo tenant to real account (30-day trial)",
+    summary="Convert demo tenant to real account (37-day trial)",
     operation_id="convert_demo",
 )
 async def convert_demo(
@@ -43,7 +43,7 @@ async def convert_demo(
 ):
     """Promote the current demo tenant in-place to a real account.
 
-    No payment is collected here — the user lands in a 30-day Trial.
+    No payment is collected here — the user lands in a 37-day Trial.
     The seeded fake data is wiped; anything the user added themselves
     during the demo is preserved. Fresh tokens are issued for the new
     real user and set as cookies.
@@ -96,7 +96,7 @@ async def convert_demo(
         data=ConvertDemoResponse(
             tenant_id=result.tenant_id,
             subdomain=result.subdomain,
-            message="Welcome to NUMU! Your 30-day trial has started. Check your email to verify your account.",
+            message="Welcome to NUMU! Your 37-day trial has started. Check your email to verify your account.",
         ),
         message="Demo converted to trial account",
     )

@@ -56,7 +56,7 @@ class ITenantRepository(ABC):
 
     @abstractmethod
     async def find_expired_trials(self, limit: int = 100) -> list[TenantModel]:
-        """Find trial tenants whose 30-day window has elapsed."""
+        """Find trial tenants whose 37-day window has elapsed."""
         ...
 
     @abstractmethod

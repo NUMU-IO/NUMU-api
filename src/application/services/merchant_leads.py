@@ -316,6 +316,7 @@ async def attach_tenant_to_lead(
     user_id: UUID,
     tenant_id: UUID,
     subdomain: str | None,
+    phone: str | None = None,
 ) -> None:
     """Link the store a registered lead just created, by owner id.
 
@@ -339,6 +340,7 @@ async def attach_tenant_to_lead(
             return
         _merge(lead, "tenant_id", tenant_id)
         _merge(lead, "store_subdomain", _clip("store_subdomain", subdomain))
+        _merge(lead, "phone", _clip("phone", phone))
         _merge(lead, "store_created_at", datetime.now(UTC))
         lead.advance_status("store_created")
         lead.last_seen_at = datetime.now(UTC)
