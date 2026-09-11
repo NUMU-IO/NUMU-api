@@ -18,6 +18,7 @@ from src.core.interfaces.services.token_service import ITokenService
 from src.core.logging import get_logger
 from src.core.value_objects.email import Email
 from src.core.value_objects.phone import InvalidPhoneError, PhoneNumber
+from src.infrastructure.tenancy.service import TRIAL_LIFETIME_DAYS
 
 logger = get_logger(__name__)
 
@@ -34,7 +35,10 @@ class GoogleOAuthUseCase:
         self.token_service = token_service
 
     async def execute(
-        self, id_token_str: str, phone: str | None = None
+        self,
+        id_token_str: str,
+        phone: str | None = None,
+        trial_days: int = TRIAL_LIFETIME_DAYS,
     ) -> AuthResponseDTO:
         """Verify Google ID token and return auth response.
 
@@ -121,7 +125,7 @@ class GoogleOAuthUseCase:
                     email_verified_at=datetime.now(UTC),
                     avatar_url=avatar_url,
                     phone=parsed_phone,
-                    trial_ends_at=datetime.now(UTC) + timedelta(days=14),
+                    trial_ends_at=datetime.now(UTC) + timedelta(days=trial_days),
                     auth_provider="google",
                     google_id=google_sub,
                 )

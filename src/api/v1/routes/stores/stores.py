@@ -44,6 +44,7 @@ from src.application.use_cases.stores.create_store import (
     validate_subdomain,
 )
 from src.core.entities.store import Store
+from src.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 from src.core.value_objects.money import Currency
@@ -193,6 +194,10 @@ async def create_store(
     # merchant's own banner use.
     user_result = await db.execute(select(UserModel).where(UserModel.id == user_id))
     user = user_result.scalar_one_or_none()
+    if user is None or not user.phone:
+        raise ValidationError(
+            "Phone number is required before creating a store", field="phone"
+        )
     # The signup stamp is the authority on when this trial ends: a merchant who
     # registers on the 1st and opens their store on the 8th gets the remaining
     # 30 days, not a fresh 37 from today. `None` once it has passed, so a
@@ -329,6 +334,7 @@ async def create_store(
             user_id=user_id,
             tenant_id=result.tenant_id,
             subdomain=result.subdomain,
+            phone=user.phone,
         )
 
     if result.subdomain:

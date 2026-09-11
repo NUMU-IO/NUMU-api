@@ -416,11 +416,15 @@ async def google_oauth(
         user_repository=user_repo,
         token_service=token_service,
     )
+    from src.application.services.signup_settings import get_signup_settings
+
+    signup = await get_signup_settings(db)
 
     try:
         result = await use_case.execute(
             id_token_str,
             phone=body.get("phone") if isinstance(body.get("phone"), str) else None,
+            trial_days=signup.trial_days,
         )
     except ValueError as e:
         raise HTTPException(

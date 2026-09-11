@@ -1,4 +1,4 @@
-"""Promote a demo tenant in-place to a real account on a 30-day trial.
+"""Promote a demo tenant in-place to a real account on a 37-day trial.
 
 Stream 1.2 of the NUMU plan. Called by ``POST /api/v1/demo/convert``.
 
@@ -50,7 +50,7 @@ class ConvertDemoResult:
 
 
 class ConvertDemoUseCase:
-    """Promote a demo tenant in-place to a real 30-day trial account."""
+    """Promote a demo tenant in-place to a real 37-day trial account."""
 
     def __init__(
         self,

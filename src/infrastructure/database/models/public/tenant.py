@@ -25,13 +25,13 @@ class TenantPlan(StrEnum):
 
     ``FREE`` is **deprecated** as a public-facing plan. It is retained in the
     enum for legacy data and internal sandboxes only — new signups go to
-    ``TRIAL`` (30-day free trial of Starter features) and convert to
+    ``TRIAL`` (37-day free trial of Starter features) and convert to
     ``STARTER``/``PRO``/``ENTERPRISE`` afterward.
     """
 
     FREE = "free"  # deprecated — see plan.py module docs
     DEMO = "demo"  # internal sandbox: Try-a-Demo flow
-    TRIAL = "trial"  # 30-day free trial; auto-transitions to read_only on expiry
+    TRIAL = "trial"  # 37-day free trial; auto-transitions to read_only on expiry
     PAYG = "payg"  # pay-as-you-go: wallet-funded per-order commission
     STARTER = "starter"
     PRO = "pro"

@@ -201,14 +201,15 @@ DEFAULT_PRICING_PLANS = {
     "plans": [
         {
             "key": "trial",
-            "name_en": "30-Day Free Trial",
-            "name_ar": "تجربة مجانية ٣٠ يوم",
+            "name_en": "37-Day Free Trial",
+            "name_ar": "تجربة مجانية ٣٧ يوم",
             "price_monthly": 0,
             "price_annual": 0,
             "currency": "EGP",
             "cta": "try_demo",
             "popular": False,
             "features": [
+                {"en": "500 orders/month", "ar": "٥٠٠ أوردر شهريًا"},
                 {"en": "100 products", "ar": "١٠٠ منتج"},
                 {"en": "Custom domain", "ar": "دومين خاص"},
                 {"en": "All 12 premium themes", "ar": "كل الـ ١٢ ثيم"},
@@ -228,6 +229,7 @@ DEFAULT_PRICING_PLANS = {
             "cta": "subscribe",
             "popular": False,
             "features": [
+                {"en": "Unlimited orders", "ar": "أوردرات بلا حدود"},
                 {"en": "100 products", "ar": "١٠٠ منتج"},
                 {"en": "Custom domain", "ar": "دومين خاص"},
                 {"en": "All 12 premium themes", "ar": "كل الـ ١٢ ثيم"},
@@ -300,6 +302,7 @@ def build_payg_plan_card(commission_percent: float) -> dict:
         "popular": False,
         "commission_percent": commission_percent,
         "features": [
+            {"en": "Unlimited orders", "ar": "أوردرات بلا حدود"},
             {"en": "No monthly subscription", "ar": "بدون اشتراك شهري"},
             {
                 "en": f"{pct_en} per paid order only",
@@ -355,22 +358,64 @@ async def get_public_pricing_plans(
 
     stored = config.value if config else DEFAULT_PRICING_PLANS
     plans = [dict(p) for p in stored.get("plans", [])]
+    signup = await get_signup_settings(db)
 
-    # LIVE-PRICE MERGE (same rule as the payg commission below): for
-    # paid plans that exist in the real catalog, the displayed price is
-    # ALWAYS what the platform actually charges — PLAN_LIMITS (piasters,
-    # incl. admin plan-limits overrides), the exact amount an InstaPay
-    # subscription payment is created with. Marketing copy stays
-    # admin-editable; the numbers cannot drift from the charge.
+    # LIVE CATALOG MERGE: public prices, order limits, and trial length must
+    # match what the platform enforces even when old admin card copy remains
+    # stored in JSONB.
     for p in plans:
-        if p.get("key") in ("starter", "pro"):
-            f = get_plan_features(p["key"])
+        key = p.get("key")
+        if key in ("trial", "starter", "pro", "enterprise"):
+            f = get_plan_features(key)
             if f.monthly_price_piasters > 0:
                 p["price_monthly"] = f.monthly_price_piasters // 100
             if f.annual_price_piasters > 0:
                 p["price_annual"] = f.annual_price_piasters // 100
+            order_feature = {
+                "en": (
+                    "Unlimited orders"
+                    if f.max_orders_per_month == -1
+                    else f"{f.max_orders_per_month:,} orders/month"
+                ),
+                "ar": (
+                    "أوردرات بلا حدود"
+                    if f.max_orders_per_month == -1
+                    else f"{f.max_orders_per_month:,} أوردر شهريًا"
+                ),
+            }
+            features = p.get("features", [])
+            p["features"] = [
+                order_feature,
+                *[
+                    item
+                    for item in features
+                    if not (
+                        any(
+                            ch.isdigit()
+                            for ch in f"{item.get('en', '')}{item.get('ar', '')}"
+                        )
+                        and (
+                            "order" in item.get("en", "").lower()
+                            or "أوردر" in item.get("ar", "")
+                            or "اوردر" in item.get("ar", "")
+                            or "طلب" in item.get("ar", "")
+                        )
+                    )
+                    and "unlimited orders" not in item.get("en", "").lower()
+                    and not (
+                        "بلا حدود" in item.get("ar", "")
+                        and (
+                            "أوردر" in item.get("ar", "")
+                            or "اوردر" in item.get("ar", "")
+                            or "طلب" in item.get("ar", "")
+                        )
+                    )
+                ],
+            ]
+            if key == "trial":
+                p["name_en"] = f"{signup.trial_days}-Day Free Trial"
+                p["name_ar"] = f"تجربة مجانية {signup.trial_days} يوم"
 
-    signup = await get_signup_settings(db)
     wallet_admin = await get_wallet_settings(db)
 
     trial_visible = signup.trial_enabled and signup.trial_visible_on_landing

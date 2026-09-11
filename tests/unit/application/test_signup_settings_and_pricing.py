@@ -62,6 +62,8 @@ async def test_public_pricing_includes_payg_and_trial_meta(test_session):
     assert payg["price_monthly"] == 0
 
     assert data["trial"] == {"enabled": True, "days": 37, "visible": True}
+    trial = next(p for p in data["plans"] if p["key"] == "trial")
+    assert trial["name_en"] == "37-Day Free Trial"
 
 
 @pytest.mark.asyncio
@@ -119,7 +121,7 @@ async def test_public_pricing_paid_prices_always_match_plan_catalog(test_session
                         "currency": "EGP",
                         "cta": "subscribe",
                         "popular": False,
-                        "features": [],
+                        "features": [{"en": "50 orders", "ar": "50 طلب"}],
                     },
                     {
                         "key": "pro",
@@ -146,6 +148,11 @@ async def test_public_pricing_paid_prices_always_match_plan_catalog(test_session
     pro = get_plan_features("pro")
     assert by_key["starter"]["price_monthly"] == starter.monthly_price_piasters // 100
     assert by_key["starter"]["price_annual"] == starter.annual_price_piasters // 100
+    assert by_key["starter"]["features"][0] == {
+        "en": "Unlimited orders",
+        "ar": "أوردرات بلا حدود",
+    }
+    assert all("50" not in f["en"] for f in by_key["starter"]["features"])
     assert by_key["pro"]["price_monthly"] == pro.monthly_price_piasters // 100
     assert by_key["pro"]["price_annual"] == pro.annual_price_piasters // 100
     # Marketing copy from the stored config is preserved.

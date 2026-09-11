@@ -50,7 +50,7 @@ class StartDemoResponse(BaseModel):
 
 class ConvertDemoRequest(BaseModel):
     """Promote a demo tenant to a real account. No payment required —
-    the user lands in a 30-day trial."""
+    the user lands in a 37-day trial."""
 
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
