@@ -544,6 +544,8 @@ jobs:
 
             echo "==> Authenticating with GHCR..."
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+            echo "${GHCR_TOKEN}" | ssh -o BatchMode=yes -i ~/.ssh/numu-bg-tunnel \
+              ec2-user@108.133.34.24 "docker login ghcr.io -u '${GHCR_USER}' --password-stdin"
 
             # Reclaim disk BEFORE the pull, not after. The prune at the end of
             # this script only ran once a deploy had already succeeded, so
@@ -563,15 +565,16 @@ jobs:
             /opt/numu-api/deploy-blue-green.sh "${NUMU_API_IMAGE}" "${TRAFFIC_PERCENT}" "${DEPLOYMENT_ACTION}"
 
             echo "==> Aligning background workers with the active API slot..."
-            ACTIVE_NAME=\$(sed -n 's/^ACTIVE_NAME=//p' /opt/numu-api/.api-blue-green-state)
-            export NUMU_API_IMAGE=\$(docker inspect "\$ACTIVE_NAME" --format '{{.Image}}')
-            docker compose up -d celery-worker celery-beat
+            ACTIVE_IMAGE_REF=\$(sed -n 's/^ACTIVE_IMAGE_REF=//p' /opt/numu-api/.api-blue-green-state)
+            docker pull "\$ACTIVE_IMAGE_REF" || true
+            docker tag "\$ACTIVE_IMAGE_REF" ghcr.io/numu-io/numu-api:prod
+            docker compose up -d --force-recreate celery-worker celery-beat
 
             echo "==> Migrations completed against the candidate image."
 
             echo "==> Verifying health..."
             sleep 12
-            curl -sf http://localhost:8000/api/v1/health | grep -q '"success":true' || {
+            docker exec numu-api-router wget -qO- http://localhost:8000/api/v1/health | grep -q '"success":true' || {
               echo "ERROR: EC2 health check failed — dumping recent API logs:"
               docker logs --tail=80 numu-api-router
               exit 1
