@@ -620,6 +620,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     needs: [build-and-push, deploy-apex]
+    permissions:
+      contents: read
+      packages: read
     if: >-
       github.ref == 'refs/heads/prod' &&
       needs.deploy-apex.result == 'success' &&
@@ -647,6 +650,8 @@ jobs:
           PROD_EC2_HOST: ${{ secrets.PROD_EC2_HOST }}
           PROD_EC2_USER: ${{ secrets.PROD_EC2_USER }}
           PROD_EC2_SSH_KEY_PATH: /home/runner/.ssh/ec2_key
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
           NUMU_ADMIN_EMAIL: ${{ secrets.NUMU_ADMIN_EMAIL }}
           NUMU_ADMIN_PASSWORD: ${{ secrets.NUMU_ADMIN_PASSWORD }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

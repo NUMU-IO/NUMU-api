@@ -9,6 +9,8 @@ SSH_KEY="${PROD_EC2_SSH_KEY_PATH:-$HOME/.ssh/ec2_key}"
 IMAGE_REF="${NUMU_API_IMAGE:?NUMU_API_IMAGE is required}"
 SSH_USER="${PROD_EC2_USER:?PROD_EC2_USER is required}"
 SSH_HOST="${PROD_EC2_HOST:?PROD_EC2_HOST is required}"
+GHCR_TOKEN="${GHCR_TOKEN:?GHCR_TOKEN is required}"
+GHCR_USER="${GHCR_USER:?GHCR_USER is required}"
 GATE_SCRIPT="${CANARY_GATE_SCRIPT:-scripts/canary_gate.py}"
 ROLLBACK_NEEDED=true
 COMPLETED=false
@@ -22,6 +24,11 @@ notify() {
   curl -fsS --max-time 10 -H 'Content-Type: application/json' \
     --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null \
     || echo "WARNING: Slack notification failed" >&2
+}
+
+registry_login() {
+  printf '%s' "$GHCR_TOKEN" | ssh -o BatchMode=yes -i "$SSH_KEY" \
+    "$SSH_USER@$SSH_HOST" docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
 }
 
 remote_deploy() {
@@ -123,6 +130,7 @@ trap cleanup EXIT
 [[ -f "$SSH_KEY" ]] || die "SSH key not found: $SSH_KEY"
 [[ -f "$GATE_SCRIPT" ]] || die "canary gate not found: $GATE_SCRIPT"
 
+registry_login
 notify ":test_tube: NUMU API canary started at 10%. Kuma: https://status.numueg.app ${GITHUB_RUN_URL:-}"
 guard_for_one_hold "10% traffic"
 full_gate
