@@ -110,6 +110,10 @@ from src.infrastructure.database.models.tenant.refund import RefundModel
 from src.infrastructure.database.models.tenant.risk_assessment import (
     RiskAssessmentModel,
 )
+from src.infrastructure.database.models.tenant.series import (
+    SeriesModel,
+    SeriesProductModel,
+)
 from src.infrastructure.database.models.tenant.shipment import ShipmentModel
 from src.infrastructure.database.models.tenant.shipping_rate import ShippingRateModel
 from src.infrastructure.database.models.tenant.shipping_zone import ShippingZoneModel
@@ -218,6 +222,8 @@ __all__ = [
     "ProductModel",
     "ProductReviewModel",
     "VariantModel",
+    "SeriesModel",
+    "SeriesProductModel",
     "PromotionModel",
     "PromotionDismissalModel",
     "PromotionDisplayModel",

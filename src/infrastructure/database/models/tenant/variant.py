@@ -13,6 +13,7 @@ SUM across variants for backward-compat display).
 """
 
 from sqlalchemy import (
+    Boolean,
     ForeignKey,
     Index,
     Integer,
@@ -76,4 +77,13 @@ class VariantModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     weight: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     metadata_: Mapped[dict | None] = mapped_column(
         "metadata", JSONB, nullable=True, default=dict
+    )
+    fulfillment_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="physical", server_default="physical"
+    )
+    requires_shipping: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    track_inventory: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
     )

@@ -34,7 +34,7 @@ from src.api.dependencies import (
 from src.api.dependencies.database import get_db
 from src.application.services.variant_sync_service import recompute_product_quantity
 from src.core.entities.store import Store
-from src.core.entities.variant import Variant
+from src.core.entities.variant import FulfillmentType, Variant
 from src.core.value_objects.money import Currency, Money
 from src.infrastructure.repositories import ProductRepository
 from src.infrastructure.repositories.variant_repository import VariantRepository
@@ -72,6 +72,9 @@ class VariantResponse(BaseModel):
     image_url: str | None
     weight_g: float | None
     metadata: dict | None
+    fulfillment_type: FulfillmentType
+    requires_shipping: bool
+    track_inventory: bool
     created_at: str
     updated_at: str
 
@@ -92,6 +95,9 @@ class CreateVariantRequest(BaseModel):
     weight_g: float | None = Field(None, ge=0)
     position: int = Field(default=0, ge=0)
     metadata: dict | None = None
+    fulfillment_type: FulfillmentType = FulfillmentType.PHYSICAL
+    requires_shipping: bool = True
+    track_inventory: bool = True
 
 
 class UpdateVariantRequest(BaseModel):
@@ -113,6 +119,9 @@ class UpdateVariantRequest(BaseModel):
     weight_g: float | None = Field(None, ge=0)
     position: int | None = Field(None, ge=0)
     metadata: dict | None = None
+    fulfillment_type: FulfillmentType | None = None
+    requires_shipping: bool | None = None
+    track_inventory: bool | None = None
 
 
 # ─── Serializer ───────────────────────────────────────────────────────
@@ -144,6 +153,9 @@ def _to_response(v: Variant) -> VariantResponse:
         image_url=v.image_url,
         weight_g=float(v.weight) if v.weight is not None else None,
         metadata=v.metadata or {},
+        fulfillment_type=v.fulfillment_type,
+        requires_shipping=v.requires_shipping,
+        track_inventory=v.track_inventory,
         created_at=str(v.created_at) if v.created_at else "",
         updated_at=str(v.updated_at) if v.updated_at else "",
     )
@@ -263,6 +275,7 @@ async def create_variant_route(
             )
     repo = VariantRepository(session)
     currency = _currency(request.price_currency)
+    is_physical = request.fulfillment_type is FulfillmentType.PHYSICAL
     variant = await repo.create(
         tenant_id=product.tenant_id,
         store_id=store.id,
@@ -286,6 +299,9 @@ async def create_variant_route(
         image_url=request.image_url,
         weight=request.weight_g,
         metadata=request.metadata,
+        fulfillment_type=request.fulfillment_type,
+        requires_shipping=request.requires_shipping if is_physical else False,
+        track_inventory=request.track_inventory if is_physical else False,
     )
     await _sync_product_base_price(session, product_repo, product)
     await recompute_product_quantity(session, product_id=product_id)
@@ -388,6 +404,15 @@ async def update_variant_route(
         existing.weight = body["weight_g"]
     if "metadata" in body:
         existing.metadata = body["metadata"] or {}
+    if "fulfillment_type" in body:
+        existing.fulfillment_type = body["fulfillment_type"]
+    if "requires_shipping" in body:
+        existing.requires_shipping = body["requires_shipping"]
+    if "track_inventory" in body:
+        existing.track_inventory = body["track_inventory"]
+    if existing.fulfillment_type is not FulfillmentType.PHYSICAL:
+        existing.requires_shipping = False
+        existing.track_inventory = False
 
     updated = await repo.update(existing)
     await _sync_product_base_price(session, product_repo, product)
