@@ -148,11 +148,11 @@ IMAGE_REF="${1:-}"
 TRAFFIC_PERCENT="${2:-100}"
 ACTION="${3:-deploy}"
 validate_percent "$TRAFFIC_PERCENT"
-[[ "$ACTION" == "deploy" || "$ACTION" == "rollback" ]] \
-  || die "action must be deploy or rollback"
-if [[ "$ACTION" == "deploy" ]]; then
+[[ "$ACTION" == "deploy" || "$ACTION" == "rollback" || "$ACTION" == "finalize-local" || "$ACTION" == "retire-remote" ]] \
+  || die "action must be deploy, rollback, finalize-local, or retire-remote"
+if [[ "$ACTION" != "rollback" ]]; then
   [[ "$IMAGE_REF" =~ ^[a-zA-Z0-9._/@:-]+$ ]] \
-    || die "usage: $0 IMAGE_REF [CANDIDATE_PERCENT] [deploy|rollback]"
+    || die "usage: $0 IMAGE_REF [CANDIDATE_PERCENT] [deploy|rollback|finalize-local|retire-remote]"
 fi
 [[ -f "$ENV_FILE" ]] || die "$ENV_FILE not found"
 [[ -f "$REMOTE_KEY" ]] || die "$REMOTE_KEY not found"
@@ -393,11 +393,57 @@ if [[ "$ACTION" == "rollback" ]]; then
   exit 0
 fi
 
+if [[ "$ACTION" == "retire-remote" ]]; then
+  [[ "$ACTIVE_LOCATION" == "local" && -z "$CANDIDATE_LOCATION" && "$PREVIOUS_LOCATION" == "remote" ]] \
+    || die "retire-remote requires local active with a retained remote slot"
+  apply_router local local 0
+  route_health stable || die "primary API route failed before remote retirement"
+  remove_slot remote
+  PREVIOUS_LOCATION=""
+  TRAFFIC_PERCENT=0
+  write_state
+  echo "==> Temporary remote API slot removed; production remains on the primary API EC2."
+  exit 0
+fi
+
 docker pull "$IMAGE_REF" \
   || docker image inspect "$IMAGE_REF" >/dev/null 2>&1 \
   || die "candidate image is neither pullable nor cached locally"
 IMAGE_ID="$(docker image inspect "$IMAGE_REF" --format '{{.Id}}')"
 IMAGE_DIGEST="$(docker image inspect "$IMAGE_REF" --format '{{index .RepoDigests 0}}')"
+
+if [[ "$ACTION" == "finalize-local" ]]; then
+  [[ "$ACTIVE_LOCATION" == "local" && "$CANDIDATE_LOCATION" == "remote" ]] \
+    || die "finalize-local requires a local active slot and remote candidate"
+  [[ "$CANDIDATE_IMAGE_ID" == "$IMAGE_ID" ]] \
+    || die "remote candidate does not match the requested build"
+
+  echo "==> Moving traffic temporarily to the tested remote candidate..."
+  apply_router remote local 0
+  route_health stable || die "remote candidate failed before local installation"
+  ACTIVE_LOCATION=remote
+  CANDIDATE_LOCATION=""
+  PREVIOUS_LOCATION=local
+  TRAFFIC_PERCENT=0
+  write_state
+
+  echo "==> Installing the tested image on the primary API EC2..."
+  run_local "$IMAGE_DIGEST"
+  [[ "$(slot_image_id local)" == "$IMAGE_ID" ]] \
+    || die "primary API EC2 image does not match the tested candidate"
+  apply_router remote local 100
+  route_health candidate || die "new primary API slot failed health verification"
+
+  ACTIVE_LOCATION=local
+  CANDIDATE_LOCATION=""
+  PREVIOUS_LOCATION=remote
+  TRAFFIC_PERCENT=0
+  apply_router local local 0
+  route_health stable || die "primary API route failed final health verification"
+  write_state
+  echo "==> Finalized on the primary API EC2; remote slot retained until end-to-end verification."
+  exit 0
+fi
 
 if [[ "$(candidate_disposition "$CANDIDATE_IMAGE_ID" "$IMAGE_ID")" == replace ]]; then
   echo "==> Replacing the superseded $CANDIDATE_LOCATION candidate safely..."
