@@ -140,6 +140,10 @@ if [[ "${1:-}" == "--self-test" ]]; then
   exit 0
 fi
 
+command -v flock >/dev/null 2>&1 || die "flock is required to serialize deployments"
+exec 9>"$ROOT/.deploy-blue-green.lock"
+flock -n 9 || die "another blue/green deployment is already running"
+
 IMAGE_REF="${1:-}"
 TRAFFIC_PERCENT="${2:-100}"
 ACTION="${3:-deploy}"
@@ -423,6 +427,8 @@ else
   docker run --rm --network "$LOCAL_NETWORK" --env-file "$ENV_FILE" \
     -e ENVIRONMENT=staging -e DEBUG=false -e LOG_FORMAT=json \
     "$IMAGE_DIGEST" alembic upgrade heads
+  route_health stable \
+    || die "migration is incompatible with the active API; candidate was not started"
 
   echo "==> Deploying and health-checking the $TARGET_LOCATION candidate..."
   if [[ "$TARGET_LOCATION" == "local" ]]; then

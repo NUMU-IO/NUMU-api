@@ -19,11 +19,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Reject unsafe online migrations
+        if: github.event_name == 'pull_request'
+        run: |
+          mapfile -t migrations < <(git diff --name-only --diff-filter=ACMR \
+            "${{ github.event.pull_request.base.sha }}" HEAD -- 'alembic/versions/*.py')
+          ((${#migrations[@]} == 0)) || python scripts/check_migration_safety.py "${migrations[@]}"
 
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
