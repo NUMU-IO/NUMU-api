@@ -586,6 +586,22 @@ jobs:
             echo "==> EC2 prod deployment complete."
           DEPLOY_SCRIPT
 
+      - name: Notify Slack when production deployment fails
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "WARNING: SLACK_WEBHOOK_URL is not configured"
+            exit 0
+          fi
+          payload="$(python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' \
+            ":rotating_light: NUMU production API deployment failed before canary monitoring started. ${GITHUB_RUN_URL}")"
+          curl -fsS --max-time 10 -H 'Content-Type: application/json' \
+            --data "$payload" "$SLACK_WEBHOOK_URL" >/dev/null \
+            || echo "WARNING: Slack failure notification could not be delivered"
+
   automatic-canary-promotion:
     name: Monitor and automatically promote production canary
     runs-on: ubuntu-latest
