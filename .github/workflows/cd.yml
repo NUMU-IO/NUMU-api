@@ -4,6 +4,20 @@ on:
   push:
     branches: [dev, stage, prod]
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      deployment_action:
+        description: "Deploy the selected ref or roll production back to the retained slot"
+        required: true
+        default: "deploy"
+        type: choice
+        options: ["deploy", "rollback"]
+      traffic_percent:
+        description: "Percent of production API traffic sent to the candidate build"
+        required: true
+        default: "100"
+        type: choice
+        options: ["0", "10", "25", "50", "100"]
 
 env:
   REGISTRY: ghcr.io
@@ -54,6 +68,7 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ steps.ref_tag.outputs.value }}
             type=raw,value=latest,enable=${{ github.ref_name == 'prod' }}
 
       - name: Build and push
@@ -492,6 +507,8 @@ jobs:
     if: github.ref == 'refs/heads/prod'
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Install EC2 SSH key
         run: |
           mkdir -p ~/.ssh
@@ -499,12 +516,27 @@ jobs:
           chmod 600 ~/.ssh/ec2_key
           echo "StrictHostKeyChecking no" >> ~/.ssh/config
 
+      - name: Validate blue/green deployment script
+        run: |
+          bash -n ops/deploy-blue-green.sh
+          bash ops/deploy-blue-green.sh --self-test
+
+      - name: Install blue/green deployment script on EC2
+        run: |
+          scp -i ~/.ssh/ec2_key ops/deploy-blue-green.sh \
+            ${{ secrets.PROD_EC2_USER }}@${{ secrets.PROD_EC2_HOST }}:/opt/numu-api/deploy-blue-green.sh
+          ssh -i ~/.ssh/ec2_key ${{ secrets.PROD_EC2_USER }}@${{ secrets.PROD_EC2_HOST }} \
+            "chmod 700 /opt/numu-api/deploy-blue-green.sh"
+
       - name: Deploy api + celery to EC2
         # Unquoted heredoc so GHCR_TOKEN / GHCR_USER expand on the runner
         # before being forwarded over SSH (they are not set on the EC2 box).
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
+          NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          TRAFFIC_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.traffic_percent || vars.PROD_API_TRAFFIC_PERCENT || '100' }}
+          DEPLOYMENT_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_action || 'deploy' }}
         run: |
           ssh -i ~/.ssh/ec2_key ${{ secrets.PROD_EC2_USER }}@${{ secrets.PROD_EC2_HOST }} << DEPLOY_SCRIPT
             set -e
@@ -527,36 +559,23 @@ jobs:
             docker builder prune -f || echo "[builder prune] skipped — non-fatal"
             df -h / | tail -1
 
-            echo "==> Pulling latest api image (:prod)..."
-            docker compose pull api
+            echo "==> Blue/green API deployment (${TRAFFIC_PERCENT}% candidate traffic)..."
+            /opt/numu-api/deploy-blue-green.sh "${NUMU_API_IMAGE}" "${TRAFFIC_PERCENT}" "${DEPLOYMENT_ACTION}"
 
-            echo "==> Recreating api + celery with the new image..."
-            docker compose up -d api celery-worker celery-beat
+            echo "==> Aligning background workers with the active API slot..."
+            ACTIVE_NAME=\$(sed -n 's/^ACTIVE_NAME=//p' /opt/numu-api/.api-blue-green-state)
+            export NUMU_API_IMAGE=\$(docker inspect "\$ACTIVE_NAME" --format '{{.Image}}')
+            docker compose up -d celery-worker celery-beat
 
-            echo "==> Running database migrations (Supabase)..."
-            # 'heads' (plural), NOT 'head': apply ALL heads so a transient branch
-            # point (two migrations off one parent before a merge migration
-            # lands) can't hard-fail the deploy with "Multiple head revisions".
-            # (Plain quotes on purpose — this heredoc is UNQUOTED so env vars
-            # expand on the runner, which means backticks here are COMMAND
-            # SUBSTITUTION: the old backticked comment executed 'heads' on the
-            # runner and spat "heads: command not found" into every deploy log.)
-            docker compose exec -T api alembic upgrade heads
+            echo "==> Migrations completed against the candidate image."
 
             echo "==> Verifying health..."
             sleep 12
             curl -sf http://localhost:8000/api/v1/health | grep -q '"success":true' || {
               echo "ERROR: EC2 health check failed — dumping recent API logs:"
-              docker compose logs --tail=80 api
+              docker logs --tail=80 numu-api-router
               exit 1
             }
-
-            echo "==> Reloading edge nginx so it re-resolves the recreated api container IP..."
-            # docker compose up recreates the api container with a NEW docker-network
-            # IP; the long-lived edge-nginx caches the old IP in its static upstream
-            # and 502s every request until reloaded. Reload re-resolves it.
-            docker exec numu-edge-nginx nginx -s reload 2>/dev/null \
-              || echo "[edge nginx reload] skipped — numu-edge-nginx not found (non-fatal)"
 
             echo "==> Pruning dangling images..."
             docker image prune -f || echo "[image prune] skipped — non-fatal"
