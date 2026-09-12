@@ -585,3 +585,41 @@ jobs:
 
             echo "==> EC2 prod deployment complete."
           DEPLOY_SCRIPT
+
+  automatic-canary-promotion:
+    name: Monitor and automatically promote production canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    needs: [build-and-push, deploy-apex]
+    if: >-
+      github.ref == 'refs/heads/prod' &&
+      needs.deploy-apex.result == 'success' &&
+      ((github.event_name == 'push' && vars.PROD_API_TRAFFIC_PERCENT == '10') ||
+       (github.event_name == 'workflow_dispatch' && inputs.deployment_action == 'deploy' && inputs.traffic_percent == '10'))
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install EC2 SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_EC2_SSH_KEY }}" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          echo "StrictHostKeyChecking no" >> ~/.ssh/config
+
+      - name: Validate canary controller
+        run: |
+          bash -n ops/automatic-canary-rollout.sh
+          python3 scripts/canary_gate.py --self-test
+
+      - name: Monitor, test, promote, or roll back
+        env:
+          NUMU_API_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          PROD_EC2_HOST: ${{ secrets.PROD_EC2_HOST }}
+          PROD_EC2_USER: ${{ secrets.PROD_EC2_USER }}
+          PROD_EC2_SSH_KEY_PATH: /home/runner/.ssh/ec2_key
+          NUMU_ADMIN_EMAIL: ${{ secrets.NUMU_ADMIN_EMAIL }}
+          NUMU_ADMIN_PASSWORD: ${{ secrets.NUMU_ADMIN_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash ops/automatic-canary-rollout.sh
