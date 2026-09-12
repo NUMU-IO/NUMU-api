@@ -34,10 +34,10 @@ registry_login() {
 remote_deploy() {
   local percent="$1"
   ssh -o BatchMode=yes -i "$SSH_KEY" "$SSH_USER@$SSH_HOST" \
-    bash -s -- "$IMAGE_REF" "$percent" <<'REMOTE'
+    bash -s -- "$IMAGE_REF" "$percent" "${2:-deploy}" <<'REMOTE'
 set -Eeuo pipefail
 cd /opt/numu-api
-/opt/numu-api/deploy-blue-green.sh "$1" "$2" deploy
+/opt/numu-api/deploy-blue-green.sh "$1" "$2" "$3"
 REMOTE
 }
 
@@ -135,17 +135,18 @@ notify ":test_tube: NUMU API canary started at 10%. Kuma: https://status.numueg.
 guard_for_one_hold "10% traffic"
 full_gate
 
-echo "==> Gate passed; promoting candidate to 50%..."
-remote_deploy 50
-notify ":large_yellow_circle: NUMU API candidate promoted to 50%; monitoring for one more hour. ${GITHUB_RUN_URL:-}"
-guard_for_one_hold "50% traffic"
+echo "==> Gate passed; promoting candidate to 25%..."
+remote_deploy 25
+notify ":large_yellow_circle: NUMU API candidate promoted to 25%; monitoring for one more hour. ${GITHUB_RUN_URL:-}"
+guard_for_one_hold "25% traffic"
 full_gate
 
-echo "==> Final gate passed; promoting candidate to 100%..."
-remote_deploy 100
+echo "==> Final gate passed; installing the candidate on the primary API EC2..."
+remote_deploy 100 finalize-local
 align_workers
 probe stable || die "promoted API failed its final health check"
+remote_deploy 0 retire-remote
 ROLLBACK_NEEDED=false
 COMPLETED=true
-notify ":large_green_circle: NUMU API candidate automatically promoted to 100%. ${GITHUB_RUN_URL:-}"
-echo "==> Automatic canary rollout completed at 100%."
+notify ":large_green_circle: NUMU API candidate finalized at 100% on the primary API EC2. ${GITHUB_RUN_URL:-}"
+echo "==> Automatic canary rollout completed at 100% on the primary API EC2."
