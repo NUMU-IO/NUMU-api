@@ -35,6 +35,9 @@ def _mock_row(price_amount: int, compare_at: int | None = None) -> MagicMock:
     row.image_url = None
     row.weight = None
     row.metadata_ = {}
+    row.fulfillment_type = "physical"
+    row.requires_shipping = True
+    row.track_inventory = True
     row.created_at = datetime(2026, 1, 1, tzinfo=UTC)
     row.updated_at = datetime(2026, 1, 1, tzinfo=UTC)
     return row
@@ -60,3 +63,17 @@ def test_money_amount_helper_writes_cents():
     # admin builds Money from MAJOR input; helper must persist CENTS
     assert _money_amount(Money(amount=Decimal("220"), currency=Currency.EGP)) == 22000
     assert _money_amount(None) is None
+
+
+def test_untracked_digital_variant_is_available_without_stock():
+    row = _mock_row(12000)
+    row.fulfillment_type = "digital"
+    row.requires_shipping = False
+    row.track_inventory = False
+    row.inventory_quantity = 0
+
+    entity = _to_entity(row)
+
+    assert entity.fulfillment_type == "digital"
+    assert entity.requires_shipping is False
+    assert entity.is_in_stock is True

@@ -25,6 +25,7 @@ of which specific S/M/L × Red/Blue/Green you're looking at.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -32,6 +33,12 @@ from pydantic import Field, field_validator
 
 from src.core.entities.base import BaseEntity
 from src.core.value_objects.money import Money
+
+
+class FulfillmentType(StrEnum):
+    PHYSICAL = "physical"
+    DIGITAL = "digital"
+    SERVICE = "service"
 
 
 class Variant(BaseEntity):
@@ -79,6 +86,9 @@ class Variant(BaseEntity):
     # ETA invoice tax code) that need a variant-specific value
     # without warranting a column.
     metadata: dict[str, Any] = Field(default_factory=dict)
+    fulfillment_type: FulfillmentType = FulfillmentType.PHYSICAL
+    requires_shipping: bool = True
+    track_inventory: bool = True
 
     @field_validator("compare_at_price", "cost_price", mode="before")
     @classmethod
@@ -93,7 +103,7 @@ class Variant(BaseEntity):
 
     @property
     def is_in_stock(self) -> bool:
-        return self.inventory_quantity > 0
+        return not self.track_inventory or self.inventory_quantity > 0
 
     @property
     def is_on_sale(self) -> bool:

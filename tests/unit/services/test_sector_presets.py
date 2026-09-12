@@ -113,6 +113,13 @@ async def test_apply_is_idempotent():
     assert len(definition_repo.rows) == len(preset.fields)
 
 
+def test_bookstore_supports_editions_and_publication_date():
+    preset = get_preset("bookstore")
+    assert preset is not None
+    assert {"variants", "digital_delivery"} <= set(preset.capabilities)
+    assert any(field.key == "publication_date" for field in preset.fields)
+
+
 @pytest.mark.asyncio
 async def test_apply_records_sector_and_enables_capabilities():
     preset = get_preset("coffee")

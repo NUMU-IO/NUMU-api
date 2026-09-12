@@ -624,6 +624,10 @@ class ProductResponse(BaseModel):
         default_factory=list,
         description="Public typed metafields ({namespace, key, type, value})",
     )
+    series: list[dict] = Field(
+        default_factory=list,
+        description="Ordered series memberships with neighboring books",
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
 
@@ -665,6 +669,9 @@ class ProductVariantSummary(BaseModel):
     is_in_stock: bool = Field(description="Whether inventory_quantity > 0")
     image_url: str | None = None
     weight: float | None = None
+    fulfillment_type: str = "physical"
+    requires_shipping: bool = True
+    track_inventory: bool = True
 
 
 class UploadedImageResponse(BaseModel):

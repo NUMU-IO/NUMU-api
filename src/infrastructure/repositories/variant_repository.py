@@ -12,7 +12,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.variant import Variant
+from src.core.entities.variant import FulfillmentType, Variant
 from src.core.value_objects.money import Currency, Money
 from src.infrastructure.database.models.tenant.variant import VariantModel
 
@@ -47,6 +47,9 @@ def _to_entity(row: VariantModel) -> Variant:
         image_url=row.image_url,
         weight=float(row.weight) if row.weight is not None else None,
         metadata=row.metadata_ or {},
+        fulfillment_type=FulfillmentType(row.fulfillment_type),
+        requires_shipping=row.requires_shipping,
+        track_inventory=row.track_inventory,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -153,6 +156,9 @@ class VariantRepository:
         image_url: str | None = None,
         weight: float | None = None,
         metadata: dict | None = None,
+        fulfillment_type: FulfillmentType = FulfillmentType.PHYSICAL,
+        requires_shipping: bool = True,
+        track_inventory: bool = True,
     ) -> Variant:
         row = VariantModel(
             tenant_id=tenant_id,
@@ -170,6 +176,9 @@ class VariantRepository:
             image_url=image_url,
             weight=weight,
             metadata_=metadata or {},
+            fulfillment_type=fulfillment_type.value,
+            requires_shipping=requires_shipping,
+            track_inventory=track_inventory,
         )
         self._session.add(row)
         await self._session.flush()
@@ -196,6 +205,9 @@ class VariantRepository:
         row.image_url = variant.image_url
         row.weight = variant.weight
         row.metadata_ = variant.metadata or {}
+        row.fulfillment_type = variant.fulfillment_type.value
+        row.requires_shipping = variant.requires_shipping
+        row.track_inventory = variant.track_inventory
         await self._session.flush()
         await self._session.refresh(row)
         return _to_entity(row)

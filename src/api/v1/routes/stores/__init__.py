@@ -84,6 +84,7 @@ from src.api.v1.routes.stores import reconciliation as reconciliation_module
 from src.api.v1.routes.stores import refunds as refunds_module
 from src.api.v1.routes.stores import returns as returns_module
 from src.api.v1.routes.stores import sector_presets as sector_presets_module
+from src.api.v1.routes.stores import series as series_module
 from src.api.v1.routes.stores import settings as settings_module
 from src.api.v1.routes.stores import shipments as shipments_module
 from src.api.v1.routes.stores import shipping as shipping_module
@@ -185,6 +186,7 @@ router.include_router(pages_module.router, tags=["Store Pages"])
 router.include_router(blogs_module.router, tags=["Store Blogs"])
 router.include_router(metafields_module.router, tags=["Store Metafields"])
 router.include_router(sector_presets_module.router, tags=["Store Sector Presets"])
+router.include_router(series_module.router, tags=["Store Product Series"])
 router.include_router(theme_updates_module.router, tags=["Store Theme Updates"])
 router.include_router(promotions_module.router, tags=["Store Promotions"])
 router.include_router(settings_module.router, tags=["Store Settings"])

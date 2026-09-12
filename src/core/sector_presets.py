@@ -114,6 +114,12 @@ SECTOR_PRESETS: dict[str, SectorPreset] = {
             PresetField("publisher", _TEXT, "Publisher", "الناشر"),
             PresetField("language", _TEXT, "Language", "اللغة"),
             PresetField("pages", _NUM, "Pages", "عدد الصفحات"),
+            PresetField(
+                "publication_date",
+                MetafieldType.DATE,
+                "Publication date",
+                "تاريخ النشر",
+            ),
             PresetField("edition_year", _NUM, "Edition year", "سنة الإصدار"),
             # A used bookshop sells a COPY, not a title: where it sits and what
             # shape it is in are part of the offer, and a bookseller's own
@@ -132,7 +138,7 @@ SECTOR_PRESETS: dict[str, SectorPreset] = {
             PresetCategory("children", "Children", "أطفال"),
             PresetCategory("new-releases", "New releases", "إصدارات جديدة"),
         ],
-        capabilities=["inventory", "shipping"],
+        capabilities=["variants", "inventory", "shipping", "digital_delivery"],
         home_sections=[
             "hero",
             "featured_collection",

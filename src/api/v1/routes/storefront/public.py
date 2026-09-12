@@ -9,6 +9,7 @@ These routes are publicly accessible without authentication:
 """
 
 import re
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -1342,6 +1343,72 @@ async def browse_products_cursor(
 
 
 @router.get(
+    "/series/{series_slug}",
+    response_model=SuccessResponse[dict],
+    summary="Get a public product series",
+    operation_id="get_storefront_series",
+)
+async def get_storefront_series(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    series_slug: Annotated[str, Path(description="Series slug")],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse[dict]:
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.product import ProductModel
+    from src.infrastructure.database.models.tenant.series import (
+        SeriesModel,
+        SeriesProductModel,
+    )
+
+    series = (
+        await session.execute(
+            select(SeriesModel).where(
+                SeriesModel.store_id == store_id,
+                SeriesModel.slug == series_slug,
+                SeriesModel.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if series is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Series not found")
+    books = (
+        await session.execute(
+            select(SeriesProductModel, ProductModel)
+            .join(ProductModel, ProductModel.id == SeriesProductModel.product_id)
+            .where(
+                SeriesProductModel.series_id == series.id,
+                ProductModel.status.in_(PURCHASABLE_STATUSES),
+            )
+            .order_by(SeriesProductModel.position)
+        )
+    ).all()
+    return SuccessResponse(
+        data={
+            "id": str(series.id),
+            "name": series.name,
+            "slug": series.slug,
+            "description": series.description,
+            "cover_image_url": series.cover_image_url,
+            "products": [
+                {
+                    "product_id": str(link.product_id),
+                    "name": product.name,
+                    "slug": product.slug,
+                    "cover_image_url": product.images[0] if product.images else None,
+                    "volume_label": link.volume_label,
+                    "position": link.position,
+                    "price": str(Decimal(product.price_amount) / 100),
+                    "price_currency": product.price_currency,
+                }
+                for link, product in books
+            ],
+        },
+        message="Series retrieved successfully",
+    )
+
+
+@router.get(
     "/products/{product_slug}",
     response_model=SuccessResponse[ProductResponse],
     summary="Get product by slug (or UUID)",
@@ -1467,6 +1534,7 @@ async def get_product_by_slug(
         metafields=await _resolve_public_metafields(
             session, store_id, "product", product.id
         ),
+        series=await _resolve_product_series(session, product.id),
         created_at=str(product.created_at),
         updated_at=str(product.updated_at),
     )
@@ -1572,9 +1640,72 @@ async def _resolve_variants_for_product(
             "is_in_stock": continue_selling or v.is_in_stock,
             "image_url": v.image_url,
             "weight": v.weight,
+            "fulfillment_type": v.fulfillment_type.value,
+            "requires_shipping": v.requires_shipping,
+            "track_inventory": v.track_inventory,
         }
         for v in variants
     ]
+
+
+async def _resolve_product_series(
+    session: AsyncSession, product_id: UUID
+) -> list[dict]:
+    """Return series context and neighbors for a storefront product page."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.product import ProductModel
+    from src.infrastructure.database.models.tenant.series import (
+        SeriesModel,
+        SeriesProductModel,
+    )
+
+    memberships = (
+        await session.execute(
+            select(SeriesProductModel, SeriesModel)
+            .join(SeriesModel, SeriesModel.id == SeriesProductModel.series_id)
+            .where(
+                SeriesProductModel.product_id == product_id,
+                SeriesModel.status == "active",
+            )
+        )
+    ).all()
+    result = []
+    for membership, series in memberships:
+        books = (
+            await session.execute(
+                select(SeriesProductModel, ProductModel)
+                .join(ProductModel, ProductModel.id == SeriesProductModel.product_id)
+                .where(SeriesProductModel.series_id == series.id)
+                .order_by(SeriesProductModel.position)
+            )
+        ).all()
+        items = [
+            {
+                "product_id": str(link.product_id),
+                "name": product.name,
+                "slug": product.slug,
+                "cover_image_url": product.images[0] if product.images else None,
+                "volume_label": link.volume_label,
+                "position": link.position,
+            }
+            for link, product in books
+        ]
+        index = next(
+            i for i, item in enumerate(items) if item["product_id"] == str(product_id)
+        )
+        result.append({
+            "id": str(series.id),
+            "name": series.name,
+            "slug": series.slug,
+            "volume_label": membership.volume_label,
+            "position": membership.position,
+            "count": len(items),
+            "previous": items[index - 1] if index else None,
+            "next": items[index + 1] if index + 1 < len(items) else None,
+            "products": items,
+        })
+    return result
 
 
 async def _resolve_public_metafields(
