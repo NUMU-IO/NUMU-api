@@ -38,6 +38,17 @@ backend_for() {
   fi
 }
 
+candidate_disposition() {
+  local current_id="$1" requested_id="$2"
+  if [[ -z "$current_id" ]]; then
+    echo deploy
+  elif [[ "$current_id" == "$requested_id" ]]; then
+    echo reuse
+  else
+    echo replace
+  fi
+}
+
 render_router_config() {
   local active="$1" candidate="$2" percent="$3" output="$4" bucket
   local active_backend candidate_backend
@@ -114,6 +125,9 @@ self_test() {
   render_router_config remote local 100 "$tmp/nginx.conf"
   grep -q 'default candidate' "$tmp/nginx.conf"
   grep -q "stable    $REMOTE_TUNNEL_BACKEND" "$tmp/nginx.conf"
+  [[ "$(candidate_disposition "" new)" == deploy ]]
+  [[ "$(candidate_disposition same same)" == reuse ]]
+  [[ "$(candidate_disposition old new)" == replace ]]
   if docker info >/dev/null 2>&1; then
     docker run --rm -v "$tmp/nginx.conf:/etc/nginx/nginx.conf:ro" \
       nginx:1.27-alpine nginx -t >/dev/null
@@ -381,9 +395,21 @@ docker pull "$IMAGE_REF" \
 IMAGE_ID="$(docker image inspect "$IMAGE_REF" --format '{{.Id}}')"
 IMAGE_DIGEST="$(docker image inspect "$IMAGE_REF" --format '{{index .RepoDigests 0}}')"
 
+if [[ "$(candidate_disposition "$CANDIDATE_IMAGE_ID" "$IMAGE_ID")" == replace ]]; then
+  echo "==> Replacing the superseded $CANDIDATE_LOCATION candidate safely..."
+  apply_router "$ACTIVE_LOCATION" "$CANDIDATE_LOCATION" 0
+  route_health stable || die "stable route failed before candidate replacement"
+  remove_slot "$CANDIDATE_LOCATION"
+  CANDIDATE_LOCATION=""
+  CANDIDATE_IMAGE_ID=""
+  PREVIOUS_LOCATION=""
+  REQUESTED_TRAFFIC_PERCENT="$TRAFFIC_PERCENT"
+  TRAFFIC_PERCENT=0
+  write_state
+  TRAFFIC_PERCENT="$REQUESTED_TRAFFIC_PERCENT"
+fi
+
 if [[ -n "$CANDIDATE_LOCATION" ]]; then
-  [[ "$CANDIDATE_IMAGE_ID" == "$IMAGE_ID" ]] \
-    || die "another candidate is under test; finish it at 0% or 100% first"
   TARGET_LOCATION="$CANDIDATE_LOCATION"
   echo "==> Reusing $TARGET_LOCATION candidate at $TRAFFIC_PERCENT% traffic..."
 else
