@@ -1143,6 +1143,21 @@ async def checkout(
         )
         product_category_map[item.product_id] = getattr(product, "category_id", None)
 
+        selected_variant = None
+        if item.variant_id:
+            from src.infrastructure.repositories.variant_repository import (
+                VariantRepository,
+            )
+
+            selected_variant = await VariantRepository(product_repo.session).get_by_id(
+                item.variant_id
+            )
+            if selected_variant is None or selected_variant.product_id != product.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Variant does not belong to {product.name}",
+                )
+
         # ── Stock pre-check ──
         # Three modes:
         #   1. Merchant opted into oversell (continue_selling_when_out_of_stock) → skip
@@ -1175,7 +1190,22 @@ async def checkout(
                     matching_combo = c
                     break
 
-        if matching_combo is not None:
+        tracks_inventory = selected_variant is None or selected_variant.track_inventory
+        if not tracks_inventory:
+            pass
+        elif selected_variant is not None:
+            if (
+                not allow_negative
+                and selected_variant.inventory_quantity < item.quantity
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Insufficient stock for {product.name} "
+                        f"(available: {selected_variant.inventory_quantity})"
+                    ),
+                )
+        elif matching_combo is not None:
             if matching_combo.get("enabled") is False:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -1217,22 +1247,10 @@ async def checkout(
         display_options: dict[str, str] = (
             {str(k): str(v) for k, v in selections.items()} if selections else {}
         )
-        if not display_options and item.variant_id:
-            from src.infrastructure.database.connection import AsyncSessionLocal
-            from src.infrastructure.repositories.variant_repository import (
-                VariantRepository,
-            )
-
-            async with AsyncSessionLocal() as _s:
-                _variant = await VariantRepository(_s).get_by_id(item.variant_id)
-            if (
-                _variant is not None
-                and _variant.product_id == product.id
-                and _variant.option_values
-            ):
-                display_options = {
-                    str(k): str(v) for k, v in _variant.option_values.items() if v
-                }
+        if not display_options and selected_variant and selected_variant.option_values:
+            display_options = {
+                str(k): str(v) for k, v in selected_variant.option_values.items() if v
+            }
         variant_name = (
             ", ".join(f"{k}: {v}" for k, v in display_options.items())
             if display_options
@@ -1240,17 +1258,34 @@ async def checkout(
         )
         if product.tax_exempt:
             tax_exempt_product_ids.add(product.id)
-        if product.requires_shipping:
+        requires_shipping = (
+            selected_variant.requires_shipping
+            if selected_variant is not None
+            else product.requires_shipping
+        )
+        if requires_shipping:
             order_requires_shipping = True
+        fulfillment_type = (
+            selected_variant.fulfillment_type.value
+            if selected_variant is not None
+            else product.product_type.value
+        )
+        line_properties = dict(display_options)
+        line_properties["_fulfillment_type"] = fulfillment_type
+        line_properties["_requires_shipping"] = requires_shipping
         line_items.append(
             CreateOrderLineItemDTO(
                 product_id=product.id,
                 product_name=product.name,
-                sku=product.sku,
+                sku=selected_variant.sku if selected_variant else product.sku,
                 quantity=item.quantity,
                 # The authoritative charge. A sale that is open right now
                 # must be what the customer is billed, not the list price.
-                unit_price=product.effective_price().cents,
+                unit_price=(
+                    selected_variant.price.cents
+                    if selected_variant is not None
+                    else product.effective_price().cents
+                ),
                 variant_id=item.variant_id,
                 variant_name=variant_name,
                 # Persist the raw selection dict so the merchant order-detail
@@ -1259,7 +1294,7 @@ async def checkout(
                 # whether a combo matched — the customer's pick is useful
                 # context even on products that don't have a strict combo
                 # catalog yet (e.g. legacy data).
-                properties=display_options or None,
+                properties=line_properties,
             )
         )
         line_item_inventory.append({
@@ -1274,11 +1309,13 @@ async def checkout(
             "variant_id": item.variant_id,
             "allow_negative": allow_negative,
             "quantity": item.quantity,
+            "track_inventory": tracks_inventory,
         })
         # Product.weight is Decimal kilograms; convert to grams and
         # multiply by quantity. Missing weight → skip (contributes 0).
-        if product.weight is not None:
-            cart_weight_g += int(product.weight * 1000) * item.quantity
+        weight = selected_variant.weight if selected_variant else product.weight
+        if requires_shipping and weight is not None:
+            cart_weight_g += int(weight * 1000) * item.quantity
 
     # Build address DTOs
     addr = request.shipping_address
@@ -1594,6 +1631,8 @@ async def checkout(
 
     stock_debit_lines: list[dict] = []
     for li, inv in zip(line_items, line_item_inventory):
+        if not inv.get("track_inventory", True):
+            continue
         success, reason, replay = await debit_order_line(
             product_repo.session,
             tenant_id=store.tenant_id,
