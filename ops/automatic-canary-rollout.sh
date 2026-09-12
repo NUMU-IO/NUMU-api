@@ -64,7 +64,7 @@ probe() {
     return 1
   fi
   if ! grep -q '"success":true' "$body" \
-      || ! grep -Eqi "^x-numu-variant: ${variant}\r?$" "$headers"; then
+      || ! grep -Fqi "x-numu-variant: ${variant}" "$headers"; then
     rm -f "$body" "$headers"
     return 1
   fi
