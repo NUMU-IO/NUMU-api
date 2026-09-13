@@ -45,6 +45,7 @@ from src.api.dependencies.repositories import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.storefront.checkout import CheckoutRequest, CheckoutResponse
+from src.api.v1.schemas.tenant.settings import deposit_due_cents
 from src.application.dto.order import (
     CreateOrderAddressDTO,
     CreateOrderLineItemDTO,
@@ -2154,11 +2155,11 @@ async def checkout(
     _deposit_policy_raw = (store.settings or {}).get("payment", {}).get("cod", {}).get(
         "deposit_policy"
     ) or {}
-    if (
-        request.payment_method == "cod"
-        and _deposit_policy_raw.get("enabled")
-        and int(_deposit_policy_raw.get("amount_cents", 0) or 0) > 0
-    ):
+    # Sized server-side from the order we just built. The storefront quotes
+    # the same figure from the same policy, but the amount charged is never
+    # taken from the client.
+    _deposit_amount = deposit_due_cents(_deposit_policy_raw, created_order.total)
+    if request.payment_method == "cod" and _deposit_amount > 0:
         _allowed_gateways: list[str] = list(
             _deposit_policy_raw.get("allowed_gateways") or []
         )
@@ -2182,7 +2183,6 @@ async def checkout(
         from datetime import UTC, datetime, timedelta
 
         _ttl_minutes = int(_deposit_policy_raw.get("ttl_minutes", 30) or 30)
-        _deposit_amount = int(_deposit_policy_raw["amount_cents"])
 
         # Mutate the order into PENDING_DEPOSIT. We set `.status`
         # directly rather than going through `transition_to` because
