@@ -107,7 +107,12 @@ class ApiClient:
             raise GateError("login succeeded but no CSRF cookie was issued")
 
 
-def check_health(base_url: str, samples: int, max_ratio: float) -> tuple[float, float]:
+def check_health(
+    base_url: str,
+    samples: int,
+    max_ratio: float,
+    max_candidate_latency_ms: float | None = None,
+) -> tuple[float, float]:
     timings: dict[str, list[float]] = {"stable": [], "candidate": []}
     for _ in range(samples):
         for variant in ("stable", "candidate"):
@@ -129,6 +134,14 @@ def check_health(base_url: str, samples: int, max_ratio: float) -> tuple[float, 
         raise GateError(
             f"candidate p95 is {candidate_p95 / stable_p95:.2f}x stable; "
             f"maximum is {max_ratio:.2f}x"
+        )
+    if (
+        max_candidate_latency_ms is not None
+        and candidate_p95 * 1000 > max_candidate_latency_ms
+    ):
+        raise GateError(
+            f"candidate p95 is {candidate_p95 * 1000:.0f}ms; "
+            f"maximum is {max_candidate_latency_ms:.0f}ms"
         )
     return stable_p95, candidate_p95
 
@@ -240,6 +253,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="https://numueg.app")
     parser.add_argument("--samples", type=int, default=20)
     parser.add_argument("--max-latency-ratio", type=float, default=1.25)
+    parser.add_argument("--max-candidate-latency-ms", type=float)
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
@@ -247,10 +261,22 @@ def main() -> int:
     if args.self_test:
         self_test()
         return 0
-    if args.samples < 1 or args.max_latency_ratio < 1:
-        raise GateError("samples must be positive and latency ratio must be at least 1")
+    if (
+        args.samples < 1
+        or args.max_latency_ratio < 1
+        or (
+            args.max_candidate_latency_ms is not None
+            and args.max_candidate_latency_ms <= 0
+        )
+    ):
+        raise GateError("samples and latency limits must be positive")
 
-    check_health(args.base_url, args.samples, args.max_latency_ratio)
+    check_health(
+        args.base_url,
+        args.samples,
+        args.max_latency_ratio,
+        args.max_candidate_latency_ms,
+    )
     if args.smoke:
         email = os.environ.get("NUMU_ADMIN_EMAIL")
         password = os.environ.get("NUMU_ADMIN_PASSWORD")

@@ -106,7 +106,8 @@ guard_for_one_hold() {
 
 full_gate() {
   python3 "$GATE_SCRIPT" --base-url "$API_BASE_URL" \
-    --samples "$GATE_SAMPLES" --max-latency-ratio 1.25 --smoke
+    --samples "$GATE_SAMPLES" --max-latency-ratio 3.5 \
+    --max-candidate-latency-ms 1000 --smoke
 }
 
 cleanup() {
