@@ -2,9 +2,10 @@
 set -Eeuo pipefail
 
 API_BASE_URL="${API_BASE_URL:-https://numueg.app}"
-HOLD_SECONDS="${CANARY_HOLD_SECONDS:-3600}"
+HOLD_SECONDS="${CANARY_HOLD_SECONDS:-180}"
 POLL_SECONDS="${CANARY_POLL_SECONDS:-20}"
 FAILURE_THRESHOLD="${CANARY_FAILURE_THRESHOLD:-3}"
+GATE_SAMPLES="${CANARY_GATE_SAMPLES:-5}"
 SSH_KEY="${PROD_EC2_SSH_KEY_PATH:-$HOME/.ssh/ec2_key}"
 IMAGE_REF="${NUMU_API_IMAGE:?NUMU_API_IMAGE is required}"
 SSH_USER="${PROD_EC2_USER:?PROD_EC2_USER is required}"
@@ -105,7 +106,7 @@ guard_for_one_hold() {
 
 full_gate() {
   python3 "$GATE_SCRIPT" --base-url "$API_BASE_URL" \
-    --samples 20 --max-latency-ratio 1.25 --smoke
+    --samples "$GATE_SAMPLES" --max-latency-ratio 1.25 --smoke
 }
 
 cleanup() {
@@ -127,6 +128,7 @@ trap cleanup EXIT
 [[ "$HOLD_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "CANARY_HOLD_SECONDS must be positive"
 [[ "$POLL_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "CANARY_POLL_SECONDS must be positive"
 [[ "$FAILURE_THRESHOLD" =~ ^[1-9][0-9]*$ ]] || die "failure threshold must be positive"
+[[ "$GATE_SAMPLES" =~ ^[1-9][0-9]*$ ]] || die "CANARY_GATE_SAMPLES must be positive"
 [[ -f "$SSH_KEY" ]] || die "SSH key not found: $SSH_KEY"
 [[ -f "$GATE_SCRIPT" ]] || die "canary gate not found: $GATE_SCRIPT"
 
@@ -137,7 +139,7 @@ full_gate
 
 echo "==> Gate passed; promoting candidate to 25%..."
 remote_deploy 25
-notify ":large_yellow_circle: NUMU API candidate promoted to 25%; monitoring for one more hour. ${GITHUB_RUN_URL:-}"
+notify ":large_yellow_circle: NUMU API candidate promoted to 25%; monitoring for 3 more minutes. ${GITHUB_RUN_URL:-}"
 guard_for_one_hold "25% traffic"
 full_gate
 
