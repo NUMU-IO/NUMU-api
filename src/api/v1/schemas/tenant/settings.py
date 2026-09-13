@@ -38,15 +38,27 @@ class CodDepositPolicy(BaseModel):
     balance due on delivery. If the deposit isn't completed within
     `ttl_minutes`, the order auto-cancels.
 
-    Starts with fixed-amount only. Percentage and "cover shipping"
-    variants become alternative shapes of this object when merchants
-    ask for them.
+    `mode` picks how much: a flat `amount_cents`, or `percent` of the
+    order total (50 = half). `min_order_cents` gates the whole policy by
+    basket size, so a merchant can leave small COD orders alone and only
+    ask for a deposit once an order is worth losing.
     """
 
     enabled: bool = False
+    # How the deposit is sized. "fixed" reads amount_cents, "percent"
+    # reads percent.
+    mode: Literal["fixed", "percent"] = "fixed"
     # Fixed deposit amount in cents. Merchants typically set this to
-    # match their delivery fee (40–80 EGP in Egypt).
+    # match their delivery fee (40–80 EGP in Egypt). Used when
+    # mode == "fixed"; clamped to the order total at checkout so a
+    # deposit can never exceed what the order is worth.
     amount_cents: int = Field(default=0, ge=0)
+    # Share of the order total, used when mode == "percent". 50 = half.
+    percent: int = Field(default=50, ge=1, le=100)
+    # Only ask for a deposit when the order total reaches this. 0 means
+    # every COD order. Compared with >=, so a 1000 threshold catches an
+    # order of exactly 1000.
+    min_order_cents: int = Field(default=0, ge=0)
     # How long the customer has to complete the deposit payment before
     # the intent expires and the order auto-cancels. Defaults to
     # 30 min (matches the existing InstaPay-proof TTL). Range is
@@ -69,10 +81,10 @@ class CodDepositPolicy(BaseModel):
                 "At least one allowed_gateway is required when the deposit "
                 "policy is enabled."
             )
-        if self.enabled and self.amount_cents <= 0:
+        if self.enabled and self.mode == "fixed" and self.amount_cents <= 0:
             raise ValueError(
                 "amount_cents must be greater than 0 when the deposit "
-                "policy is enabled."
+                "policy is enabled in fixed mode."
             )
         # De-dup while preserving order for deterministic storage.
         if self.allowed_gateways:
@@ -84,6 +96,28 @@ class CodDepositPolicy(BaseModel):
                     deduped.append(g)
             object.__setattr__(self, "allowed_gateways", deduped)
         return self
+
+
+def deposit_due_cents(policy: dict | None, total_cents: int) -> int:
+    """How much deposit this order owes. 0 means none is required.
+
+    The single place the policy is interpreted — checkout enforces the
+    amount with it, and the storefront config exposes the same inputs so
+    the customer is quoted the figure they will actually be charged.
+    """
+    if not policy or not policy.get("enabled") or total_cents <= 0:
+        return 0
+    if total_cents < int(policy.get("min_order_cents", 0) or 0):
+        return 0
+    if policy.get("mode") == "percent":
+        percent = int(policy.get("percent", 50) or 50)
+        # Round to the nearest cent rather than truncating — on a 50%
+        # split of an odd total, truncation quietly shorts the merchant.
+        due = (total_cents * percent + 50) // 100
+    else:
+        due = int(policy.get("amount_cents", 0) or 0)
+    # A deposit larger than the order is a charge, not a deposit.
+    return min(due, total_cents)
 
 
 class PaymentSettingsResponse(BaseModel):

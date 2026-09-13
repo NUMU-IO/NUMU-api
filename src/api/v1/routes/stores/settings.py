@@ -303,7 +303,10 @@ def _build_payment_response(settings: dict) -> PaymentSettingsResponse:
     # validator runs on writes via UpdatePaymentSettingsRequest.
     deposit_policy = CodDepositPolicy.model_construct(
         enabled=bool(deposit_raw.get("enabled", False)),
+        mode=deposit_raw.get("mode", "fixed"),
         amount_cents=int(deposit_raw.get("amount_cents", 0) or 0),
+        percent=int(deposit_raw.get("percent", 50) or 50),
+        min_order_cents=int(deposit_raw.get("min_order_cents", 0) or 0),
         ttl_minutes=int(deposit_raw.get("ttl_minutes", 30) or 30),
         auto_refund_on_cancel=bool(deposit_raw.get("auto_refund_on_cancel", False)),
         allowed_gateways=list(deposit_raw.get("allowed_gateways") or []),

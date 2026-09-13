@@ -175,6 +175,13 @@ async def get_public_checkout_config(
         "enabled": cod_enabled,
         "deposit_required": cod_enabled and deposit_enabled,
         "deposit_gateways": deposit_gateways,
+        # Sizing inputs, so the storefront can tell the customer what they
+        # pay now versus on delivery before the order exists. Checkout
+        # recomputes the charge from the stored policy either way.
+        "deposit_mode": deposit_raw.get("mode", "fixed"),
+        "deposit_amount_cents": int(deposit_raw.get("amount_cents", 0) or 0),
+        "deposit_percent": int(deposit_raw.get("percent", 50) or 50),
+        "deposit_min_order_cents": int(deposit_raw.get("min_order_cents", 0) or 0),
     }
     config["currency"] = currency
     config["saved_cards_enabled"] = any(
