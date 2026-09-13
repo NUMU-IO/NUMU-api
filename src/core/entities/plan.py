@@ -79,7 +79,7 @@ PLAN_LIMITS: dict[str, PlanFeatures] = {
     # ─── 37-day free trial of Starter features (default for new signups) ──
     "trial": PlanFeatures(
         display_name="Trial",
-        max_products=100,
+        max_products=-1,
         max_orders_per_month=500,  # bounded so abuse is contained
         max_stores=1,
         max_staff_members=3,

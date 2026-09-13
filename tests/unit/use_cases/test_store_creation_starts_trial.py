@@ -101,6 +101,6 @@ def test_the_trial_plan_is_not_the_demo_sandbox():
 
     trial = get_plan_features("trial")
     demo = get_plan_features("demo")
-    assert trial.max_products > demo.max_products
+    assert trial.max_products == -1  # unlimited
     assert trial.max_orders_per_month > demo.max_orders_per_month
     assert trial.custom_domain_enabled and not demo.custom_domain_enabled
