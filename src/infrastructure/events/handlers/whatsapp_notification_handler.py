@@ -235,6 +235,7 @@ async def _resolve_send_context(
     idempotency_event_tag: str,
     order_id: UUID,
     notification_pref_key: str,
+    force: bool = False,
 ) -> tuple[GuardContext, dict] | None:
     """Prefetch everything the guard + send need. Returns ``None`` when the
     handler should silently no-op (missing customer / phone / store).
@@ -446,7 +447,7 @@ async def _resolve_send_context(
         has_active_opt_in=has_active_opt_in,
         has_opt_out=has_opt_out,
         window_is_open=True,  # template sends ignore the 24h window (FR-037 (f))
-        already_sent=already_sent,
+        already_sent=already_sent and not force,
         requires_template_approval=requires_template_approval(store_settings),
     )
 
@@ -468,7 +469,7 @@ async def _resolve_send_context(
 
 
 async def _maybe_send_cod_confirm_request(
-    session: "AsyncSession", event: OrderCreatedEvent
+    session: "AsyncSession", event: OrderCreatedEvent, force: bool = False
 ) -> bool:
     """COD "tap to confirm" path (order_confirmation_request_v1).
 
@@ -516,6 +517,7 @@ async def _maybe_send_cod_confirm_request(
         idempotency_event_tag="order_confirm_request",
         order_id=event.order_id,
         notification_pref_key="require_order_confirmation",
+        force=force,
     )
     if resolution is None:
         return True
@@ -647,7 +649,9 @@ async def _maybe_send_cod_confirm_request(
     return True
 
 
-async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
+async def handle_order_created_whatsapp(
+    event: OrderCreatedEvent, force: bool = False
+) -> None:
     """US1 / FR-001 — send a WhatsApp order-confirmation when an order is
     created. Idempotent: replayed events do not produce duplicate sends.
     Guard-gated: opt-out / merchant-setting-off / non-APPROVED template /
@@ -664,7 +668,7 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
 
     async with AsyncSessionLocal() as session:
         # COD "tap to confirm" flow supersedes the passive v2 notice.
-        if await _maybe_send_cod_confirm_request(session, event):
+        if await _maybe_send_cod_confirm_request(session, event, force=force):
             return
 
         resolution = await _resolve_send_context(
@@ -678,6 +682,7 @@ async def handle_order_created_whatsapp(event: OrderCreatedEvent) -> None:
             idempotency_event_tag="order_created",
             order_id=event.order_id,
             notification_pref_key="order_confirmation",
+            force=force,
         )
         if resolution is None:
             return

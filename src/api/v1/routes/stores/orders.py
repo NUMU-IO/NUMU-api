@@ -1855,3 +1855,132 @@ async def preview_order_email(
     from fastapi.responses import HTMLResponse
 
     return HTMLResponse(content=template["html"])
+
+
+# ============================================================================
+# WhatsApp notification endpoints
+# ============================================================================
+
+
+async def _order_whatsapp_sends(
+    db: AsyncSession, store_id: UUID, phone: str, order_id: UUID
+) -> list[dict]:
+    """Outbound WhatsApp sends logged against a single order, newest first."""
+    from src.infrastructure.repositories.message_log_repository import (
+        MessageLogRepository,
+    )
+
+    rows = await MessageLogRepository(db).get_by_phone(store_id, phone, limit=50)
+    return [
+        {
+            "template_name": row.template_name,
+            "status": row.status.value,
+            "error_code": row.error_code,
+            "message_id": row.message_id,
+            "sent_at": row.created_at,
+        }
+        for row in rows
+        if (row.metadata or {}).get("order_id") == str(order_id)
+    ]
+
+
+@router.get(
+    "/{order_id}/whatsapp",
+    response_model=SuccessResponse,
+    summary="WhatsApp sends for an order",
+    operation_id="get_order_whatsapp_sends",
+)
+async def get_order_whatsapp_sends(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Delivery status of every WhatsApp message sent for this order.
+
+    A `failed` row carries Meta's numeric `error_code` — the only place a
+    merchant can see why a confirmation never arrived.
+    """
+    from src.core.exceptions import EntityNotFoundError
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        raise EntityNotFoundError("Order", str(order_id))
+
+    customer = await customer_repo.get_by_id(order.customer_id)
+    if not customer or not customer.phone:
+        return SuccessResponse(data={"sends": []})
+
+    return SuccessResponse(
+        data={
+            "sends": await _order_whatsapp_sends(
+                db, store.id, str(customer.phone), order_id
+            )
+        }
+    )
+
+
+@router.post(
+    "/{order_id}/resend-whatsapp",
+    response_model=SuccessResponse,
+    summary="Resend the WhatsApp order confirmation",
+    operation_id="resend_order_whatsapp",
+)
+async def resend_order_whatsapp(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Replay the order-created WhatsApp send for this order.
+
+    Routes exactly like the original: COD orders on stores with
+    "confirm order in WhatsApp" get the tap-to-confirm request, everything
+    else gets the passive confirmation. Every guard still applies (opt-out,
+    template approval, merchant toggle) — only the send-once idempotency
+    check is bypassed, which is the whole point of a resend.
+    """
+    from src.core.events.order_events import OrderCreatedEvent
+    from src.core.exceptions import EntityNotFoundError
+    from src.infrastructure.events.handlers.whatsapp_notification_handler import (
+        handle_order_created_whatsapp,
+    )
+
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        raise EntityNotFoundError("Order", str(order_id))
+
+    customer = await customer_repo.get_by_id(order.customer_id)
+    if not customer or not customer.phone:
+        raise HTTPException(status_code=400, detail="Customer has no phone number")
+
+    before = {
+        row["message_id"]
+        for row in await _order_whatsapp_sends(
+            db, store.id, str(customer.phone), order_id
+        )
+    }
+
+    await handle_order_created_whatsapp(
+        OrderCreatedEvent(
+            order_id=order.id,
+            order_number=order.order_number,
+            store_id=order.store_id,
+            customer_id=order.customer_id,
+            total=order.total,
+            currency=order.currency,
+        ),
+        force=True,
+    )
+
+    sends = await _order_whatsapp_sends(db, store.id, str(customer.phone), order_id)
+    # A delayed confirm-request is enqueued, not logged, so "no new row" means
+    # queued OR guard-blocked. ponytail: collapse the two; split them when a
+    # merchant actually runs a send delay and asks which one happened.
+    sent = any(row["message_id"] not in before for row in sends)
+    return SuccessResponse(
+        data={"sends": sends, "sent": sent},
+        message="Resent" if sent else "No new send — check WhatsApp status",
+    )
