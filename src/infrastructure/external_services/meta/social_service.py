@@ -124,8 +124,12 @@ class MetaSocialService:
     def get_auth_url(self, platform: SocialPlatform | str, redirect_uri: str) -> str:
         """Build the OAuth authorization URL.
 
-        For Instagram, we use Facebook Login with instagram_basic + instagram_content_publish
-        scopes because the Instagram Graph API is accessed through Facebook OAuth.
+        Instagram is reached through Facebook Login, so both platforms use the
+        same dialog. Scopes must stay a subset of what the Meta App Review
+        submission asks for — a consent dialog that requests more than the app
+        was approved for is a rejection on its own. This service only ever
+        reads: /me/accounts, the IG account node and its /media, and the Page's
+        own /posts. That is covered by the three scopes below.
         """
         platform = self._ensure_platform(platform)
         if not self._is_configured:
@@ -134,12 +138,9 @@ class MetaSocialService:
         # Both Instagram and Facebook use Facebook Login OAuth
         scopes = {
             SocialPlatform.INSTAGRAM: (
-                "instagram_basic,instagram_manage_insights,"
-                "pages_show_list,pages_read_engagement"
+                "instagram_basic,pages_show_list,pages_read_engagement"
             ),
-            SocialPlatform.FACEBOOK: (
-                "pages_show_list,pages_read_engagement,pages_read_user_content"
-            ),
+            SocialPlatform.FACEBOOK: ("pages_show_list,pages_read_engagement"),
         }
 
         params = {
