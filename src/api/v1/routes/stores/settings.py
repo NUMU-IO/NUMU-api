@@ -567,16 +567,15 @@ async def update_payment_settings(
                         "them from the deposit policy."
                     ),
                 )
+        # Dump the model rather than listing fields by hand. A hand-built dict
+        # silently drops anything added to CodDepositPolicy later — which is
+        # how `mode`, `percent` and `min_order_cents` were accepted, validated,
+        # and then thrown away on save, with the merchant seeing a success
+        # toast for a setting that never persisted.
         payment_settings.setdefault(
             "cod",
             {"enabled": True, "is_configured": True, "last_configured": None},
-        )["deposit_policy"] = {
-            "enabled": policy.enabled,
-            "amount_cents": policy.amount_cents,
-            "ttl_minutes": policy.ttl_minutes,
-            "auto_refund_on_cancel": policy.auto_refund_on_cancel,
-            "allowed_gateways": list(policy.allowed_gateways),
-        }
+        )["deposit_policy"] = policy.model_dump(mode="json")
 
     # Save settings
     settings["payment"] = payment_settings
