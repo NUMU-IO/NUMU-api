@@ -313,6 +313,19 @@ class OrderRepository(IOrderRepository):
             model.payment_method = entity.payment_method
             model.payment_id = entity.payment_id
             model.shipping_method = entity.shipping_method
+            # The deposit columns are written AFTER the order row is created —
+            # checkout builds the order, then moves it into PENDING_DEPOSIT and
+            # stamps these. Leaving them off this list meant the status change
+            # persisted while the gateway and amounts silently did not, so the
+            # order sat in PENDING_DEPOSIT with no gateway and the customer's
+            # proof upload was rejected as "not a transfer-based payment
+            # method". Anything mutated after creation has to be listed here.
+            model.deposit_required_cents = entity.deposit_required_cents
+            model.deposit_amount_cents = entity.deposit_amount_cents
+            model.deposit_paid_at = entity.deposit_paid_at
+            model.deposit_expires_at = entity.deposit_expires_at
+            model.deposit_gateway = entity.deposit_gateway
+            model.deposit_payment_id = entity.deposit_payment_id
             model.customer_confirmation_status = entity.customer_confirmation_status
             model.customer_confirmation_requested_at = (
                 entity.customer_confirmation_requested_at
