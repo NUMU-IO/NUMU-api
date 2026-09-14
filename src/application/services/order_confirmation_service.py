@@ -126,6 +126,14 @@ async def confirm_order_from_whatsapp(
         return False
     if order.status != OrderStatus.PENDING:
         # Status moved on (cancelled / processing) — don't resurrect it.
+        # Logged because this used to swallow every tap on a PENDING_DEPOSIT
+        # order without a trace: the customer pressed Confirm, nothing
+        # happened, and there was nothing in the logs to say why.
+        logger.info(
+            "whatsapp_confirm_wrong_status",
+            order_id=str(order_id),
+            status=getattr(order.status, "value", order.status),
+        )
         return False
 
     # Verify the tapper owns the order (canonical-phone compare).
