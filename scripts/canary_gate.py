@@ -112,8 +112,29 @@ def check_health(
     samples: int,
     max_ratio: float,
     max_candidate_latency_ms: float | None = None,
+    warmup: int = 0,
 ) -> tuple[float, float]:
+    """Compare stable and candidate health latency.
+
+    ``samples`` has to be large enough for the percentile to mean something.
+    At 5 samples ``percentile(.., 0.95)`` returns the maximum, so a single GC
+    pause or connection-pool checkout reads as a p95 regression and rolls back
+    a healthy deploy.
+
+    ``warmup`` requests are issued to each variant and thrown away. The
+    candidate has only ever served the canary's own poll traffic, so its first
+    timed requests otherwise carry cold connection pools that stable — serving
+    the other 90% — does not have.
+    """
     timings: dict[str, list[float]] = {"stable": [], "candidate": []}
+    for _ in range(warmup):
+        for variant in ("stable", "candidate"):
+            try:
+                ApiClient(base_url, variant).request("GET", "/api/v1/health")
+            except Exception:
+                # A failing warmup is not a verdict — the timed loop below
+                # raises on a genuinely unhealthy variant.
+                pass
     for _ in range(samples):
         for variant in ("stable", "candidate"):
             started = time.perf_counter()
@@ -245,6 +266,11 @@ def functional_smoke(base_url: str, email: str, password: str, subdomain: str) -
 def self_test() -> None:
     assert percentile([5, 1, 3, 4, 2], 0.95) == 5
     assert percentile([0.1] * 19 + [0.124], 0.95) == 0.1
+    # At five samples the "95th percentile" is just the slowest request, which
+    # is why the rollout passes a real sample count. Pinned so nobody tunes it
+    # back down without seeing what it does.
+    assert percentile([1, 1, 1, 1, 9], 0.95) == 9
+    assert percentile([1] * 19 + [9], 0.95) == 1
     print("canary gate self-test passed")
 
 
@@ -252,6 +278,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="https://numueg.app")
     parser.add_argument("--samples", type=int, default=20)
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=3,
+        help="Untimed requests per variant before measuring, to even out the "
+        "candidate's cold connection pool.",
+    )
     parser.add_argument("--max-latency-ratio", type=float, default=1.25)
     parser.add_argument("--max-candidate-latency-ms", type=float)
     parser.add_argument("--smoke", action="store_true")
@@ -276,6 +309,7 @@ def main() -> int:
         args.samples,
         args.max_latency_ratio,
         args.max_candidate_latency_ms,
+        args.warmup,
     )
     if args.smoke:
         email = os.environ.get("NUMU_ADMIN_EMAIL")

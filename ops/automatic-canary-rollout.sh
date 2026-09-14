@@ -5,7 +5,9 @@ API_BASE_URL="${API_BASE_URL:-https://numueg.app}"
 HOLD_SECONDS="${CANARY_HOLD_SECONDS:-180}"
 POLL_SECONDS="${CANARY_POLL_SECONDS:-20}"
 FAILURE_THRESHOLD="${CANARY_FAILURE_THRESHOLD:-3}"
-GATE_SAMPLES="${CANARY_GATE_SAMPLES:-5}"
+# 5 samples made the "p95" the single slowest request — one GC pause rolled
+# back a healthy deploy. 20 is the gate script's own default.
+GATE_SAMPLES="${CANARY_GATE_SAMPLES:-20}"
 SSH_KEY="${PROD_EC2_SSH_KEY_PATH:-$HOME/.ssh/ec2_key}"
 IMAGE_REF="${NUMU_API_IMAGE:?NUMU_API_IMAGE is required}"
 SSH_USER="${PROD_EC2_USER:?PROD_EC2_USER is required}"
@@ -105,9 +107,14 @@ guard_for_one_hold() {
 }
 
 full_gate() {
+  # The absolute ceiling is a backstop for "both slots are slow", not the
+  # primary check — that is the 3.5x ratio, which compares the two slots under
+  # identical conditions and passed at 1.83x when this last rolled back. The
+  # ceiling sat at 1000ms while stable's own health p95 measures ~750ms on this
+  # box, leaving 250ms of headroom and failing on ordinary jitter.
   python3 "$GATE_SCRIPT" --base-url "$API_BASE_URL" \
     --samples "$GATE_SAMPLES" --max-latency-ratio 3.5 \
-    --max-candidate-latency-ms 1000 --smoke
+    --max-candidate-latency-ms "${CANARY_MAX_CANDIDATE_MS:-2500}" --smoke
 }
 
 cleanup() {
