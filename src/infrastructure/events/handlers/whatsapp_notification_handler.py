@@ -499,6 +499,20 @@ async def _maybe_send_cod_confirm_request(
     if order_row is None or (order_row.payment_method or "").lower() != "cod":
         return False
 
+    # A deposit order is confirmed by paying the deposit, so asking the
+    # customer to also tap "Confirm" is a question with no answer: the tap
+    # handler requires PENDING and this order is PENDING_DEPOSIT, so every tap
+    # was dropped silently. Return True so the passive confirmation doesn't
+    # fire either — nothing is confirmed until the deposit lands.
+    if getattr(order_row.status, "value", order_row.status) == "pending_deposit":
+        logger.info(
+            "whatsapp_order_confirm_request_skipped",
+            order_id=str(event.order_id),
+            store_id=str(event.store_id),
+            reason="pending_deposit",
+        )
+        return True
+
     store_row = (
         await session.execute(select(StoreModel).where(StoreModel.id == event.store_id))
     ).scalar_one_or_none()
