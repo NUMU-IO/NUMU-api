@@ -137,6 +137,9 @@ class StoreRepository(IStoreRepository):
             model.social_links = entity.social_links
             model.settings = entity.settings
             model.theme_settings = entity.theme_settings
+            # Missing before: Store Settings → Pages & Hours saved with a 200
+            # while `business_hours` stayed null.
+            model.business_hours = entity.business_hours
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)
