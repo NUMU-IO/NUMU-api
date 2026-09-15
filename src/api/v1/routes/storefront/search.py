@@ -148,14 +148,24 @@ async def _search_categories(
 
 
 def _product_to_dict(p: ProductModel) -> dict[str, Any]:
+    # A search result is rendered by the same product card as a collection
+    # grid, so it carries what that card reads: the full gallery, the
+    # compare-at price, tags, and the free-form attributes where an imported
+    # catalogue keeps its author. With only name/price/one image, every
+    # result lost its author line and its struck-through price.
+    images = p.images if isinstance(p.images, list) else []
     return {
         "id": str(p.id),
         "name": p.name,
         "slug": p.slug,
         "sku": p.sku,
         "price": p.price_amount / 100.0,
+        "compare_at_price": p.compare_at_price / 100.0 if p.compare_at_price else None,
         "price_currency": p.price_currency,
-        "image": (p.images or [None])[0] if isinstance(p.images, list) else None,
+        "image": images[0] if images else None,
+        "images": images,
+        "tags": p.tags or [],
+        "attributes": p.attributes or {},
         "in_stock": (p.quantity or 0) > 0,
     }
 
