@@ -39,6 +39,7 @@ import src.api.middleware.rate_limit as rate_limit_module
 from src.api.middleware.rate_limit import (
     AUTH_ENDPOINTS,
     CUSTOMER_AUTH_SUFFIXES,
+    REFRESH_ENDPOINTS,
     SENSITIVE_CUSTOMER_SUFFIXES,
     SENSITIVE_PER_USER_PATHS,
     SKIP_RATE_LIMIT,
@@ -47,6 +48,7 @@ from src.api.middleware.rate_limit import (
     _is_auth_endpoint,
     _is_checkout,
     _is_coupon_apply,
+    _is_token_refresh,
     _is_track_beacon,
     _is_whatsapp_byo_connect,
     _is_whatsapp_dlq_replay,
@@ -242,9 +244,12 @@ class TestEndpointConfiguration:
         customer auth moved to the _is_auth_endpoint matcher."""
         assert "/api/v1/auth/login" in AUTH_ENDPOINTS
         assert "/api/v1/auth/register" in AUTH_ENDPOINTS
-        assert "/api/v1/auth/refresh" in AUTH_ENDPOINTS
         assert "/api/v1/admin/auth/login" in AUTH_ENDPOINTS
-        assert "/api/v1/admin/auth/refresh" in AUTH_ENDPOINTS
+        # Refresh moved to its own generous tier (parallel tabs refresh
+        # together); it must never drift back into the strict auth set.
+        assert "/api/v1/auth/refresh" in REFRESH_ENDPOINTS
+        assert "/api/v1/admin/auth/refresh" in REFRESH_ENDPOINTS
+        assert not AUTH_ENDPOINTS & REFRESH_ENDPOINTS
 
         fields = Settings.model_fields
         auth = fields["rate_limit_auth_requests_per_minute"].default
@@ -277,17 +282,20 @@ class TestEndpointConfiguration:
         # Exact entries still work
         assert _is_auth_endpoint("/api/v1/auth/login")
         assert _is_auth_endpoint("/api/v1/admin/auth/login")
-        assert _is_auth_endpoint("/api/v1/admin/auth/refresh")
 
         # Store-scoped customer auth (dynamic store id)
         assert _is_auth_endpoint(f"{STORE_PREFIX}/auth/login")
         assert _is_auth_endpoint(f"{STORE_PREFIX}/auth/register")
-        assert _is_auth_endpoint(f"{STORE_PREFIX}/auth/refresh")
         assert set(CUSTOMER_AUTH_SUFFIXES) == {
             "/auth/login",
             "/auth/register",
-            "/auth/refresh",
         }
+
+        # Refresh (merchant, admin, customer) is its own tier, not auth
+        assert not _is_auth_endpoint("/api/v1/admin/auth/refresh")
+        assert not _is_auth_endpoint(f"{STORE_PREFIX}/auth/refresh")
+        assert _is_token_refresh("/api/v1/admin/auth/refresh")
+        assert _is_token_refresh(f"{STORE_PREFIX}/auth/refresh")
 
         # Near-misses stay on their own tiers
         assert not _is_auth_endpoint(f"{STORE_PREFIX}/auth/forgot-password")
