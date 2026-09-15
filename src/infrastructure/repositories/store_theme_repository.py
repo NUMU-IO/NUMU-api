@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from src.core.entities.theme import StoreTheme, ThemeType
 from src.core.interfaces.repositories.theme_repository import IStoreThemeRepository
 from src.infrastructure.database.models.tenant.theme import StoreThemeModel
+from src.infrastructure.section_library import merge_section_library
 
 
 class StoreThemeRepository(IStoreThemeRepository):
@@ -70,6 +71,12 @@ class StoreThemeRepository(IStoreThemeRepository):
                 _manifest.get("presets"), dict
             ):
                 presets = copy.deepcopy(_manifest["presets"])
+            # Library sections join the theme's own schemas only for a version
+            # whose manifest opts in (`supports.section_library`).
+            if isinstance(_manifest, dict):
+                section_schemas = merge_section_library(
+                    section_schemas, _manifest.get("supports")
+                )
 
         return StoreTheme(
             id=UUID(str(model.id)),

@@ -38,6 +38,7 @@ from src.infrastructure.database.models.tenant.marketplace_theme import (
     MarketplaceThemeModel,
     MarketplaceThemeVersionModel,
 )
+from src.infrastructure.section_library import pack_supports
 
 DEFAULT_DIST = Path(
     os.environ.get("THEME_DIR", "C:/Users/Yahia/NUMU/numu-theme-magic/dist")
@@ -91,7 +92,9 @@ async def seed() -> None:
     version = manifest.get("version", "0.1.0")
     description = manifest.get("description")
     tags = manifest.get("tags") if isinstance(manifest.get("tags"), list) else []
-    presets = manifest.get("presets") or {}
+    # A marketplace version has no manifest column, so theme.json `supports`
+    # (e.g. the section-library opt-in) rides in presets until activation.
+    presets = pack_supports(manifest.get("presets") or {}, manifest)
     settings_schema = _load_json(dist / "settings_schema.json", [])
     sections = _load_json(dist / "sections.json", None) or {}
     section_schemas = (
