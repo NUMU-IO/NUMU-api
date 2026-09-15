@@ -481,14 +481,16 @@ async def update_payment_settings(
     if request.cod_enabled is not None:
         payment_settings["cod"]["enabled"] = request.cod_enabled
     if request.fawry_enabled is not None:
-        if not payment_settings["fawry"]["is_configured"]:
+        if request.fawry_enabled and not payment_settings["fawry"]["is_configured"]:
             raise HTTPException(
                 status_code=400,
                 detail="Fawry is not configured. Contact administrator.",
             )
         payment_settings["fawry"]["enabled"] = request.fawry_enabled
     if getattr(request, "fawaterak_enabled", None) is not None:
-        if not payment_settings.get("fawaterak", {}).get("is_configured"):
+        if request.fawaterak_enabled and not payment_settings.get("fawaterak", {}).get(
+            "is_configured"
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Fawaterak is not configured. Contact administrator.",
@@ -497,7 +499,7 @@ async def update_payment_settings(
             request.fawaterak_enabled
         )
     if request.paymob_enabled is not None:
-        if not payment_settings["paymob"]["is_configured"]:
+        if request.paymob_enabled and not payment_settings["paymob"]["is_configured"]:
             raise HTTPException(
                 status_code=400,
                 detail="Paymob is not configured. Contact administrator.",
@@ -513,14 +515,18 @@ async def update_payment_settings(
             {"enabled": False, "is_configured": False, "last_configured": None},
         )["enabled"] = request.kashier_enabled
     if getattr(request, "instapay_enabled", None) is not None:
-        if not payment_settings.get("instapay", {}).get("is_configured"):
+        if request.instapay_enabled and not payment_settings.get("instapay", {}).get(
+            "is_configured"
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="InstaPay is not configured. Save your IPA first.",
             )
         payment_settings["instapay"]["enabled"] = request.instapay_enabled
     if getattr(request, "moyasar_enabled", None) is not None:
-        if not payment_settings.get("moyasar", {}).get("is_configured"):
+        if request.moyasar_enabled and not payment_settings.get("moyasar", {}).get(
+            "is_configured"
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Moyasar is not configured. Contact administrator.",
@@ -531,7 +537,9 @@ async def update_payment_settings(
         # was scaffolded as an API gateway needing a partnership. It is a
         # manual rail: the merchant configures it themselves by saving a
         # wallet number, which is what sets is_configured.
-        if not payment_settings.get("vodafone_cash", {}).get("is_configured"):
+        if request.vodafone_cash_enabled and not payment_settings.get(
+            "vodafone_cash", {}
+        ).get("is_configured"):
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -540,7 +548,10 @@ async def update_payment_settings(
             )
         payment_settings["vodafone_cash"]["enabled"] = request.vodafone_cash_enabled
     if request.bank_transfer_enabled is not None:
-        if not payment_settings["bank_transfer"]["is_configured"]:
+        if (
+            request.bank_transfer_enabled
+            and not payment_settings["bank_transfer"]["is_configured"]
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Bank Transfer is not configured. Contact administrator.",

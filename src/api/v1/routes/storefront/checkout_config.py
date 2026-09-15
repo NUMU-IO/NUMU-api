@@ -78,9 +78,11 @@ async def get_public_checkout_config(
     # storefront's payment step renders the right options (e.g. Moyasar
     # for a Saudi store) instead of falling back to a hardcoded default.
     # Mirrors the gating in get_store_payment_methods: a provider shows
-    # when it's enabled in settings AND offered in the store's market;
-    # outside production we surface merely-enabled (not-yet-configured)
-    # providers so merchants can preview their onboarding selections.
+    # when it's enabled in settings AND offered in the store's market.
+    # Only local development surfaces merely-enabled (not-yet-configured)
+    # providers: a shopper must never be offered a gateway that can't take
+    # the payment, and the apex stack has run with ENVIRONMENT=staging, so a
+    # "not production" test put unconfigured gateways in front of real buyers.
     from src.application.services.market_registry import get_market
     from src.config import settings as app_settings
 
@@ -110,7 +112,7 @@ async def get_public_checkout_config(
         cfg = payment_settings.get(provider, {})
         if not cfg.get("enabled"):
             continue
-        if cfg.get("is_configured") or app_settings.environment != "production":
+        if cfg.get("is_configured") or app_settings.environment == "development":
             enabled_methods.append(provider)
     config["enabled_payment_methods"] = enabled_methods
 

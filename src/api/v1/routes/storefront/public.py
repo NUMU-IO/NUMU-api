@@ -2626,9 +2626,10 @@ async def get_store_payment_methods(
 
     apple_pay_platform_ok = await is_apple_pay_platform_enabled(db)
 
-    # In non-production environments, surface methods that are merely `enabled`
-    # (without `is_configured`) so merchants see what they selected during onboarding
-    # before they've finished credential setup.
+    # Only in local development, surface methods that are merely `enabled`
+    # (without `is_configured`) so engineers can preview onboarding selections
+    # before credentials exist. Any deployed stack — including one labelled
+    # staging — offers shoppers configured gateways only.
     from src.application.services.market_registry import get_market
     from src.config import settings as app_settings
 
@@ -2646,7 +2647,7 @@ async def get_store_payment_methods(
             return False
         if cfg.get("is_configured"):
             return True
-        return app_settings.environment != "production"
+        return app_settings.environment == "development"
 
     methods = []
     if _show("cod"):
