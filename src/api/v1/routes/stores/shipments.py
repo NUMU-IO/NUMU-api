@@ -28,11 +28,13 @@ from src.api.v1.schemas.tenant.shipment import (
 )
 from src.application.services.carrier_resolver import (
     DEFAULT_CARRIER,
+    SUPPORTED_CARRIERS,
     CarrierCapabilityError,
     UnknownCarrierError,
     capability,
     service_for_carrier,
     service_for_shipment,
+    supports,
     tracking_url_for,
 )
 from src.core.entities.shipment import Shipment, ShipmentStatus
@@ -362,6 +364,7 @@ async def list_shipments(
         has_cod=has_cod,
         order_id=order_id,
         has_label=has_label,
+        label_carriers=tuple(c for c in SUPPORTED_CARRIERS if supports(c, "print_awb")),
     )
     return SuccessResponse(
         data=[_shipment_to_list_item(s) for s in shipments],

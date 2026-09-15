@@ -188,6 +188,7 @@ class ShipmentRepository(IShipmentRepository):
         has_cod: bool | None = None,
         order_id: UUID | None = None,
         has_label: bool | None = None,
+        label_carriers: tuple[str, ...] = (),
     ) -> list[Shipment]:
         query = select(ShipmentModel).where(ShipmentModel.store_id == store_id)
         if status:
@@ -196,10 +197,15 @@ class ShipmentRepository(IShipmentRepository):
             query = query.where(ShipmentModel.carrier == carrier)
         if order_id:
             query = query.where(ShipmentModel.order_id == order_id)
+        # A label exists when the carrier handed us a URL, or when the carrier
+        # prints on demand through /awb (J&T, manual) and stores no URL.
+        labelled = (
+            ShipmentModel.awb_url.isnot(None) & (ShipmentModel.awb_url != "")
+        ) | ShipmentModel.carrier.in_(label_carriers)
         if has_label is True:
-            query = query.where(ShipmentModel.awb_url.isnot(None))
+            query = query.where(labelled)
         elif has_label is False:
-            query = query.where(ShipmentModel.awb_url.is_(None))
+            query = query.where(~labelled)
         if date_from:
             query = query.where(ShipmentModel.created_at >= date_from)
         if date_to:
