@@ -1,26 +1,25 @@
-"""J&T Express webhook handler.
+"""J&T Express Egypt status push.
 
-Receives delivery status updates from J&T Express:
-- Picked up
-- In transit
-- Out for delivery
-- Delivered (+ COD payment confirmation)
-- Returned
-- Failed delivery attempt
+J&T posts a waybill's scan history form-encoded as ``bizContent`` and signs
+it the way it signs requests: header ``digest`` = base64(md5(bizContent +
+privateKey)). Set the track push URL on open.jtjms-eg.com to
+``https://numueg.app/api/v1/webhooks/jt/callback``.
 
-Updates BOTH the Order and Shipment records.
+Unlike the generic shipping route this also moves the order (ship, deliver,
+collect COD, return to origin, cancel). A push that fails verification is
+refused; the 30-minute trace poll still catches the shipment up.
 """
 
-import json
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.carrier_credentials import load_credentials
 from src.application.services.carrier_registry import get_spec
 from src.application.services.funnel_emit_service import emit_order_delivered
-from src.config import settings
+from src.application.services.shipment_status_sync import apply_carrier_status
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.core.logging import get_logger
@@ -31,459 +30,178 @@ from src.infrastructure.repositories.funnel_event_repository import (
 )
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.shipment_repository import ShipmentRepository
+from src.infrastructure.repositories.store_repository import StoreRepository
 from src.infrastructure.tenancy.rls import narrow_to_tenant
+from src.infrastructure.webhooks.carrier_parsers import decode_webhook_body
 
 logger = get_logger(__name__)
 router = APIRouter()
 
-# Initialize service (global fallback)
-jt_service = JTShippingService()
-
-# Map J&T states to ShipmentStatus
-# Carrier status vocabulary is declared once in the carrier registry
-# (application/services/carrier_registry.py). This module used to carry
-# its own copy; three copies had already drifted. Kept as a module
-# constant because existing code and tests reference it by name.
-JT_STATE_MAP = dict(get_spec("jt").status_map)
+ACK = {"code": "1", "msg": "success", "data": "SUCCESS"}
 
 
-async def _find_order(repo: OrderRepository, tracking_number: str, log):
-    """Look up order by tracking number with row-level lock, return None on miss."""
-    if not tracking_number:
-        return None
+async def _enqueue_purchase_events(session: AsyncSession, order: Any, log: Any) -> None:
     try:
-        order = await repo.get_by_tracking_number_for_update(tracking_number)
-        if not order:
-            log.debug("order_not_found_for_tracking", tracking_number=tracking_number)
-        return order
-    except Exception as e:
-        log.warning("order_lookup_failed", error=str(e))
-        return None
-
-
-async def _find_shipment(repo: ShipmentRepository, tracking_number: str, log):
-    """Look up shipment by tracking number with row-level lock."""
-    if not tracking_number:
-        return None
-    try:
-        shipment = await repo.get_by_tracking_number_for_update(tracking_number)
-        if not shipment:
-            log.debug(
-                "shipment_not_found_for_tracking", tracking_number=tracking_number
-            )
-        return shipment
-    except Exception as e:
-        log.warning("shipment_lookup_failed", error=str(e))
-        return None
-
-
-async def _update_shipment_status(shipment, shipment_repo, state: str, log, **kwargs):
-    """Update shipment record based on J&T state."""
-    if not shipment:
-        return
-
-    new_status = JT_STATE_MAP.get(state)
-    if not new_status:
-        return
-
-    description = kwargs.get("description", f"J&T state: {state}")
-
-    if state in ("DELIVERED", "SIGNED"):
-        cod_amount = kwargs.get("cod_amount")
-        shipment.mark_delivered(
-            cod_collected=bool(cod_amount),
-            cod_amount=cod_amount,
+        from src.application.services.meta_capi_purchase_dispatcher import (
+            enqueue_meta_capi_purchase,
         )
-    elif state in ("PICKUP", "PICKED_UP"):
-        shipment.mark_picked_up()
-    elif state in ("FAILED", "PROBLEM"):
-        shipment.mark_failed(kwargs.get("failure_reason", ""))
-    elif state in ("RETURNED", "REJECTED"):
-        shipment.mark_returned()
-    elif state in ("CANCELLED", "VOIDED"):
-        shipment.mark_cancelled("Cancelled by carrier")
-    elif state in ("OUT_FOR_DELIVERY", "DELIVERING"):
-        shipment.update_status(ShipmentStatus.OUT_FOR_DELIVERY, "Out for delivery")
-    elif state in ("IN_TRANSIT", "TRANSIT"):
-        shipment.update_status(ShipmentStatus.IN_TRANSIT, description)
-    else:
-        shipment.update_status(new_status, description)
 
-    await shipment_repo.update(shipment)
-    log.info(
-        "shipment_status_updated",
-        shipment_id=str(shipment.id),
-        new_status=new_status.value,
-    )
+        await enqueue_meta_capi_purchase(session, order)
+    except Exception:
+        log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
+    try:
+        from src.application.services.tiktok_capi_purchase_dispatcher import (
+            enqueue_tiktok_capi_purchase,
+        )
+
+        await enqueue_tiktok_capi_purchase(session, order)
+    except Exception:
+        log.warning("tiktok_capi_purchase_enqueue_failed", exc_info=True)
+
+
+async def _sync_order(
+    session: AsyncSession,
+    order: Any,
+    order_repo: OrderRepository,
+    shipment: Any,
+    status: ShipmentStatus,
+    tracking_number: str,
+    reason: str,
+    log: Any,
+) -> None:
+    from src.application.services.stock_service import try_restock_order
+
+    if status is ShipmentStatus.PICKED_UP:
+        if order.status == OrderStatus.CONFIRMED:
+            order.start_processing()
+        if order.status == OrderStatus.PROCESSING:
+            order.ship(tracking_number=tracking_number)
+
+    elif status is ShipmentStatus.DELIVERED:
+        delivered_now = order.status == OrderStatus.SHIPPED
+        if delivered_now:
+            order.deliver()
+        cod_collected = bool(shipment and shipment.cod_amount) and not order.is_paid
+        if cod_collected:
+            order.mark_as_paid(
+                payment_id=f"cod-jt-{tracking_number}", payment_method="cod"
+            )
+            order.metadata["cod_amount"] = shipment.cod_amount / 100
+            order.metadata["cod_collected_via"] = "jt_webhook"
+            order.metadata["cod_tracking_number"] = tracking_number
+        await order_repo.update(order)
+        if cod_collected:
+            await _enqueue_purchase_events(session, order, log)
+        if delivered_now:
+            await emit_order_delivered(
+                order, FunnelEventRepository(session), order_repo
+            )
+        return
+
+    elif status is ShipmentStatus.RETURNED:
+        if order.status == OrderStatus.SHIPPED:
+            order.return_to_origin(reason="Returned by carrier (J&T)")
+        elif order.can_be_cancelled:
+            order.cancel(reason="Returned by carrier (J&T)")
+        await try_restock_order(session, order, reason="jt_returned")
+
+    elif status is ShipmentStatus.FAILED:
+        order.metadata.setdefault("delivery_failures", []).append({
+            "reason": reason,
+            "tracking_number": tracking_number,
+            "timestamp": datetime.now(UTC).isoformat(),
+        })
+
+    elif status is ShipmentStatus.CANCELLED and order.can_be_cancelled:
+        order.cancel(reason="Cancelled via J&T")
+        await try_restock_order(session, order, reason="jt_cancelled")
+
+    else:
+        return
+
+    await order_repo.update(order)
 
 
 @router.post("/callback", operation_id="jt_callback")
 async def jt_callback(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_admin_db_session)],
-    x_jt_signature: str = Header(None, alias="x-jt-signature"),
-):
-    """Handle J&T Express delivery status webhook.
+) -> dict[str, Any]:
+    raw = await request.body()
+    event = get_spec("jt").parse_webhook(decode_webhook_body(raw) or {})
+    if event is None:
+        logger.warning("jt_webhook_unreadable")
+        return ACK
 
-    J&T sends POST requests when delivery status changes.
-    Uses per-store webhook secret for verification (each merchant has their own
-    J&T account). Falls back to global secret, then dev mode (no verification).
-    """
-    payload = await request.body()
-    log = logger.bind(webhook="jt")
-
-    # Parse payload to identify the shipment
-    data = json.loads(payload)
-    tracking_number = (
-        data.get("billCode") or data.get("billcode") or data.get("tracking_number", "")
+    log = logger.bind(
+        webhook="jt", tracking_number=event.tracking_number, raw_status=event.raw_status
     )
-    state = data.get("scanType") or data.get("status", "")
-    cod_amount = data.get("codAmount") or data.get("cod_amount")
-    reference = data.get("txlogisticId") or data.get("reference", "")
-
-    log = log.bind(
-        tracking_number=tracking_number,
-        state=state,
-        reference=reference,
-        cod_amount=cod_amount,
-    )
-    log.info("webhook_received")
-
-    order_repo = OrderRepository(session)
     shipment_repo = ShipmentRepository(session)
+    order_repo = OrderRepository(session)
+    shipment = await shipment_repo.get_by_tracking_number_for_update(
+        event.tracking_number
+    )
+    order = await order_repo.get_by_tracking_number_for_update(event.tracking_number)
+    if shipment is None and order is None:
+        log.info("jt_webhook_unknown_waybill")
+        return ACK
 
-    # Look up shipment and order to identify the store
-    order = await _find_order(order_repo, tracking_number, log)
-    shipment = await _find_shipment(shipment_repo, tracking_number, log)
+    owner = shipment or order
+    store = await StoreRepository(session).get_by_id(owner.store_id)
+    creds = await load_credentials(store.settings if store else None, "jt") or {}
+    signature = request.headers.get("digest", "")
+    if not JTShippingService(**creds).verify_webhook_signature(raw, signature):
+        log.warning("jt_webhook_signature_invalid", has_signature=bool(signature))
+        return {"code": "0", "msg": "digest verification failed", "data": "FAIL"}
 
-    # Determine tenant_id from whichever we found
-    tenant_id = None
-    if shipment:
-        tenant_id = shipment.tenant_id
-    elif order:
-        tenant_id = order.tenant_id
+    status = event.status
+    if status is None:
+        log.warning("jt_webhook_status_unmapped")
+        return ACK
+    if shipment is not None and shipment.status == status:
+        return ACK
 
-    # Verify signature using per-store secret, then global fallback
-    signature_verified = False
-    if tenant_id and x_jt_signature:
+    await narrow_to_tenant(session, owner.tenant_id)
+    reason = event.description or event.raw_status
+
+    if shipment is not None:
+        if (
+            status in (ShipmentStatus.FAILED, ShipmentStatus.RETURNED)
+            and shipment.cod_amount
+        ):
+            shipment.metadata.update({
+                "cod_rejected": True,
+                "rejection_reason": reason,
+                "rejection_timestamp": datetime.now(UTC).isoformat(),
+            })
+        if status is ShipmentStatus.DELIVERED and shipment.cod_amount:
+            shipment.cod_collected = True
+            shipment.cod_collected_at = datetime.now(UTC)
+        await apply_carrier_status(
+            shipment=shipment,
+            shipment_repo=shipment_repo,
+            carrier="jt",
+            raw_status=event.raw_status,
+            description=event.description,
+            failure_reason=reason,
+            status=status,
+        )
+
+    if order is not None:
         try:
-            from src.infrastructure.repositories.store_repository import (
-                StoreRepository,
+            await _sync_order(
+                session,
+                order,
+                order_repo,
+                shipment,
+                status,
+                event.tracking_number,
+                reason,
+                log,
             )
-
-            store_repo = StoreRepository(session)
-            store = await store_repo.get_by_id(tenant_id)
-            if store and store.settings:
-                jt_config = store.settings.get("shipping", {}).get("jt", {})
-                encrypted_creds = jt_config.get("encrypted_credentials")
-                key_id = jt_config.get("encryption_key_id")
-                if encrypted_creds and key_id:
-                    import base64
-
-                    from src.infrastructure.external_services.secrets.secrets_manager import (
-                        get_secrets_manager,
-                    )
-
-                    secrets = get_secrets_manager()
-                    cred_data = await secrets.decrypt(
-                        base64.b64decode(encrypted_creds), key_id
-                    )
-                    store_webhook_secret = cred_data.get("webhook_secret")
-                    if store_webhook_secret:
-                        store_jt = JTShippingService(
-                            webhook_secret=store_webhook_secret
-                        )
-                        verified = store_jt.verify_webhook_signature(
-                            payload, x_jt_signature
-                        )
-                        if verified:
-                            signature_verified = True
-                            log.info("webhook_verified_per_store")
-                        else:
-                            log.warning("webhook_per_store_signature_invalid")
         except Exception as e:
-            log.warning("webhook_per_store_verify_error", error=str(e))
+            log.error("jt_webhook_order_sync_failed", error=str(e))
 
-    if not signature_verified and x_jt_signature:
-        if settings.jt_webhook_secret:
-            verified_data = jt_service.verify_webhook_signature(payload, x_jt_signature)
-            if verified_data:
-                signature_verified = True
-                log.info("webhook_verified_global")
-            else:
-                log.warning("webhook_global_signature_invalid")
-
-    if not signature_verified:
-        if x_jt_signature:
-            log.warning("webhook_signature_unverified_accepting", mode="permissive")
-        else:
-            log.warning("webhook_no_signature", mode="development")
-
-    if tenant_id:
-        await narrow_to_tenant(session, tenant_id)
-
-    # Process based on delivery state
-    if state in ("DELIVERED", "SIGNED"):
-        log.info("delivery_completed")
-        if order:
-            try:
-                delivered_now = False
-                if order.status == OrderStatus.SHIPPED:
-                    order.deliver()
-                    delivered_now = True
-                    log.info("order_marked_delivered", order_id=str(order.id))
-
-                cod_just_collected = False
-                if cod_amount and not order.is_paid:
-                    order.mark_as_paid(
-                        payment_id=f"cod-jt-{tracking_number}",
-                        payment_method="cod",
-                    )
-                    order.metadata["cod_amount"] = cod_amount
-                    order.metadata["cod_collected_via"] = "jt_webhook"
-                    order.metadata["cod_tracking_number"] = tracking_number
-                    cod_just_collected = True
-                    log.info("cod_collected", amount=cod_amount, order_id=str(order.id))
-
-                await order_repo.update(order)
-
-                # Meta CAPI Purchase fan-out — only when COD was actually
-                # collected on this webhook. Best-effort.
-                if cod_just_collected:
-                    try:
-                        from src.application.services.meta_capi_purchase_dispatcher import (
-                            enqueue_meta_capi_purchase,
-                        )
-
-                        await enqueue_meta_capi_purchase(session, order)
-                    except Exception:
-                        log.warning("meta_capi_purchase_enqueue_failed", exc_info=True)
-
-                    try:
-                        from src.application.services.tiktok_capi_purchase_dispatcher import (  # noqa: E501
-                            enqueue_tiktok_capi_purchase,
-                        )
-
-                        await enqueue_tiktok_capi_purchase(session, order)
-                    except Exception:
-                        log.warning(
-                            "tiktok_capi_purchase_enqueue_failed", exc_info=True
-                        )
-
-                if delivered_now:
-                    await emit_order_delivered(
-                        order, FunnelEventRepository(session), order_repo
-                    )
-            except Exception as e:
-                log.error("delivery_order_update_failed", error=str(e))
-
-        await _update_shipment_status(
-            shipment, shipment_repo, state, log, cod_amount=cod_amount
-        )
-
-        try:
-            await session.commit()
-        except Exception as e:
-            log.error("delivery_commit_failed", error=str(e))
-            await session.rollback()
-
-    elif state in ("PICKUP", "PICKED_UP"):
-        log.info("delivery_picked_up")
-        if order:
-            try:
-                if order.status == OrderStatus.PROCESSING:
-                    order.ship(tracking_number=tracking_number)
-                    await order_repo.update(order)
-                    log.info("order_marked_shipped", order_id=str(order.id))
-                elif order.status == OrderStatus.CONFIRMED:
-                    order.start_processing()
-                    order.ship(tracking_number=tracking_number)
-                    await order_repo.update(order)
-                    log.info("order_confirmed_and_shipped", order_id=str(order.id))
-            except Exception as e:
-                log.error("pickup_order_update_failed", error=str(e))
-
-        await _update_shipment_status(shipment, shipment_repo, state, log)
-
-        try:
-            await session.commit()
-        except Exception as e:
-            log.error("pickup_commit_failed", error=str(e))
-            await session.rollback()
-
-    elif state in ("RETURNED", "REJECTED"):
-        log.info("delivery_returned")
-        if order:
-            try:
-                # A carrier return is an RTO, not a cancellation. For a shipped
-                # order use the guarded SHIPPED -> RETURNED transition so the
-                # status, status_history, and the downstream network rto signal
-                # are all correct (P0-4/P0-5). The previous code marked it
-                # CANCELLED via an illegal direct status set that bypassed the
-                # transition table. Pre-ship returns (anomalous) fall back to
-                # cancel — the only legal terminal from those states.
-                if order.status == OrderStatus.SHIPPED:
-                    order.return_to_origin(reason="Returned by carrier (J&T)")
-                elif order.can_be_cancelled:
-                    order.cancel(reason="Returned by carrier (J&T)")
-                from src.application.services.stock_service import try_restock_order
-
-                await try_restock_order(session, order, reason="jt_returned")
-                await order_repo.update(order)
-                log.info("order_returned", order_id=str(order.id))
-            except Exception as e:
-                log.error("return_order_update_failed", error=str(e))
-
-        if shipment and shipment.cod_amount and shipment.cod_amount > 0:
-            if shipment.metadata is None:
-                shipment.metadata = {}
-            shipment.metadata["cod_rejected"] = True
-            shipment.metadata["rejection_reason"] = "Returned by carrier"
-            shipment.metadata["rejection_timestamp"] = datetime.now(UTC).isoformat()
-            log.info(
-                "cod_rejection_tracked_return",
-                shipment_id=str(shipment.id),
-                cod_amount=shipment.cod_amount,
-            )
-
-        await _update_shipment_status(shipment, shipment_repo, state, log)
-
-        try:
-            await session.commit()
-        except Exception as e:
-            log.error("return_commit_failed", error=str(e))
-            await session.rollback()
-
-    elif state in ("OUT_FOR_DELIVERY", "DELIVERING"):
-        log.info("delivery_out_for_delivery")
-        await _update_shipment_status(shipment, shipment_repo, state, log)
-        try:
-            await session.commit()
-        except Exception as e:
-            log.error("ofd_commit_failed", error=str(e))
-            await session.rollback()
-
-    elif state in ("IN_TRANSIT", "TRANSIT"):
-        log.info("delivery_in_transit")
-        await _update_shipment_status(shipment, shipment_repo, state, log)
-        try:
-            await session.commit()
-        except Exception as e:
-            log.error("transit_commit_failed", error=str(e))
-            await session.rollback()
-
-    elif state in ("FAILED", "PROBLEM"):
-        failure_reason = data.get("failureReason") or data.get("desc", "Unknown")
-        log.warning("delivery_failed", failure_reason=failure_reason)
-        if order:
-            try:
-                if "delivery_failures" not in order.metadata:
-                    order.metadata["delivery_failures"] = []
-                order.metadata["delivery_failures"].append({
-                    "reason": failure_reason,
-                    "tracking_number": tracking_number,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                })
-                await order_repo.update(order)
-            except Exception as e:
-                log.error("failure_order_update_failed", error=str(e))
-
-        if shipment and shipment.cod_amount and shipment.cod_amount > 0:
-            if shipment.metadata is None:
-                shipment.metadata = {}
-            shipment.metadata["cod_rejected"] = True
-            shipment.metadata["rejection_reason"] = failure_reason
-            shipment.metadata["rejection_timestamp"] = datetime.now(UTC).isoformat()
-            log.info(
-                "cod_rejection_tracked",
-                shipment_id=str(shipment.id),
-                cod_amount=shipment.cod_amount,
-                reason=failure_reason,
-            )
-
-        await _update_shipment_status(
-            shipment, shipment_repo, state, log, failure_reason=failure_reason
-        )
-
-        try:
-            await session.commit()
-        except Exception as e:
-            log.error("failure_commit_failed", error=str(e))
-            await session.rollback()
-
-    elif state in ("CANCELLED", "VOIDED"):
-        log.info("delivery_cancelled")
-        if order:
-            try:
-                if order.can_be_cancelled:
-                    order.cancel(reason="Cancelled via J&T")
-                    from src.application.services.stock_service import (
-                        try_restock_order,
-                    )
-
-                    await try_restock_order(session, order, reason="jt_cancelled")
-                    await order_repo.update(order)
-                    log.info("order_cancelled_jt", order_id=str(order.id))
-            except Exception as e:
-                log.error("cancel_order_update_failed", error=str(e))
-
-        await _update_shipment_status(shipment, shipment_repo, state, log)
-
-        try:
-            await session.commit()
-        except Exception as e:
-            log.error("cancel_commit_failed", error=str(e))
-            await session.rollback()
-
-    else:
-        log.debug("delivery_state_update", state=state)
-        await _update_shipment_status(
-            shipment, shipment_repo, state, log, description=f"Unknown state: {state}"
-        )
-        try:
-            await session.commit()
-        except Exception:
-            await session.rollback()
-
-    return {
-        "status": "received",
-        "tracking_number": tracking_number,
-        "state": state,
-    }
-
-
-@router.get("/track/{tracking_number}", operation_id="track_jt_delivery")
-async def track_jt_delivery(tracking_number: str):
-    """Get J&T Express delivery tracking information.
-
-    Public endpoint for customers to check delivery status.
-    """
-    log = logger.bind(tracking_number=tracking_number)
-
-    try:
-        tracking = await jt_service.track_shipment("JT", tracking_number)
-        log.info("tracking_retrieved", status=tracking.status)
-        return {
-            "tracking_number": tracking.tracking_number,
-            "status": tracking.status,
-            "estimated_delivery": tracking.estimated_delivery.isoformat()
-            if tracking.estimated_delivery
-            else None,
-            "events": [
-                {
-                    "status": event.status,
-                    "description": event.description,
-                    "location": event.location,
-                    "timestamp": event.timestamp.isoformat()
-                    if hasattr(event.timestamp, "isoformat")
-                    else str(event.timestamp),
-                }
-                for event in tracking.events
-            ],
-        }
-    except Exception as e:
-        log.exception("tracking_failed", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get tracking information",
-        )
+    await session.commit()
+    log.info("jt_webhook_processed", status=status.value)
+    return ACK

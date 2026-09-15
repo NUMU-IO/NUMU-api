@@ -339,3 +339,51 @@ async def verify_carrier_credentials(
         data={"carrier": spec.slug, **_carrier_status(store, spec.slug)},
         message="Verification complete",
     )
+
+
+class UpdateCarrierSettingsRequest(BaseModel):
+    auto_create_shipment: bool
+
+
+@router.patch(
+    "/{slug}",
+    summary="Change a connected carrier's settings",
+    operation_id="update_carrier_settings",
+)
+async def update_carrier_settings(
+    request: UpdateCarrierSettingsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    slug: Annotated[str, Path(description="Carrier slug")],
+):
+    """Switch auto-create on or off without re-entering credentials."""
+    try:
+        spec = spec_for(slug)
+    except UnknownCarrierError as e:
+        raise _bad_carrier(e) from e
+
+    if not has_credentials(store.settings, spec.slug):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "CARRIER_NOT_CONFIGURED",
+                "message_en": f"Connect {carrier_name(spec.slug, 'en')} first.",
+                "message_ar": f"اربط {carrier_name(spec.slug, 'ar')} الأول.",
+                "carrier": spec.slug,
+            },
+        )
+
+    settings = dict(store.settings or {})
+    shipping = dict(settings.get("shipping", {}))
+    shipping[spec.slug] = {
+        **shipping.get(spec.slug, {}),
+        "auto_create_shipment": request.auto_create_shipment,
+    }
+    settings["shipping"] = shipping
+    store.settings = settings
+    await store_repo.update(store)
+
+    return SuccessResponse(
+        data={"carrier": spec.slug, **_carrier_status(store, spec.slug)},
+        message="Carrier settings saved",
+    )

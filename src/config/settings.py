@@ -895,11 +895,8 @@ class Settings(BaseSettings):
     mylerz_base_url: str = "https://api.mylerz.com/api"
     mylerz_webhook_secret: str | None = None
 
-    # J&T Express Shipping (Egyptian Courier)
-    jt_api_key: str | None = None
-    jt_customer_code: str | None = None
-    jt_base_url: str = "https://openapi.jtexpress-eg.com/api"
-    jt_webhook_secret: str | None = None
+    # J&T Express Egypt (JMS open platform); credentials are per store
+    jt_base_url: str = "https://openapi.jtjms-eg.com/webopenplatformapi/api"
 
     # WhatsApp Business API
     whatsapp_access_token: str | None = None

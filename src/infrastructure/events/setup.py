@@ -120,6 +120,7 @@ from src.infrastructure.events.handlers.recovery_event_handler import (
     handle_risk_finalised_for_recovery,
 )
 from src.infrastructure.events.handlers.shipment_handler import (
+    handle_order_created_for_shipment,
     handle_order_status_for_shipment,
 )
 from src.infrastructure.events.handlers.staff_event_handlers import (
@@ -195,7 +196,8 @@ def create_event_bus() -> EventBus:
     # sends linked to an order when that order moves to cancelled/refunded.
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_scheduled_cancel)
 
-    # Auto-create shipment on order confirmation
+    # Auto-create shipment: COD orders on creation, the rest on confirmation
+    bus.subscribe(OrderCreatedEvent, handle_order_created_for_shipment)
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_for_shipment)
 
     # Wave 2 Phase 12 — fire Meta CAPI Purchase/Lead based on per-store

@@ -11,12 +11,16 @@ will never succeed, so a malformed payload must be reported rather than
 raised.
 """
 
+import json
+from urllib.parse import urlencode
+
 import pytest
 
 from src.application.services.carrier_registry import carrier_slugs, get_spec
 from src.core.entities.shipment import ShipmentStatus
 from src.infrastructure.webhooks.carrier_parsers import (
     PARSERS,
+    decode_webhook_body,
     parse_bosta,
     parse_jt,
     parse_mylerz,
@@ -33,7 +37,14 @@ BOSTA_BODY = {
 
 MYLERZ_BODY = {"Barcode": "MYL-123", "Status": "DELIVERED", "CODAmount": 250.0}
 
-JT_BODY = {"billCode": "JT-123", "scanType": "SIGNED", "codAmount": 250.0}
+JT_BODY = {
+    "billCode": "JT-123",
+    "txlogisticId": "ORD-1-AB12CD",
+    "details": [
+        {"scanTime": "2026-09-09 12:26:09", "scanType": "Delivery scan"},
+        {"scanTime": "2026-09-09 12:26:25", "scanType": "Signing scan", "desc": "ok"},
+    ],
+}
 
 
 class TestParsersExtractTheRightFields:
@@ -49,10 +60,14 @@ class TestParsersExtractTheRightFields:
         assert e.tracking_number == "MYL-123"
         assert e.raw_status == "DELIVERED"
 
-    def test_jt_reads_billcode_and_scantype(self):
+    def test_jt_reads_billcode_and_the_latest_scan(self):
         e = parse_jt(JT_BODY)
         assert e.tracking_number == "JT-123"
-        assert e.raw_status == "SIGNED"
+        assert e.raw_status == "Signing scan"
+
+    def test_jt_form_encoded_push_is_decoded(self):
+        raw = urlencode({"bizContent": json.dumps(JT_BODY)}).encode()
+        assert parse_jt(decode_webhook_body(raw)).tracking_number == "JT-123"
 
     @pytest.mark.parametrize(
         ("parser", "body"),
@@ -108,7 +123,7 @@ class TestRegistryIntegration:
         assert event.is_mapped
 
     def test_jt_signed_maps_to_delivered(self):
-        """J&T says SIGNED where the others say DELIVERED."""
+        """J&T says "Signing scan" where the others say DELIVERED."""
         assert get_spec("jt").parse_webhook(JT_BODY).status is ShipmentStatus.DELIVERED
 
     def test_unknown_status_is_unmapped_not_guessed(self):

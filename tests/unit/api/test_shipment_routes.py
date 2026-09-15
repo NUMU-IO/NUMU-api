@@ -161,7 +161,7 @@ class TestCarrierCatalog:
         for expected in ("print_awb", "create_pickup", "cancel_shipment", "get_cities"):
             assert expected in ops
 
-    @pytest.mark.parametrize("slug", ["mylerz", "jt"])
+    @pytest.mark.parametrize("slug", ["mylerz"])
     def test_thin_providers_report_only_the_base_contract(self, slug):
         """Regression guard: these must not claim Bosta-only operations."""
         ops = supported_operations(slug)

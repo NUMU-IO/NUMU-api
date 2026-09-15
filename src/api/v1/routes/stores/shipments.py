@@ -214,7 +214,7 @@ async def _create_shipment_for_order(
         tenant_id=store.tenant_id,
         order_id=order.id,
         carrier=carrier,
-        carrier_shipment_id=label.tracking_number,
+        carrier_shipment_id=label.carrier_shipment_id or label.tracking_number,
         tracking_number=label.tracking_number,
         tracking_url=tracking_url,
         awb_url=label.label_url,
@@ -300,6 +300,7 @@ async def bulk_create_shipments(
                     store=store,
                     order_repo=order_repo,
                     shipment_repo=shipment_repo,
+                    carrier=request.carrier,
                 )
                 return BulkShipmentResultItem(
                     order_id=oid,
@@ -492,7 +493,9 @@ async def cancel_shipment(
 
     if shipment.tracking_number:
         _, cancel = await _resolve_for_shipment(shipment, store, "cancel_shipment")
-        cancelled = await cancel(shipment.tracking_number)
+        cancelled = await cancel(
+            shipment.carrier_shipment_id or shipment.tracking_number
+        )
         if not cancelled:
             raise HTTPException(
                 status_code=400, detail="Failed to cancel shipment with carrier"
