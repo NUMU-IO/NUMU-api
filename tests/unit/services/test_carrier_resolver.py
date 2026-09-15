@@ -149,7 +149,7 @@ class TestServiceResolution:
 
 
 class TestCapabilityGuard:
-    """Mylerz and J&T implement only the four base methods."""
+    """Mylerz implements only the four base methods; J&T adds labels, cancel, cities."""
 
     @pytest.mark.asyncio
     async def test_bosta_supports_pickups_and_awb(self):
@@ -158,9 +158,16 @@ class TestCapabilityGuard:
         assert capability(service, "create_pickup", "bosta") is not None
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("slug", ["mylerz", "jt"])
     @pytest.mark.parametrize(
-        "operation", ["print_awb", "create_pickup", "get_cities", "update_delivery"]
+        ("slug", "operation"),
+        [
+            ("mylerz", "print_awb"),
+            ("mylerz", "create_pickup"),
+            ("mylerz", "get_cities"),
+            ("mylerz", "update_delivery"),
+            ("jt", "create_pickup"),
+            ("jt", "update_delivery"),
+        ],
     )
     async def test_unsupported_operations_raise_cleanly(self, slug, operation):
         """Must raise a translatable domain error, not AttributeError."""

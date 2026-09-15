@@ -21,7 +21,10 @@ def _run_async(coro):
 
 async def _sync_shipments() -> dict:
     """Sync non-terminal shipments that haven't been updated recently."""
-    from src.application.services.carrier_resolver import service_for_carrier
+    from src.application.services.carrier_resolver import (
+        map_carrier_status,
+        service_for_carrier,
+    )
     from src.core.entities.shipment import ShipmentStatus
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.repositories.shipment_repository import ShipmentRepository
@@ -87,7 +90,9 @@ async def _sync_shipments() -> dict:
                         "returned": ShipmentStatus.RETURNED,
                         "cancelled": ShipmentStatus.CANCELLED,
                     }
-                    new_status = status_map.get(tracking.status)
+                    new_status = status_map.get(tracking.status) or map_carrier_status(
+                        carrier, tracking.status
+                    )
                     if new_status and new_status.value != (
                         shipment.status.value
                         if hasattr(shipment.status, "value")

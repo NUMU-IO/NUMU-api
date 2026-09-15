@@ -143,6 +143,7 @@ class CarrierSpec:
     verification_operation: str | None = None
     #: Header the carrier signs its webhooks with.
     webhook_signature_header: str | None = None
+    webhook_secret_key: str = "webhook_secret"
     #: Turns a raw webhook body into a WebhookEvent. Lazily imported for
     #: the same reason as ``provider_cls_loader``.
     webhook_parser_loader: Callable[[], Callable] | None = None
@@ -426,43 +427,138 @@ CARRIERS: dict[str, CarrierSpec] = {
         brand_color="#D80D18",
         capabilities=ProviderCapabilities(
             supports_cod=True,
+            supports_labels=True,
+            supports_cancel=True,
             supports_tracking=True,
             supports_webhooks=True,
+            supports_city_lookup=True,
         ),
         factory=_jt_factory,
         provider_cls_loader=_jt_cls,
-        webhook_signature_header="x-jt-signature",
+        verification_operation="verify_credentials",
+        webhook_signature_header="digest",
+        webhook_secret_key="private_key",
         webhook_parser_loader=_parser("jt"),
         tracking_url_template=(
             "https://www.jtexpress-eg.com/trajectoryQuery?waybillNo={tracking_number}"
         ),
         credential_fields=(
             CredentialField(
-                key="api_key", label_en="API key", label_ar="مفتاح الـ API"
+                key="api_account",
+                label_en="API account",
+                label_ar="حساب الـ API",
+                secret=False,
+                help_en="From open.jtjms-eg.com → Console.",
+                help_ar="من open.jtjms-eg.com ← لوحة التحكم.",
+            ),
+            CredentialField(
+                key="private_key",
+                label_en="Private key",
+                label_ar="المفتاح الخاص",
+                help_en=(
+                    "From the same console. Set the track push URL there to "
+                    "https://numueg.app/api/v1/webhooks/jt/callback"
+                ),
+                help_ar=(
+                    "من نفس لوحة التحكم. حط رابط تحديثات الشحن هناك: "
+                    "https://numueg.app/api/v1/webhooks/jt/callback"
+                ),
             ),
             CredentialField(
                 key="customer_code",
                 label_en="Customer code",
                 label_ar="كود العميل",
                 secret=False,
+                help_en="Agreement customer code from your J&T branch, e.g. J0086…",
+                help_ar="كود عميل التعاقد من فرع J&T، زي J0086…",
             ),
-            _WEBHOOK_SECRET,
+            CredentialField(
+                key="customer_password",
+                label_en="Customer password",
+                label_ar="باسورد العميل",
+            ),
+            CredentialField(
+                key="sender_name",
+                label_en="Sender name",
+                label_ar="اسم الراسل",
+                required=False,
+                secret=False,
+            ),
+            CredentialField(
+                key="sender_phone",
+                label_en="Pickup phone",
+                label_ar="موبايل الاستلام",
+                secret=False,
+            ),
+            CredentialField(
+                key="sender_governorate",
+                label_en="Pickup governorate",
+                label_ar="محافظة الاستلام",
+                secret=False,
+            ),
+            CredentialField(
+                key="sender_city",
+                label_en="Pickup city",
+                label_ar="مدينة الاستلام",
+                secret=False,
+                help_en="As J&T lists it, e.g. مدينة نصر",
+                help_ar="زي ما هي مكتوبة عند J&T، زي مدينة نصر",
+            ),
+            CredentialField(
+                key="sender_area",
+                label_en="Pickup area",
+                label_ar="منطقة الاستلام",
+                required=False,
+                secret=False,
+            ),
+            CredentialField(
+                key="sender_street",
+                label_en="Pickup street address",
+                label_ar="عنوان الاستلام",
+                secret=False,
+            ),
+            CredentialField(
+                key="environment",
+                label_en="Environment",
+                label_ar="البيئة",
+                required=False,
+                secret=False,
+                help_en="Leave blank for live. Type sandbox for J&T test credentials.",
+                help_ar="سيبه فاضي للحساب الحقيقي. اكتب sandbox لحساب التجربة.",
+            ),
         ),
         status_map={
-            "PICKUP": ShipmentStatus.PICKED_UP,
-            "PICKED_UP": ShipmentStatus.PICKED_UP,
-            "IN_TRANSIT": ShipmentStatus.IN_TRANSIT,
-            "TRANSIT": ShipmentStatus.IN_TRANSIT,
-            "OUT_FOR_DELIVERY": ShipmentStatus.OUT_FOR_DELIVERY,
-            "DELIVERING": ShipmentStatus.OUT_FOR_DELIVERY,
-            "DELIVERED": ShipmentStatus.DELIVERED,
-            "SIGNED": ShipmentStatus.DELIVERED,
-            "RETURNED": ShipmentStatus.RETURNED,
-            "REJECTED": ShipmentStatus.RETURNED,
-            "FAILED": ShipmentStatus.FAILED,
-            "PROBLEM": ShipmentStatus.FAILED,
-            "CANCELLED": ShipmentStatus.CANCELLED,
-            "VOIDED": ShipmentStatus.CANCELLED,
+            "1": ShipmentStatus.PICKED_UP,
+            "3": ShipmentStatus.IN_TRANSIT,
+            "4": ShipmentStatus.IN_TRANSIT,
+            "5": ShipmentStatus.OUT_FOR_DELIVERY,
+            "6": ShipmentStatus.IN_TRANSIT,
+            "9": ShipmentStatus.IN_TRANSIT,
+            "10": ShipmentStatus.DELIVERED,
+            "11": ShipmentStatus.FAILED,
+            "13": ShipmentStatus.RETURNED,
+            "14": ShipmentStatus.FAILED,
+            "PICKUP SCAN": ShipmentStatus.PICKED_UP,
+            "SENDING SCAN": ShipmentStatus.IN_TRANSIT,
+            "STATION ARRIVAL": ShipmentStatus.IN_TRANSIT,
+            "ARRIVAL SCAN": ShipmentStatus.IN_TRANSIT,
+            "DELIVERY SCAN": ShipmentStatus.OUT_FOR_DELIVERY,
+            "SIGNING SCAN": ShipmentStatus.DELIVERED,
+            "PROBLEM SCAN": ShipmentStatus.FAILED,
+            "PROBLEMATIC SCAN": ShipmentStatus.FAILED,
+            "RETURN SCAN": ShipmentStatus.FAILED,
+            "RETURN SIGNING SCAN": ShipmentStatus.RETURNED,
+            "快件揽收": ShipmentStatus.PICKED_UP,
+            "发件扫描": ShipmentStatus.IN_TRANSIT,
+            "到件扫描": ShipmentStatus.IN_TRANSIT,
+            "入库扫描": ShipmentStatus.IN_TRANSIT,
+            "出库扫描": ShipmentStatus.IN_TRANSIT,
+            "出仓扫描": ShipmentStatus.OUT_FOR_DELIVERY,
+            "派件扫描": ShipmentStatus.OUT_FOR_DELIVERY,
+            "快件签收": ShipmentStatus.DELIVERED,
+            "问题件扫描": ShipmentStatus.FAILED,
+            "退件扫描": ShipmentStatus.FAILED,
+            "退件签收": ShipmentStatus.RETURNED,
         },
     ),
 }
@@ -559,9 +655,12 @@ def validate_registry() -> None:
                 raise AssertionError(
                     f"Carrier '{slug}' claims webhooks but has an empty status map"
                 )
-            if not any(f.key == "webhook_secret" for f in spec.credential_fields):
+            if not any(
+                f.key == spec.webhook_secret_key for f in spec.credential_fields
+            ):
                 raise AssertionError(
-                    f"Carrier '{slug}' claims webhooks but has no webhook_secret field"
+                    f"Carrier '{slug}' claims webhooks but has no "
+                    f"'{spec.webhook_secret_key}' credential field"
                 )
             # Without these the generic route silently ignores every
             # callback from this carrier — a failure mode with no error.
@@ -575,7 +674,10 @@ def validate_registry() -> None:
                 )
 
         if spec.verification_operation:
-            if spec.verification_operation not in KNOWN_OPERATIONS:
+            if spec.verification_operation not in (
+                *KNOWN_OPERATIONS,
+                "verify_credentials",
+            ):
                 raise AssertionError(
                     f"Carrier '{slug}' verifies with unknown operation "
                     f"'{spec.verification_operation}'"

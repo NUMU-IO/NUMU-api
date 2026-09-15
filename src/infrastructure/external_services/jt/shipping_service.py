@@ -1,20 +1,27 @@
-"""J&T Express shipping service implementation for Egyptian market.
+"""J&T Express Egypt on the JMS open platform.
 
-J&T Express is a global logistics company with operations in Egypt.
-This service integrates with the J&T Express API for shipment creation,
-tracking, and rate calculation.
+Docs: https://open.jtjms-eg.com/#/apiDoc/basic
 
-API Documentation: https://openapi.jtexpress-eg.com/
+Every call is a form post of ``bizContent`` (a JSON string) with headers
+``apiAccount``, ``timestamp`` and ``digest = base64(md5(bizContent + privateKey))``.
+Order calls also carry a business ``digest`` built from the agreement
+customer's code and password.
 """
 
+import base64
 import hashlib
 import hmac
 import json
-import logging
+import re
+import secrets
+import time
+from dataclasses import replace
+from typing import Any
 
 import httpx
 
 from src.config import settings
+from src.core.interfaces.services.shipping_provider import CarrierApiError
 from src.core.interfaces.services.shipping_service import (
     IShippingService,
     Parcel,
@@ -25,100 +32,203 @@ from src.core.interfaces.services.shipping_service import (
     TrackingInfo,
     parse_carrier_timestamp,
 )
+from src.core.logging import get_logger
+from src.core.value_objects.geography import resolve_governorate
+from src.infrastructure.webhooks.carrier_parsers import decode_webhook_body
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
+SANDBOX_BASE_URL = "https://demoopenapi.jtjms-eg.com/webopenplatformapi/api"
+PASSWORD_SALT = "jadada236t2"
+AUTH_ERROR_CODES = frozenset({"145003010", "145003030", "145003031"})
+NO_LOCATION_PERMISSION = "145003012"
+NOT_FOUND = "999002000"
+LOCATION_TTL_SECONDS = 24 * 3600
+
+_location_cache: dict[tuple[str, str, str], tuple[float, list[dict[str, Any]]]] = {}
+_ARABIC_FOLD = str.maketrans({
+    "أ": "ا",
+    "إ": "ا",
+    "آ": "ا",
+    "ة": "ه",
+    "ى": "ي",
+    "ـ": None,
+})
+
+
+def md5_base64(text: str) -> str:
+    digest = hashlib.md5(text.encode("utf-8"), usedforsecurity=False).digest()
+    return base64.b64encode(digest).decode()
+
+
+def _fold(text: Any) -> str:
+    text = re.sub(r"[ً-ْ]", "", str(text or "")).translate(_ARABIC_FOLD)
+    return re.sub(r"\W+", "", text.lower())
+
+
+def _contains(needle: str, haystack: str) -> bool:
+    return len(needle) > 2 and needle in haystack
+
+
+def _local_phone(phone: str | None) -> str:
+    digits = re.sub(r"\D", "", phone or "").removeprefix("00")
+    if digits.startswith("20") and len(digits) == 12:
+        return "0" + digits[2:]
+    return digits
 
 
 class JTShippingService(IShippingService):
-    """J&T Express shipping service for Egyptian market.
-
-    Features:
-    - Standard and express delivery across Egypt
-    - COD (Cash on Delivery) support
-    - Real-time tracking
-    - Return shipment handling
-    """
+    """J&T Express Egypt: booking, cancel, labels, tracking, status push."""
 
     def __init__(
         self,
-        api_key: str | None = None,
+        api_account: str | None = None,
+        private_key: str | None = None,
         customer_code: str | None = None,
+        customer_password: str | None = None,
+        sender_name: str | None = None,
+        sender_phone: str | None = None,
+        sender_governorate: str | None = None,
+        sender_city: str | None = None,
+        sender_area: str | None = None,
+        sender_street: str | None = None,
+        environment: str | None = None,
         base_url: str | None = None,
-        webhook_secret: str | None = None,
+        **_legacy: Any,
     ) -> None:
-        self.api_key = api_key or settings.jt_api_key
-        self.customer_code = customer_code or settings.jt_customer_code
-        self.base_url = (base_url or settings.jt_base_url).rstrip("/")
-        self.webhook_secret = webhook_secret or settings.jt_webhook_secret
+        self.api_account = api_account or ""
+        self.private_key = private_key or ""
+        self.customer_code = customer_code or ""
+        self.customer_password = customer_password or ""
+        self.sender = ShippingAddress(
+            name=sender_name or "",
+            street1=sender_street or "",
+            street2=sender_area,
+            city=sender_city or "",
+            state=sender_governorate,
+            country="Egypt",
+            phone=sender_phone,
+        )
+        sandbox = (environment or "").strip().lower() == "sandbox"
+        default_url = SANDBOX_BASE_URL if sandbox else settings.jt_base_url
+        self.base_url = (base_url or default_url).rstrip("/")
 
-    def _get_headers(self) -> dict[str, str]:
-        """Get API request headers."""
-        if not self.api_key:
-            raise ValueError("J&T Express API key not configured")
-        return {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "apiAccount": self.customer_code or "",
-            "digest": self.api_key,
+    def _business_digest(self) -> str:
+        cipher = hashlib.md5(
+            f"{self.customer_password}{PASSWORD_SALT}".encode(), usedforsecurity=False
+        ).hexdigest()
+        return md5_base64(f"{self.customer_code}{cipher.upper()}{self.private_key}")
+
+    async def _post(self, path: str, biz: dict[str, Any]) -> Any:
+        if not (self.api_account and self.private_key):
+            raise CarrierApiError(401, "J&T Express is not connected", carrier="jt")
+
+        content = json.dumps(biz, ensure_ascii=False, separators=(",", ":"))
+        headers = {
+            "apiAccount": self.api_account,
+            "digest": md5_base64(content + self.private_key),
+            "timestamp": str(int(time.time() * 1000)),
         }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/{path}",
+                data={"bizContent": content},
+                headers=headers,
+            )
 
-    async def get_rates(
-        self,
-        from_address: ShippingAddress,
-        to_address: ShippingAddress,
-        parcel: Parcel,
-    ) -> list[ShippingRate]:
-        """Get shipping rates from J&T Express.
+        if resp.status_code != 200:
+            raise CarrierApiError(
+                resp.status_code,
+                f"J&T HTTP {resp.status_code}: {resp.text[:300]}",
+                carrier="jt",
+            )
+        body = resp.json()
+        code = str(body.get("code", ""))
+        if code != "1" and str(body.get("msg", "")).lower() != "success":
+            logger.warning("jt_api_error", path=path, code=code, msg=body.get("msg"))
+            raise CarrierApiError(
+                401 if code in AUTH_ERROR_CODES else 422,
+                f"J&T {code}: {body.get('msg') or 'unknown error'}",
+                carrier="jt",
+            )
+        return body.get("data")
 
-        Returns **an empty list** when J&T does not answer. It used to
-        return a hardcoded 45 EGP as ``carrier="jt"`` — NUMU's own guess
-        presented to a merchant as the carrier's price. See the note on
-        the Mylerz provider: the registry declares
-        ``supports_live_rates=False`` for both, so checkout never asks
-        either of them for a price.
-        """
+    async def get_cities(self) -> list[dict[str, Any]]:
+        """J&T's Egypt province/city/area tree; [] when the account lacks that API."""
+        key = (self.base_url, self.api_account, self.private_key)
+        cached = _location_cache.get(key)
+        if cached and time.monotonic() - cached[0] < LOCATION_TTL_SECONDS:
+            return cached[1]
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{self.base_url}/order/queryFreight",
-                    json={
-                        "customerCode": self.customer_code,
-                        "senderAddr": from_address.city,
-                        "receiverAddr": to_address.city,
-                        "weight": str(parcel.weight),
-                        "length": str(parcel.length),
-                        "width": str(parcel.width),
-                        "height": str(parcel.height),
-                    },
-                    headers=self._get_headers(),
-                    timeout=30.0,
-                )
-                if resp.status_code != 200:
-                    logger.warning(
-                        "J&T rates failed: %s %s", resp.status_code, resp.text
-                    )
-                    return []
+            rows = (
+                await self._post("location/getLocation", {"countryCode": "EGY"}) or []
+            )
+        except CarrierApiError as e:
+            # J&T answers 145003012 before checking the key; book with plain names.
+            if not str(e).startswith(f"J&T {NO_LOCATION_PERMISSION}:"):
+                raise
+            rows = []
+        # ponytail: per-process cache; move to Redis if workers multiply.
+        _location_cache[key] = (time.monotonic(), rows)
+        return rows
 
-                data = resp.json()
-                if data.get("code") != "1":
-                    logger.warning("J&T rates API error: %s", data.get("msg"))
-                    return []
+    async def _locate(self, address: ShippingAddress) -> dict[str, str]:
+        rows = await self.get_cities()
+        governorate = resolve_governorate(address.state or "") or resolve_governorate(
+            address.city or ""
+        )
+        if not rows:
+            return {
+                "prov": governorate.name_ar if governorate else address.state or "",
+                "city": address.city or "",
+                "area": address.street2 or address.city or "",
+            }
+        if governorate:
+            names = {_fold(governorate.name_ar), _fold(governorate.name_en)}
+            rows = [r for r in rows if _fold(r.get("prov")) in names] or rows
 
-                freight = data.get("data", {})
-                amount = int(float(freight.get("totalPrice", 45)) * 100)
-                return [
-                    ShippingRate(
-                        carrier="jt",
-                        service="standard",
-                        rate_id="jt_standard",
-                        amount=amount,
-                        currency="EGP",
-                        estimated_days=freight.get("estimatedDays", 3),
-                    )
-                ]
-        except Exception as e:
-            logger.warning("J&T get_rates error: %s", e)
-            return []
+        city = _fold(address.city)
+        text = _fold(" ".join(filter(None, [address.street1, address.street2])))
+        # ponytail: name matching against J&T's tree; a city with no named area
+        # takes its first area. Upgrade: let checkout pick from the J&T tree.
+        match = (
+            next((r for r in rows if city and _fold(r.get("area")) == city), None)
+            or next(
+                (
+                    r
+                    for r in rows
+                    if city
+                    and _fold(r.get("city")) == city
+                    and _contains(_fold(r.get("area")), text)
+                ),
+                None,
+            )
+            or next((r for r in rows if city and _fold(r.get("city")) == city), None)
+            or next((r for r in rows if _contains(_fold(r.get("area")), text)), None)
+        )
+        if match is None:
+            raise CarrierApiError(
+                422,
+                f"J&T does not recognise the city '{address.city}' "
+                f"({address.state or 'no governorate'}). Use the city or area "
+                f"name as J&T lists it.",
+                carrier="jt",
+            )
+        return {k: str(match.get(k) or "") for k in ("prov", "city", "area")}
+
+    @staticmethod
+    def _party(address: ShippingAddress, place: dict[str, str]) -> dict[str, Any]:
+        street = " ".join(filter(None, [address.street1, address.street2]))[:200]
+        phone = _local_phone(address.phone)
+        return {
+            "name": address.name[:50],
+            "mobile": phone,
+            "phone": phone,
+            "countryCode": "EGY",
+            **place,
+            "street": street,
+            "address": street,
+        }
 
     async def create_shipment(
         self,
@@ -130,159 +240,141 @@ class JTShippingService(IShippingService):
         order_reference: str | None = None,
         notes: str | None = None,
     ) -> ShipmentLabel:
-        """Create a shipment via J&T Express API."""
-        payload = {
+        sender = replace(self.sender, name=self.sender.name or from_address.name)
+        biz: dict[str, Any] = {
             "customerCode": self.customer_code,
-            "orderType": "1",  # 1 = pickup
-            "serviceType": "1",  # 1 = standard
-            "sender": {
-                "name": from_address.name,
-                "phone": from_address.phone or "",
-                "address": f"{from_address.street1} {from_address.street2 or ''}".strip(),
-                "city": from_address.city,
-            },
-            "receiver": {
-                "name": to_address.name,
-                "phone": to_address.phone or "",
-                "address": f"{to_address.street1} {to_address.street2 or ''}".strip(),
-                "city": to_address.city,
-            },
-            "weight": str(parcel.weight),
-            "itemsValue": str((cod_amount / 100) if cod_amount else 0),
-            "remark": notes or "",
-            "txlogisticId": order_reference or "",
-            "payType": "PP" if not cod_amount or cod_amount <= 0 else "CC",
+            "digest": self._business_digest(),
+            "txlogisticId": f"{order_reference or 'NUMU'}-{secrets.token_hex(3).upper()}",
+            "expressType": "EZ",
+            "orderType": "2",
+            "serviceType": "01",
+            "deliveryType": "04",
+            "payType": "PP_PM",
+            "goodsType": "ITN16",
+            "operateType": 1,
+            "totalQuantity": 1,
+            "weight": f"{max(parcel.weight, 0.01):.2f}",
+            "sender": self._party(sender, await self._locate(sender)),
+            "receiver": self._party(to_address, await self._locate(to_address)),
+            "remark": (notes or "")[:200],
         }
-
         if cod_amount and cod_amount > 0:
-            payload["goodsValue"] = str(cod_amount / 100)
+            biz["itemsValue"] = f"{cod_amount / 100:.2f}"
+            biz["priceCurrency"] = "EGP"
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.base_url}/order/create",
-                json=payload,
-                headers=self._get_headers(),
-                timeout=30.0,
+        data = await self._post("order/addOrder", biz) or {}
+        if not data.get("billCode"):
+            raise CarrierApiError(
+                502, "J&T accepted the order but returned no waybill", carrier="jt"
             )
-            if resp.status_code not in (200, 201):
-                logger.error("J&T shipment creation failed: %s", resp.text)
-                raise ValueError(f"Failed to create J&T shipment: {resp.text}")
+        return ShipmentLabel(
+            label_url="",
+            tracking_number=data["billCode"],
+            carrier="jt",
+            service="standard",
+            carrier_shipment_id=data.get("txlogisticId") or biz["txlogisticId"],
+        )
 
-            data = resp.json()
-            if data.get("code") != "1":
-                logger.error("J&T shipment API error: %s", data.get("msg"))
-                raise ValueError(
-                    f"J&T shipment creation error: {data.get('msg', 'Unknown error')}"
-                )
+    async def verify_credentials(self) -> None:
+        """Cancel an order that doesn't exist.
 
-            order_data = data.get("data", {})
-            bill_code = (
-                order_data.get("billCode") or order_data.get("txlogisticId") or ""
-            )
+        J&T checks the API account, private key and customer password before
+        looking the order up, so "not found" proves all three.
+        """
+        try:
+            await self.cancel_shipment("NUMU-CREDENTIAL-CHECK")
+        except CarrierApiError as e:
+            if not str(e).startswith(f"J&T {NOT_FOUND}:"):
+                raise
 
-            return ShipmentLabel(
-                label_url=order_data.get("labelUrl") or "",
-                tracking_number=bill_code,
-                carrier="jt",
-                service="standard",
-            )
+    async def cancel_shipment(self, carrier_shipment_id: str) -> bool:
+        """Cancel by J&T's customer order number (txlogisticId)."""
+        await self._post(
+            "order/cancelOrder",
+            {
+                "customerCode": self.customer_code,
+                "digest": self._business_digest(),
+                "orderType": "2",
+                "txlogisticId": carrier_shipment_id,
+                "reason": "Cancelled by merchant",
+            },
+        )
+        return True
 
-    async def track_shipment(
-        self,
-        carrier: str,
-        tracking_number: str,
-    ) -> TrackingInfo:
-        """Track a J&T Express shipment."""
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self.base_url}/track/query",
-                json={
-                    "billCodes": tracking_number,
-                },
-                headers=self._get_headers(),
-                timeout=30.0,
-            )
-            if resp.status_code != 200:
-                raise ValueError(f"J&T tracking failed: {resp.text}")
+    async def print_awb(self, tracking_number: str) -> bytes:
+        data = await self._post(
+            "order/printOrder",
+            {
+                "customerCode": self.customer_code,
+                "digest": self._business_digest(),
+                "billCode": tracking_number,
+                "printSize": 0,
+                "printCod": 1,
+            },
+        )
+        return base64.b64decode((data or {}).get("base64EncodeContent") or "")
 
-            data = resp.json()
-            if data.get("code") != "1":
-                raise ValueError(
-                    f"J&T tracking error: {data.get('msg', 'Unknown error')}"
-                )
-
-            tracks = data.get("data", [])
-            if not tracks:
-                return TrackingInfo(
-                    carrier="jt",
-                    tracking_number=tracking_number,
-                    status="unknown",
-                    events=[],
-                )
-
-            track = tracks[0] if isinstance(tracks, list) else tracks
-            details = track.get("details", [])
-            events = []
-            for detail in details:
-                events.append(
-                    TrackingEvent(
-                        status=detail.get("scanType", ""),
-                        description=detail.get("desc", ""),
-                        location=detail.get("scanCity"),
-                        timestamp=parse_carrier_timestamp(detail.get("scanTime", "")),
-                    )
-                )
-
+    async def track_shipment(self, carrier: str, tracking_number: str) -> TrackingInfo:
+        data = await self._post("logistics/trace", {"billCodes": tracking_number}) or []
+        track = next((t for t in data if t.get("billCode") == tracking_number), None)
+        details = (track or {}).get("details") or []
+        if not details:
             return TrackingInfo(
                 carrier="jt",
                 tracking_number=tracking_number,
-                status=track.get("lastStatus", "unknown"),
-                events=events,
-                estimated_delivery=None,
+                status="unknown",
+                events=[],
             )
+
+        latest = max(details, key=lambda d: str(d.get("scanTime") or ""))
+        return TrackingInfo(
+            carrier="jt",
+            tracking_number=tracking_number,
+            status=str(
+                latest.get("scanType") or latest.get("scanTypeCode") or "unknown"
+            ),
+            events=[
+                TrackingEvent(
+                    status=str(d.get("scanType") or ""),
+                    description=str(d.get("desc") or ""),
+                    location=d.get("scanNetworkCity") or d.get("scanNetworkName"),
+                    timestamp=parse_carrier_timestamp(d.get("scanTime")),
+                )
+                for d in details
+            ],
+        )
+
+    async def get_rates(
+        self,
+        from_address: ShippingAddress,
+        to_address: ShippingAddress,
+        parcel: Parcel,
+    ) -> list[ShippingRate]:
+        """No live quotes: the registry declares supports_live_rates=False."""
+        return []
 
     async def validate_address(
         self,
         address: ShippingAddress,
     ) -> tuple[bool, ShippingAddress | None]:
-        """Validate address (basic validation for J&T)."""
         is_valid = bool(address.city and address.street1 and address.phone)
         return is_valid, address if is_valid else None
 
-    def verify_webhook_signature(
-        self,
-        payload: bytes,
-        signature: str,
-    ) -> dict | None:
-        """Verify J&T Express webhook signature."""
-        if not self.webhook_secret:
-            return json.loads(payload)
-        expected = hmac.new(
-            self.webhook_secret.encode(),
-            payload,
-            hashlib.sha256,
-        ).hexdigest()
-        if hmac.compare_digest(expected, signature):
-            return json.loads(payload)
-        return None
+    def verify_webhook_signature(self, payload: bytes, signature: str) -> dict | None:
+        """J&T signs pushes like requests: digest = base64(md5(bizContent + privateKey))."""
+        body = decode_webhook_body(payload)
+        content = body.get("bizContent") if isinstance(body, dict) else None
+        if not (content and signature and self.private_key):
+            return None
+        expected = md5_base64(content + self.private_key)
+        if not hmac.compare_digest(expected, signature.strip()):
+            return None
+        return json.loads(content)
 
 
 async def get_jt_service_for_store(
     store_settings: dict | None = None,
 ) -> JTShippingService:
-    """Get a JTShippingService configured with per-store credentials.
-
-    Falls back to global env vars if no per-store credentials are configured.
-    """
     from src.application.services.carrier_credentials import load_credentials
 
-    creds = await load_credentials(store_settings, "jt")
-    if creds:
-        return JTShippingService(
-            api_key=creds.get("api_key"),
-            customer_code=creds.get("customer_code"),
-            webhook_secret=creds.get("webhook_secret"),
-            base_url=settings.jt_base_url,
-        )
-    # Fallback to global settings
-    return JTShippingService()
+    return JTShippingService(**(await load_credentials(store_settings, "jt") or {}))

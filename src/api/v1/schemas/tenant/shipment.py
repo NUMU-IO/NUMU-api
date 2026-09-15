@@ -30,6 +30,10 @@ class BulkCreateShipmentRequest(BaseModel):
     """Bulk create shipments for multiple orders."""
 
     order_ids: list[UUID] = Field(..., min_length=1, max_length=50)
+    carrier: str = Field(
+        default=DEFAULT_CARRIER,
+        description=f"Shipping carrier: {', '.join(SUPPORTED_CARRIERS)}",
+    )
 
 
 class ShipmentStatusHistoryEntry(BaseModel):

@@ -18,13 +18,13 @@ class TestVerificationHonesty:
 
     @pytest.mark.asyncio
     async def test_carrier_without_a_probe_reports_unknown_not_false(self):
-        """Mylerz and J&T have no safe read-only call.
+        """Mylerz has no safe read-only call.
 
         `None` means "we can't tell", which the UI renders as
         "configured, not verified". Returning False would read as
         "broken", and True would be the original lie.
         """
-        for slug in ("mylerz", "jt"):
+        for slug in ("mylerz",):
             assert get_spec(slug).verification_operation is None
             verified, error = await _run_verification(slug, {})
             assert verified is None
@@ -32,6 +32,10 @@ class TestVerificationHonesty:
 
     def test_bosta_declares_a_probe(self):
         assert get_spec("bosta").verification_operation == "get_cities"
+
+    def test_jt_probe_checks_every_credential(self):
+        """J&T's getLocation answers "no permission" even to a wrong key."""
+        assert get_spec("jt").verification_operation == "verify_credentials"
 
     @pytest.mark.asyncio
     async def test_a_rejected_key_is_false_with_a_reason(self, monkeypatch):

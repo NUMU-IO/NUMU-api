@@ -22,9 +22,21 @@ onto ``ShippingProvider``, each parser becomes that class's
 ``parse_webhook`` and this module goes away.
 """
 
+import json
 from typing import Any
+from urllib.parse import parse_qs
 
 from src.core.interfaces.services.shipping_provider import WebhookEvent
+
+
+def decode_webhook_body(raw: bytes) -> Any:
+    """JSON, or a form post (J&T sends ``bizContent=<json>``). None if neither."""
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        pass
+    form = parse_qs(raw.decode("utf-8", "replace"))
+    return {key: values[0] for key, values in form.items()} or None
 
 
 def _first(data: dict[str, Any], *keys: str) -> Any:
@@ -108,23 +120,35 @@ def parse_mylerz(data: dict[str, Any]) -> WebhookEvent | None:
 
 
 def parse_jt(data: dict[str, Any]) -> WebhookEvent | None:
-    """J&T identifies the parcel by ``billCode`` and the event by ``scanType``."""
+    """J&T pushes ``bizContent``: a ``billCode`` and its scan history.
+
+    The newest scan (by ``scanTime``) is the event.
+    """
     if not isinstance(data, dict):
         return None
+    if isinstance(data.get("bizContent"), str):
+        try:
+            data = json.loads(data["bizContent"])
+        except ValueError:
+            return None
+        if not isinstance(data, dict):
+            return None
 
-    tracking = _first(data, "billCode", "billcode", "tracking_number")
+    tracking = _first(data, "billCode", "billcode")
     if not tracking:
         return None
 
-    cod_amount = _to_float(_first(data, "codAmount", "cod_amount"))
+    details = data.get("details")
+    scans = (
+        [d for d in details if isinstance(d, dict)] if isinstance(details, list) else []
+    )
+    latest = max(scans, key=lambda d: str(d.get("scanTime") or ""), default={})
     return WebhookEvent(
         tracking_number=str(tracking),
         status=None,
-        raw_status=str(_first(data, "scanType", "status") or ""),
-        description=str(_first(data, "desc", "description", "remark") or ""),
-        cod_collected=bool(cod_amount),
-        cod_amount=cod_amount,
-        occurred_at=_first(data, "scanTime", "timestamp"),
+        raw_status=str(_first(latest, "scanType", "scanTypeCode") or ""),
+        description=str(_first(latest, "desc", "probleDescription") or ""),
+        occurred_at=latest.get("scanTime"),
         payload=data,
     )
 
@@ -137,4 +161,10 @@ PARSERS = {
 }
 
 
-__all__ = ["PARSERS", "parse_bosta", "parse_jt", "parse_mylerz"]
+__all__ = [
+    "PARSERS",
+    "decode_webhook_body",
+    "parse_bosta",
+    "parse_jt",
+    "parse_mylerz",
+]

@@ -105,7 +105,17 @@ class TestCapabilityTruthfulness:
         ):
             assert getattr(caps, name), name
 
-    @pytest.mark.parametrize("slug", ["mylerz", "jt"])
+    def test_jt_declares_what_its_egypt_api_does(self):
+        assert get_spec("jt").capabilities.enabled() == [
+            "supports_cod",
+            "supports_labels",
+            "supports_cancel",
+            "supports_webhooks",
+            "supports_tracking",
+            "supports_city_lookup",
+        ]
+
+    @pytest.mark.parametrize("slug", ["mylerz"])
     def test_thin_carriers_declare_narrowly(self, slug):
         """They implement 4 of Bosta's 20 methods — must not claim more.
 

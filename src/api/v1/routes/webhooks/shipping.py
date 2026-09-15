@@ -24,7 +24,6 @@ merchant-visible migration, not a refactor. Point new integrations here.
 See ``docs/Plans/Shipping/SHIPPING-UNIFIED-LAYER.md`` § P1.5.
 """
 
-import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Request
@@ -35,6 +34,7 @@ from src.application.services.carrier_credentials import load_credentials
 from src.application.services.carrier_registry import CarrierSpec, get_spec
 from src.application.services.shipment_status_sync import apply_carrier_status
 from src.core.logging import get_logger
+from src.infrastructure.webhooks.carrier_parsers import decode_webhook_body
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -70,9 +70,9 @@ async def _verify(
             store = await StoreRepository(session).get_by_id(tenant_id)
             if store:
                 creds = await load_credentials(store.settings or {}, spec.slug)
-                secret = (creds or {}).get("webhook_secret")
+                secret = (creds or {}).get(spec.webhook_secret_key)
                 if secret:
-                    service = provider_cls(webhook_secret=secret)
+                    service = provider_cls(**{spec.webhook_secret_key: secret})
                     if service.verify_webhook_signature(raw_body, signature):
                         return True
         except Exception as e:
@@ -110,11 +110,10 @@ async def carrier_webhook(
         return {"status": "ignored", "reason": "unknown_carrier", "carrier": carrier}
 
     raw_body = await request.body()
-    try:
-        data = json.loads(raw_body)
-    except (ValueError, TypeError):
+    data = decode_webhook_body(raw_body)
+    if data is None:
         log.warning("webhook_unparseable_body")
-        return {"status": "ignored", "reason": "invalid_json"}
+        return {"status": "ignored", "reason": "invalid_body"}
 
     event = spec.parse_webhook(data)
     if event is None:

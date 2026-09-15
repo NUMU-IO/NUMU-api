@@ -1,38 +1,78 @@
-"""Auto-create Bosta shipment when order status changes to confirmed/processing.
+"""Auto-create a carrier shipment for new orders.
 
-Subscribes to OrderStatusChangedEvent and creates a shipment automatically
-if the store has Bosta configured with auto_create_shipment enabled.
+Two triggers, one booking path:
+
+* **Order created**: cash-on-delivery orders book straight away, unless the
+  store asks customers to confirm COD orders on WhatsApp (they wait for the
+  tap) or the order still waits for a deposit.
+* **Order confirmed / processing**: everything else, i.e. confirmed COD
+  orders and online-payment orders once the payment lands.
+
+The carrier is the first registry carrier (Bosta first) the store connected
+with auto-create switched on. An order with an active shipment is never
+booked twice.
 """
 
 from datetime import UTC, datetime
+from uuid import UUID
 
 from src.core.entities.shipment import Shipment, ShipmentStatus
-from src.core.events.order_events import OrderStatusChangedEvent
+from src.core.events.order_events import OrderCreatedEvent, OrderStatusChangedEvent
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+COD_METHODS = ("cod", "cash_on_delivery")
+
+
+def auto_create_carrier(store_settings: dict | None) -> str | None:
+    """First carrier with auto-create on that the store can actually book with."""
+    from src.application.services.carrier_credentials import has_credentials
+    from src.application.services.carrier_resolver import SUPPORTED_CARRIERS
+
+    shipping = (store_settings or {}).get("shipping", {})
+    return next(
+        (
+            slug
+            for slug in SUPPORTED_CARRIERS
+            if shipping.get(slug, {}).get("auto_create_shipment")
+            and (
+                shipping.get(slug, {}).get("enabled")
+                or has_credentials(store_settings, slug)
+            )
+        ),
+        None,
+    )
+
+
+def books_on_creation(
+    store_settings: dict | None, payment_method: str | None, status: str
+) -> bool:
+    if (payment_method or "").lower() not in COD_METHODS:
+        return False
+    if status not in ("pending", "confirmed", "processing"):
+        return False
+    notifications = (store_settings or {}).get("whatsapp_notifications", {}) or {}
+    awaits_tap = status == "pending" and notifications.get(
+        "require_order_confirmation", False
+    )
+    return not awaits_tap
+
+
+async def handle_order_created_for_shipment(event: OrderCreatedEvent) -> None:
+    await _auto_create(event.order_id, event.store_id, trigger="created")
+
 
 async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> None:
-    """Auto-create a Bosta shipment when order is confirmed or moves to processing.
+    if event.new_status in ("confirmed", "processing"):
+        await _auto_create(event.order_id, event.store_id, trigger=event.new_status)
 
-    Only triggers if:
-    - new_status is 'confirmed' or 'processing'
-    - Store has Bosta enabled with auto_create_shipment
-    - No active forward shipment already exists for the order
-    """
-    if event.new_status not in ("confirmed", "processing"):
-        return
 
-    log = logger.bind(
-        order_id=str(event.order_id),
-        store_id=str(event.store_id),
-        new_status=event.new_status,
-    )
+async def _auto_create(order_id: UUID, store_id: UUID, trigger: str) -> None:
+    log = logger.bind(order_id=str(order_id), store_id=str(store_id), trigger=trigger)
 
     try:
         from src.application.services.carrier_resolver import (
-            DEFAULT_CARRIER,
             service_for_carrier,
             tracking_url_for,
         )
@@ -52,29 +92,26 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
             order_repo = OrderRepository(session)
             shipment_repo = ShipmentRepository(session)
 
-            store = await store_repo.get_by_id(event.store_id)
+            store = await store_repo.get_by_id(store_id)
             if not store:
                 log.warning("auto_shipment_skip", reason="store_not_found")
                 return
 
-            # Auto-create uses the platform default carrier; check that
-            # carrier is enabled with auto-create. Bound here so the gate
-            # and the shipment below can never check different carriers.
-            # P1 replaces this with the store's configured default.
-            carrier = DEFAULT_CARRIER
-            shipping_settings = (store.settings or {}).get("shipping", {})
-            carrier_settings = shipping_settings.get(carrier, {})
-            if not carrier_settings.get("enabled") or not carrier_settings.get(
-                "auto_create_shipment"
-            ):
+            carrier = auto_create_carrier(store.settings)
+            if carrier is None:
                 return  # Silent skip - auto-create not enabled
 
-            order = await order_repo.get_by_id(event.order_id)
+            order = await order_repo.get_by_id(order_id)
             if not order:
                 log.warning("auto_shipment_skip", reason="order_not_found")
                 return
 
-            # Idempotency: check no active shipment exists
+            status = getattr(order.status, "value", order.status)
+            if trigger == "created" and not books_on_creation(
+                store.settings, order.payment_method, status
+            ):
+                return
+
             existing = await shipment_repo.get_by_order(order.id)
             active = [
                 s
@@ -85,7 +122,6 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
                 log.debug("auto_shipment_skip", reason="active_shipment_exists")
                 return
 
-            # Build addresses
             addr = order.shipping_address
             to_address = ShippingAddress(
                 name=f"{addr.first_name} {addr.last_name}",
@@ -104,12 +140,8 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
             )
             parcel = Parcel(length=30, width=20, height=15, weight=1.0)
 
-            # COD
             cod_amount = 0
-            if order.payment_method and order.payment_method.lower() in (
-                "cod",
-                "cash_on_delivery",
-            ):
+            if (order.payment_method or "").lower() in COD_METHODS:
                 cod_amount = order.total
 
             shipping_service = await service_for_carrier(carrier, store.settings or {})
@@ -150,7 +182,6 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
                 )
                 await shipment_repo.create(failed_shipment)
 
-                # Also record in order metadata
                 order.metadata.setdefault("shipment_errors", []).append({
                     "error": error_msg,
                     "timestamp": datetime.now(UTC).isoformat(),
@@ -159,13 +190,12 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
                 await session.commit()
                 return
 
-            # Create shipment record
             shipment = Shipment(
                 store_id=store.id,
                 tenant_id=store.tenant_id,
                 order_id=order.id,
                 carrier=carrier,
-                carrier_shipment_id=label.tracking_number,
+                carrier_shipment_id=label.carrier_shipment_id or label.tracking_number,
                 tracking_number=label.tracking_number,
                 tracking_url=tracking_url_for(carrier, label.tracking_number),
                 awb_url=label.label_url,
@@ -177,14 +207,13 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
                     {
                         "from": "pending",
                         "to": "created",
-                        "description": "Auto-created on order confirmation",
+                        "description": f"Auto-created ({trigger})",
                         "timestamp": datetime.now(UTC).isoformat(),
                     }
                 ],
             )
             await shipment_repo.create(shipment)
 
-            # Update order with tracking info
             order.tracking_number = label.tracking_number
             order.tracking_url = tracking_url_for(carrier, label.tracking_number)
             order.shipping_method = f"{carrier}_standard"
@@ -194,6 +223,7 @@ async def handle_order_status_for_shipment(event: OrderStatusChangedEvent) -> No
 
             log.info(
                 "auto_shipment_created",
+                carrier=carrier,
                 tracking_number=label.tracking_number,
                 cod_amount=cod_amount,
             )

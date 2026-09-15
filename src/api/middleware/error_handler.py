@@ -45,6 +45,7 @@ from src.core.exceptions.promotion_exceptions import (
     PromotionNotFound,
     PromotionStateError,
 )
+from src.core.interfaces.services.shipping_provider import CarrierApiError
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +306,16 @@ def setup_exception_handlers(app: FastAPI) -> None:
             content=_safe_error_body(
                 "EXTERNAL_SERVICE_ERROR", message, {"detail": str(exc)}
             ),
+        )
+
+    @app.exception_handler(CarrierApiError)
+    async def carrier_api_error_handler(request: Request, exc: CarrierApiError):
+        logger.warning("Carrier API error (%s): %s", exc.carrier, exc)
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY
+            if exc.is_carrier_side
+            else status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=_error_body("CARRIER_ERROR", str(exc)),
         )
 
     # ── offers-v2: promotion-specific domain errors ──────────────────────
