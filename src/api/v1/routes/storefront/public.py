@@ -78,9 +78,11 @@ from src.application.use_cases.customers import (
     RegisterCustomerUseCase,
 )
 from src.application.use_cases.products import ListProductsUseCase
+from src.core.entities.customer import Customer
 from src.core.entities.product import PURCHASABLE_STATUSES
 from src.core.entities.store import StoreStatus
-from src.core.exceptions import EntityNotFoundError
+from src.core.exceptions import EntityNotFoundError, ValidationError
+from src.core.value_objects.email import Email
 from src.infrastructure.cache import (
     MISSING_SENTINEL,
     ProductCacheService,
@@ -1815,6 +1817,78 @@ async def notify_back_in_stock(
     return SuccessResponse(
         data={"status": "subscribed"},
         message="You'll be notified when this product is back in stock.",
+    )
+
+
+NEWSLETTER_TAG = "newsletter"
+
+
+class NewsletterSubscribeRequest(BaseModel):
+    """Body for `POST /newsletter/subscribe`."""
+
+    email: EmailStr = Field(..., max_length=254, description="Subscriber email")
+    # Honeypot: the storefront form hides this input, so only bots fill it.
+    website: str | None = Field(None, max_length=200)
+
+
+@router.post(
+    "/newsletter/subscribe",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Subscribe an email to the store's newsletter",
+    operation_id="subscribe_newsletter",
+)
+async def subscribe_newsletter(
+    store_id: Annotated[UUID, Path(description="Store ID")],
+    body_in: NewsletterSubscribeRequest,
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Record a newsletter signup as a marketing-consenting customer.
+
+    The merchant already exports and segments customers by
+    ``accepts_marketing`` and tags, so a signup is a customer row with
+    ``accepts_marketing=True`` and the ``newsletter`` tag rather than a new
+    table. An existing customer with that email is opted in and tagged.
+
+    The response is identical for new, existing and honeypot-caught emails,
+    so the form never reveals whether an email is already a customer.
+    Per-IP throttling lives in the rate-limit middleware (newsletter tier).
+    """
+    store = await store_repo.get_by_id(store_id)
+    if not store:
+        raise EntityNotFoundError("Store", str(store_id))
+
+    if not body_in.website:
+        try:
+            email = Email(value=body_in.email)
+        except ValueError as exc:
+            # EmailStr accepts a few shapes the customer Email value object
+            # rejects; answer 422 rather than letting it surface as a 500.
+            raise ValidationError("Invalid email address", field="email") from exc
+
+        customer = await customer_repo.get_by_email(store_id, email)
+        if customer is None:
+            # ponytail: two simultaneous first signups for one email can race
+            # the (store, email) insert; the loser 500s. Upsert if it shows up.
+            await customer_repo.create(
+                Customer(
+                    store_id=store_id,
+                    email=email,
+                    first_name="",
+                    last_name="",
+                    accepts_marketing=True,
+                    tags=[NEWSLETTER_TAG],
+                ),
+                tenant_id=getattr(store, "tenant_id", None) or store_id,
+            )
+        elif not customer.accepts_marketing or NEWSLETTER_TAG not in customer.tags:
+            customer.opt_in_marketing()
+            customer.add_tag(NEWSLETTER_TAG)
+            await customer_repo.update(customer)
+
+    return SuccessResponse(
+        data={"status": "subscribed"},
+        message="Subscribed to the newsletter.",
     )
 
 
