@@ -150,19 +150,43 @@ class TestStoreRepository:
         self.mock_session.add.assert_not_called()  # Not called yet
 
     @pytest.mark.asyncio
+    async def test_update_persists_business_hours(self):
+        """update() writes business_hours; it used to be silently dropped."""
+        model = self._create_mock_store_model(business_hours=None)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = model
+        self.mock_session.execute.return_value = mock_result
+        hours = {"sat": {"open": "10:00", "close": "22:00"}}
+        store = Store(
+            id=model.id,
+            owner_id=model.owner_id,
+            name="Test Store",
+            slug="test-store",
+            business_hours=hours,
+        )
+
+        await self.repository.update(store)
+
+        assert model.business_hours == hours
+
+    @pytest.mark.asyncio
     async def test_delete_existing(self):
-        """Test deleting an existing store."""
+        """Test deleting an existing store.
+
+        delete() runs a core DELETE (so Postgres cascades the children) and
+        reports success from the affected row count, not via session.delete.
+        """
         store_id = uuid4()
-        mock_model = self._create_mock_store_model(id=store_id)
 
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_model
+        mock_result.rowcount = 1
         self.mock_session.execute.return_value = mock_result
 
         result = await self.repository.delete(store_id)
 
         assert result is True
-        self.mock_session.delete.assert_called_once_with(mock_model)
+        self.mock_session.execute.assert_awaited_once()
+        self.mock_session.delete.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_delete_not_found(self):
@@ -170,7 +194,7 @@ class TestStoreRepository:
         store_id = uuid4()
 
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_result.rowcount = 0
         self.mock_session.execute.return_value = mock_result
 
         result = await self.repository.delete(store_id)
