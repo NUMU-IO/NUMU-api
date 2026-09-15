@@ -231,3 +231,63 @@ async def test_checkout_config_hides_applepay_when_platform_disabled(monkeypatch
     codes = {m["code"] for m in resp.data["payment_methods"]}
     assert "paymob" in codes
     assert "paymob_applepay" not in codes  # gated off by the platform switch
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("environment", ["staging", "production"])
+async def test_checkout_config_hides_enabled_but_unconfigured_gateway(
+    monkeypatch, environment
+):
+    """A deployed stack never offers a gateway that has no credentials."""
+    from src.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "environment", environment)
+    settings = {
+        "payment": {
+            "paymob": {"enabled": True, "is_configured": False},
+            "instapay": {"enabled": True, "is_configured": True},
+        }
+    }
+    store = _store(settings)
+    resp = await get_public_checkout_config(
+        store_id=store.id, store_repo=_FakeStoreRepo(store)
+    )
+    assert resp.data["enabled_payment_methods"] == ["instapay"]
+    assert {m["code"] for m in resp.data["payment_methods"]} == {"instapay"}
+
+
+@pytest.mark.asyncio
+async def test_checkout_config_previews_unconfigured_gateway_in_development(
+    monkeypatch,
+):
+    from src.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "environment", "development")
+    settings = {"payment": {"paymob": {"enabled": True, "is_configured": False}}}
+    store = _store(settings)
+    resp = await get_public_checkout_config(
+        store_id=store.id, store_repo=_FakeStoreRepo(store)
+    )
+    assert "paymob" in resp.data["enabled_payment_methods"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("environment", ["staging", "production"])
+async def test_payment_methods_hides_enabled_but_unconfigured_gateway(
+    monkeypatch, environment
+):
+    from src.api.v1.routes.storefront.public import get_store_payment_methods
+    from src.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "environment", environment)
+    settings = {
+        "payment": {
+            "paymob": {"enabled": True, "is_configured": False},
+            "instapay": {"enabled": True, "is_configured": True},
+        }
+    }
+    store = _store(settings)
+    resp = await get_store_payment_methods(
+        store_id=store.id, store_repo=_FakeStoreRepo(store), db=None
+    )
+    assert [m["id"] for m in resp.data["methods"]] == ["instapay"]
