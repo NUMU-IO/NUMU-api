@@ -996,6 +996,13 @@ class MarketplaceService:
 
         from src.core.entities.theme import ThemeVersion as _RuntimeThemeVersion
 
+        # theme.json `supports` rides in the version's presets (the marketplace
+        # has no manifest column). Move it back into the runtime manifest,
+        # where StoreThemeRepository reads `supports.section_library`.
+        from src.infrastructure.section_library import split_supports
+
+        presets, supports = split_supports(version.presets)
+
         runtime_version = _RuntimeThemeVersion(
             id=_uuid4_v(),
             theme_id=runtime_theme.id,
@@ -1006,7 +1013,8 @@ class MarketplaceService:
                 "id": marketplace_theme.slug,
                 "name": marketplace_theme.name,
                 "version": version.version_string,
-                "presets": version.presets or {},
+                "presets": presets or {},
+                **({"supports": supports} if supports else {}),
             },
             is_latest=True,
             checksum=version.checksum or "marketplace",
@@ -1082,7 +1090,7 @@ class MarketplaceService:
                 "css_url": version.css_url,
                 "settings_schema": version.settings_schema,
                 "section_schemas": version.section_schemas,
-                "presets": version.presets,
+                "presets": presets,
                 # Carried through so the storefront can verify the bundle it
                 # fetches. Must be refreshed alongside bundle_url — a stale
                 # checksum against a new bundle fails closed and blanks the
@@ -1109,7 +1117,7 @@ class MarketplaceService:
 
             v3 = generate_initial_v3_customization(
                 theme_id=str(runtime_theme.id),
-                presets=version.presets,
+                presets=presets,
                 bundle_url=version.bundle_url,
                 css_url=version.css_url,
                 settings_schema=version.settings_schema,

@@ -622,6 +622,12 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                     extra={"file": fname, "error": str(exc)},
                 )
 
+        # A marketplace version has no manifest column: carry theme.json
+        # `supports` (the section-library opt-in) in presets until activation.
+        from src.infrastructure.section_library import pack_supports
+
+        presets = pack_supports(presets, manifest)
+
         # ── Persist success: pending_review for admin moderation ──────────
         _run_async(
             _update_version_status(

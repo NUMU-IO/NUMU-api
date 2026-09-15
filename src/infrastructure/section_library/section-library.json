@@ -1,0 +1,5976 @@
+{
+  "sdk_version": "0.14.0",
+  "sections": {
+    "lib-before-after": {
+      "type": "lib-before-after",
+      "name": "Before / After",
+      "name_ar": "قبل / بعد",
+      "locales": {
+        "en": {
+          "name": "Before / After"
+        },
+        "ar": {
+          "name": "قبل / بعد"
+        }
+      },
+      "settings": [
+        {
+          "type": "header",
+          "content": "Content",
+          "locales": {
+            "ar": {
+              "content": "المحتوى"
+            }
+          }
+        },
+        {
+          "id": "eyebrow",
+          "type": "text",
+          "label": "Eyebrow",
+          "locales": {
+            "ar": {
+              "label": "نص صغير فوق العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "subtitle",
+          "type": "text",
+          "label": "Subtitle",
+          "locales": {
+            "ar": {
+              "label": "العنوان الفرعي"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Images",
+          "locales": {
+            "ar": {
+              "content": "الصور"
+            }
+          }
+        },
+        {
+          "id": "before_image",
+          "type": "image_picker",
+          "label": "\"Before\" image",
+          "locales": {
+            "ar": {
+              "label": "صورة «قبل»"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "before_label",
+          "type": "text",
+          "label": "\"Before\" label",
+          "locales": {
+            "ar": {
+              "label": "كلمة «قبل»"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "after_image",
+          "type": "image_picker",
+          "label": "\"After\" image",
+          "locales": {
+            "ar": {
+              "label": "صورة «بعد»"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "after_label",
+          "type": "text",
+          "label": "\"After\" label",
+          "locales": {
+            "ar": {
+              "label": "كلمة «بعد»"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Behaviour",
+          "locales": {
+            "ar": {
+              "content": "الحركة"
+            }
+          }
+        },
+        {
+          "id": "initial_position",
+          "type": "range",
+          "label": "Divider start position (%)",
+          "locales": {
+            "ar": {
+              "label": "مكان الفاصل في الأول (%)"
+            }
+          },
+          "default": 50,
+          "min": 5,
+          "max": 95,
+          "step": 5
+        },
+        {
+          "id": "animate_to_center",
+          "type": "checkbox",
+          "label": "Slide the divider in when the section appears",
+          "locales": {
+            "ar": {
+              "label": "حرّك الفاصل أول ما القسم يظهر"
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "show_labels",
+          "type": "checkbox",
+          "label": "Show the before/after labels",
+          "locales": {
+            "ar": {
+              "label": "اظهر كلمتي «قبل» و«بعد»"
+            }
+          },
+          "default": false
+        },
+        {
+          "type": "header",
+          "content": "Layout",
+          "locales": {
+            "ar": {
+              "content": "الشكل"
+            }
+          }
+        },
+        {
+          "id": "full_width",
+          "type": "checkbox",
+          "label": "Full width (edge to edge)",
+          "locales": {
+            "ar": {
+              "label": "بعرض الشاشة كلها"
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "aspect",
+          "type": "select",
+          "label": "Image shape",
+          "locales": {
+            "ar": {
+              "label": "شكل الصورة"
+            }
+          },
+          "default": "3-4",
+          "options": [
+            {
+              "value": "3-4",
+              "label": "3:4 (portrait)",
+              "label_ar": "3:4 (طولي)"
+            },
+            {
+              "value": "2-3",
+              "label": "2:3",
+              "label_ar": "2:3"
+            },
+            {
+              "value": "1-1",
+              "label": "1:1 (square)",
+              "label_ar": "1:1 (مربع)"
+            },
+            {
+              "value": "4-3",
+              "label": "4:3",
+              "label_ar": "4:3"
+            },
+            {
+              "value": "16-9",
+              "label": "16:9 (wide)",
+              "label_ar": "16:9 (عريض)"
+            }
+          ]
+        }
+      ],
+      "presets": [
+        {
+          "name": "Before / After",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Before / After"
+            },
+            "ar": {
+              "name": "قبل / بعد"
+            }
+          },
+          "settings": {
+            "initial_position": 50,
+            "animate_to_center": true,
+            "show_labels": true,
+            "full_width": true,
+            "aspect": "3-4"
+          }
+        }
+      ]
+    },
+    "lib-bundle-builder": {
+      "type": "lib-bundle-builder",
+      "name": "Bundle builder",
+      "name_ar": "كوّن باقتك",
+      "locales": {
+        "en": {
+          "name": "Bundle builder"
+        },
+        "ar": {
+          "name": "كوّن باقتك"
+        }
+      },
+      "settings": [
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "subheading",
+          "type": "text",
+          "label": "Text under the heading",
+          "info": "Leave empty to hide it.",
+          "locales": {
+            "ar": {
+              "label": "الكلام اللي تحت العنوان",
+              "info": "سيبه فاضي لو مش عايزه يظهر."
+            }
+          }
+        },
+        {
+          "id": "pick_count",
+          "type": "range",
+          "label": "How many products the shopper picks",
+          "locales": {
+            "ar": {
+              "label": "عدد المنتجات اللي الزبون يختارها"
+            }
+          },
+          "default": 3,
+          "min": 2,
+          "max": 6,
+          "step": 1
+        },
+        {
+          "type": "header",
+          "content": "Products",
+          "locales": {
+            "en": {
+              "content": "Products"
+            },
+            "ar": {
+              "content": "المنتجات"
+            }
+          }
+        },
+        {
+          "id": "source",
+          "type": "select",
+          "label": "Products to pick from",
+          "info": "Stores with more than 100 products may see some missing from a collection or tag.",
+          "locales": {
+            "ar": {
+              "label": "المنتجات اللي الزبون يختار منها",
+              "info": "لو متجرك فيه أكتر من 100 منتج، ممكن شوية منتجات من التصنيف أو التاج ما يظهروش."
+            }
+          },
+          "default": "collection",
+          "options": [
+            {
+              "value": "collection",
+              "label": "From a collection",
+              "label_ar": "من تصنيف"
+            },
+            {
+              "value": "tag",
+              "label": "With a tag",
+              "label_ar": "بتاج معيّن"
+            },
+            {
+              "value": "product_list",
+              "label": "Products I pick",
+              "label_ar": "منتجات بتختارها بنفسك"
+            }
+          ]
+        },
+        {
+          "id": "collection",
+          "type": "collection",
+          "label": "Collection",
+          "info": "Used when \"From a collection\" is picked.",
+          "locales": {
+            "ar": {
+              "label": "التصنيف",
+              "info": "بيتستخدم لما تختار «من تصنيف»."
+            }
+          }
+        },
+        {
+          "id": "tag",
+          "type": "text",
+          "label": "Tag",
+          "info": "Used when \"With a tag\" is picked.",
+          "locales": {
+            "ar": {
+              "label": "التاج",
+              "info": "بيتستخدم لما تختار «بتاج معيّن»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "product_list",
+          "type": "product_list",
+          "label": "Products",
+          "info": "Used when \"Products I pick\" is picked. Shown in this order.",
+          "locales": {
+            "ar": {
+              "label": "المنتجات",
+              "info": "بيتستخدم لما تختار «منتجات بتختارها بنفسك»، وبتظهر بنفس الترتيب."
+            }
+          }
+        },
+        {
+          "id": "limit",
+          "type": "range",
+          "label": "How many products to show",
+          "locales": {
+            "ar": {
+              "label": "عدد المنتجات اللي تظهر"
+            }
+          },
+          "default": 12,
+          "min": 4,
+          "max": 24,
+          "step": 1
+        },
+        {
+          "type": "header",
+          "content": "Offer price",
+          "locales": {
+            "en": {
+              "content": "Offer price"
+            },
+            "ar": {
+              "content": "سعر العرض"
+            }
+          }
+        },
+        {
+          "type": "paragraph",
+          "content": "This section never makes up a discount. The offer price comes from an automatic \"Any N for a fixed price\" discount with the same number of products, created in Discounts in your dashboard. Without one, shoppers see the regular total.",
+          "locales": {
+            "en": {
+              "content": "This section never makes up a discount. The offer price comes from an automatic \"Any N for a fixed price\" discount with the same number of products, created in Discounts in your dashboard. Without one, shoppers see the regular total."
+            },
+            "ar": {
+              "content": "السكشن ده مش بيعمل خصم من عنده. سعر العرض بييجي من خصم تلقائي «أي عدد بسعر ثابت» بنفس عدد المنتجات، بتعمله من «الخصومات» في لوحة التحكم. من غيره الزبون هيشوف السعر العادي."
+            }
+          }
+        },
+        {
+          "id": "show_offer",
+          "type": "checkbox",
+          "label": "Show the offer price from my discounts",
+          "locales": {
+            "ar": {
+              "label": "اظهر سعر العرض من الخصومات بتاعتي"
+            }
+          },
+          "default": true
+        },
+        {
+          "type": "header",
+          "content": "Layout",
+          "locales": {
+            "en": {
+              "content": "Layout"
+            },
+            "ar": {
+              "content": "الشكل"
+            }
+          }
+        },
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "طريقة العرض"
+            }
+          },
+          "default": "grid",
+          "options": [
+            {
+              "value": "grid",
+              "label": "Grid with the summary below",
+              "label_ar": "شبكة والملخص تحتها"
+            },
+            {
+              "value": "sticky",
+              "label": "Summary that stays in view",
+              "label_ar": "ملخص ثابت قدّام الزبون"
+            }
+          ]
+        },
+        {
+          "id": "button_text",
+          "type": "text",
+          "label": "Button text",
+          "locales": {
+            "ar": {
+              "label": "كلام الزرار"
+            }
+          },
+          "default": ""
+        }
+      ],
+      "presets": [
+        {
+          "name": "Bundle builder",
+          "category": "products",
+          "locales": {
+            "en": {
+              "name": "Bundle builder"
+            },
+            "ar": {
+              "name": "كوّن باقتك"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-collection-tiles": {
+      "type": "lib-collection-tiles",
+      "name": "Shop by category",
+      "name_ar": "تسوّق حسب التصنيف",
+      "locales": {
+        "en": {
+          "name": "Shop by category"
+        },
+        "ar": {
+          "name": "تسوّق حسب التصنيف"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "tiles",
+          "options": [
+            {
+              "value": "tiles",
+              "label": "Tiles — image with the name",
+              "label_ar": "مربعات: صورة وتحتها الاسم"
+            },
+            {
+              "value": "card",
+              "label": "Label cards — name card over the image",
+              "label_ar": "كارت الاسم فوق الصورة"
+            },
+            {
+              "value": "circles",
+              "label": "Circles — round images",
+              "label_ar": "دواير: صور مدوّرة"
+            }
+          ]
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "show_counts",
+          "type": "checkbox",
+          "label": "Show how many products",
+          "info": "Only for your collections, when the count is known.",
+          "locales": {
+            "ar": {
+              "label": "اظهر عدد المنتجات",
+              "info": "للتصنيفات بتاعة متجرك بس، لما العدد يكون معروف."
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "view_all_link",
+          "type": "url",
+          "label": "\"View all\" link",
+          "info": "Leave empty to hide the link.",
+          "locales": {
+            "ar": {
+              "label": "لينك «شوف الكل»",
+              "info": "سيبه فاضي لو مش عايز اللينك يظهر."
+            }
+          },
+          "default": "/collections"
+        },
+        {
+          "id": "source",
+          "type": "select",
+          "label": "Where the tiles come from",
+          "info": "\"Your collections\" updates on its own as you add categories. Choose \"Tiles I add below\" for a curated set with your own photos.",
+          "locales": {
+            "ar": {
+              "label": "المربعات جاية منين",
+              "info": "«تصنيفات متجرك» بتتحدّث لوحدها كل ما تضيف تصنيف. اختار «المربعات اللي تحت» لو عايز مجموعة مختارة بصورك."
+            }
+          },
+          "default": "auto",
+          "options": [
+            {
+              "value": "auto",
+              "label": "Your collections",
+              "label_ar": "تصنيفات متجرك"
+            },
+            {
+              "value": "manual",
+              "label": "Tiles I add below",
+              "label_ar": "المربعات اللي تحت"
+            }
+          ]
+        },
+        {
+          "id": "limit",
+          "type": "range",
+          "label": "How many collections",
+          "locales": {
+            "ar": {
+              "label": "عدد التصنيفات"
+            }
+          },
+          "default": 8,
+          "min": 2,
+          "max": 16,
+          "step": 1
+        },
+        {
+          "id": "columns_desktop",
+          "type": "range",
+          "label": "Tiles per row (desktop)",
+          "info": "Phones always show two per row.",
+          "locales": {
+            "ar": {
+              "label": "عدد المربعات في الصف (كمبيوتر)",
+              "info": "على الموبايل بيبان اتنين في الصف دايمًا."
+            }
+          },
+          "default": 4,
+          "min": 2,
+          "max": 6,
+          "step": 1
+        },
+        {
+          "id": "aspect",
+          "type": "select",
+          "label": "Image shape",
+          "locales": {
+            "ar": {
+              "label": "شكل الصورة"
+            }
+          },
+          "default": "portrait",
+          "options": [
+            {
+              "value": "portrait",
+              "label": "Portrait (3:4)",
+              "label_ar": "طولي (3:4)"
+            },
+            {
+              "value": "square",
+              "label": "Square",
+              "label_ar": "مربع"
+            },
+            {
+              "value": "landscape",
+              "label": "Landscape (4:3)",
+              "label_ar": "عرضي (4:3)"
+            }
+          ]
+        },
+        {
+          "id": "label_position",
+          "type": "select",
+          "label": "Name position",
+          "locales": {
+            "ar": {
+              "label": "مكان الاسم"
+            }
+          },
+          "default": "below",
+          "options": [
+            {
+              "value": "below",
+              "label": "Under the image",
+              "label_ar": "تحت الصورة"
+            },
+            {
+              "value": "overlay",
+              "label": "On the image",
+              "label_ar": "على الصورة"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "type": "tile",
+          "name": "Tile",
+          "name_ar": "مربع",
+          "locales": {
+            "en": {
+              "name": "Tile"
+            },
+            "ar": {
+              "name": "مربع"
+            }
+          },
+          "settings": [
+            {
+              "id": "image",
+              "type": "image_picker",
+              "label": "Image",
+              "locales": {
+                "ar": {
+                  "label": "الصورة"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "label",
+              "type": "text",
+              "label": "Name",
+              "locales": {
+                "ar": {
+                  "label": "الاسم"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "link",
+              "type": "url",
+              "label": "Link",
+              "locales": {
+                "ar": {
+                  "label": "اللينك"
+                }
+              },
+              "default": "/collections"
+            }
+          ]
+        }
+      ],
+      "max_blocks": 12,
+      "presets": [
+        {
+          "name": "Shop by category",
+          "category": "products",
+          "locales": {
+            "en": {
+              "name": "Shop by category"
+            },
+            "ar": {
+              "name": "تسوّق حسب التصنيف"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-countdown": {
+      "type": "lib-countdown",
+      "name": "Offer countdown",
+      "name_ar": "عداد العرض",
+      "locales": {
+        "en": {
+          "name": "Offer countdown"
+        },
+        "ar": {
+          "name": "عداد العرض"
+        }
+      },
+      "settings": [
+        {
+          "type": "header",
+          "content": "Offer",
+          "locales": {
+            "ar": {
+              "content": "العرض"
+            }
+          }
+        },
+        {
+          "id": "ends_at",
+          "type": "text",
+          "label": "Offer ends at",
+          "info": "Date and time in Cairo time, written like 2026-10-01T23:59.",
+          "locales": {
+            "ar": {
+              "label": "العرض بيخلص إمتى",
+              "info": "التاريخ والساعة بتوقيت القاهرة، اكتبهم بالشكل ده: 2026-10-01T23:59"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "text",
+          "type": "textarea",
+          "label": "Text",
+          "locales": {
+            "ar": {
+              "label": "الكلام"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "cta_text",
+          "type": "text",
+          "label": "Button text",
+          "locales": {
+            "ar": {
+              "label": "كلام الزرار"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "cta_link",
+          "type": "url",
+          "label": "Button link",
+          "locales": {
+            "ar": {
+              "label": "لينك الزرار"
+            }
+          },
+          "default": "/products"
+        },
+        {
+          "type": "header",
+          "content": "Look",
+          "locales": {
+            "ar": {
+              "content": "الشكل"
+            }
+          }
+        },
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "band",
+          "options": [
+            {
+              "value": "band",
+              "label": "Full-width band",
+              "label_ar": "شريط بعرض الشاشة"
+            },
+            {
+              "value": "card",
+              "label": "Centred card",
+              "label_ar": "كارت في النص"
+            }
+          ]
+        },
+        {
+          "type": "header",
+          "content": "When the offer ends",
+          "locales": {
+            "ar": {
+              "content": "لما العرض يخلص"
+            }
+          }
+        },
+        {
+          "id": "after_end",
+          "type": "select",
+          "label": "After the end",
+          "locales": {
+            "ar": {
+              "label": "بعد ما يخلص"
+            }
+          },
+          "default": "hide",
+          "options": [
+            {
+              "value": "hide",
+              "label": "Hide the section",
+              "label_ar": "اخفي القسم"
+            },
+            {
+              "value": "message",
+              "label": "Show a message",
+              "label_ar": "اعرض رسالة"
+            }
+          ]
+        },
+        {
+          "id": "ended_text",
+          "type": "text",
+          "label": "Message after the end",
+          "info": "Leave empty for \"This offer has ended\".",
+          "locales": {
+            "ar": {
+              "label": "الرسالة بعد ما يخلص",
+              "info": "سيبها فاضية علشان يظهر «العرض خلص»."
+            }
+          },
+          "default": ""
+        }
+      ],
+      "presets": [
+        {
+          "name": "Offer countdown",
+          "category": "marketing",
+          "locales": {
+            "en": {
+              "name": "Offer countdown"
+            },
+            "ar": {
+              "name": "عداد العرض"
+            }
+          },
+          "settings": {
+            "style": "band",
+            "after_end": "hide",
+            "cta_link": "/products"
+          }
+        }
+      ]
+    },
+    "lib-faq": {
+      "type": "lib-faq",
+      "name": "FAQ",
+      "name_ar": "الأسئلة الشائعة",
+      "locales": {
+        "en": {
+          "name": "FAQ"
+        },
+        "ar": {
+          "name": "الأسئلة الشائعة"
+        }
+      },
+      "limit": 1,
+      "settings": [
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "show_group_headings",
+          "type": "checkbox",
+          "label": "Show group headings",
+          "locales": {
+            "ar": {
+              "label": "اظهر عناوين المجموعات"
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "contact_text",
+          "type": "text",
+          "label": "Closing line",
+          "info": "Shown under the questions, followed by a contact link.",
+          "locales": {
+            "ar": {
+              "label": "سطر في الآخر",
+              "info": "بيظهر تحت الأسئلة وجنبه لينك للتواصل."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "contact_link",
+          "type": "url",
+          "label": "Contact link",
+          "locales": {
+            "ar": {
+              "label": "لينك التواصل"
+            }
+          },
+          "default": "/contact"
+        }
+      ],
+      "blocks": [
+        {
+          "type": "group",
+          "name": "Group",
+          "name_ar": "مجموعة",
+          "locales": {
+            "en": {
+              "name": "Group"
+            },
+            "ar": {
+              "name": "مجموعة"
+            }
+          },
+          "settings": [
+            {
+              "id": "title",
+              "type": "text",
+              "label": "Group heading",
+              "locales": {
+                "ar": {
+                  "label": "عنوان المجموعة"
+                }
+              },
+              "default": ""
+            }
+          ],
+          "blocks": [
+            {
+              "type": "qa",
+              "name": "Question",
+              "name_ar": "سؤال",
+              "locales": {
+                "en": {
+                  "name": "Question"
+                },
+                "ar": {
+                  "name": "سؤال"
+                }
+              },
+              "settings": [
+                {
+                  "id": "question",
+                  "type": "text",
+                  "label": "Question",
+                  "locales": {
+                    "ar": {
+                      "label": "السؤال"
+                    }
+                  },
+                  "default": ""
+                },
+                {
+                  "id": "answer",
+                  "type": "textarea",
+                  "label": "Answer",
+                  "locales": {
+                    "ar": {
+                      "label": "الإجابة"
+                    }
+                  },
+                  "default": ""
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "max_blocks": 8,
+      "presets": [
+        {
+          "name": "FAQ",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "FAQ"
+            },
+            "ar": {
+              "name": "الأسئلة الشائعة"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-gallery": {
+      "type": "lib-gallery",
+      "name": "Photo gallery",
+      "name_ar": "معرض صور",
+      "locales": {
+        "en": {
+          "name": "Photo gallery"
+        },
+        "ar": {
+          "name": "معرض صور"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "grid",
+          "options": [
+            {
+              "value": "grid",
+              "label": "Grid — square tiles, like Instagram",
+              "label_ar": "مربعات زي إنستجرام"
+            },
+            {
+              "value": "looks",
+              "label": "Looks — photos with a name, caption and product link",
+              "label_ar": "لوكات بالاسم والوصف ولينك المنتج"
+            },
+            {
+              "value": "masonry",
+              "label": "Masonry — photos at their own heights",
+              "label_ar": "صور متداخلة بأطوالها الطبيعية"
+            }
+          ]
+        },
+        {
+          "type": "header",
+          "content": "Heading",
+          "locales": {
+            "ar": {
+              "content": "العنوان"
+            }
+          }
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "subtitle",
+          "type": "text",
+          "label": "Subtitle",
+          "locales": {
+            "ar": {
+              "label": "عنوان فرعي"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "handle",
+          "type": "text",
+          "label": "Account handle",
+          "info": "For example @yourbrand. Shown next to the heading.",
+          "locales": {
+            "ar": {
+              "label": "اسم الحساب",
+              "info": "زي ‎@yourbrand. بيظهر جنب العنوان."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "visit_url",
+          "type": "url",
+          "label": "“Follow us” link",
+          "info": "Leave empty to hide the button.",
+          "locales": {
+            "ar": {
+              "label": "لينك «تابعنا»",
+              "info": "سيبه فاضي علشان الزرار يختفي."
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Layout",
+          "locales": {
+            "ar": {
+              "content": "الترتيب"
+            }
+          }
+        },
+        {
+          "id": "columns_desktop",
+          "type": "range",
+          "label": "Columns on desktop",
+          "locales": {
+            "ar": {
+              "label": "عدد الأعمدة على الكمبيوتر"
+            }
+          },
+          "default": 4,
+          "min": 2,
+          "max": 6,
+          "step": 1
+        },
+        {
+          "id": "columns_mobile",
+          "type": "range",
+          "label": "Columns on mobile",
+          "locales": {
+            "ar": {
+              "label": "عدد الأعمدة على الموبايل"
+            }
+          },
+          "default": 2,
+          "min": 1,
+          "max": 3,
+          "step": 1
+        }
+      ],
+      "blocks": [
+        {
+          "type": "photo",
+          "name": "Photo",
+          "name_ar": "صورة",
+          "locales": {
+            "en": {
+              "name": "Photo"
+            },
+            "ar": {
+              "name": "صورة"
+            }
+          },
+          "settings": [
+            {
+              "id": "image",
+              "type": "image_picker",
+              "label": "Image",
+              "info": "A photo shows only when it has an image.",
+              "locales": {
+                "ar": {
+                  "label": "الصورة",
+                  "info": "الصورة مش هتظهر غير لما ترفعها."
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "link",
+              "type": "url",
+              "label": "Photo link",
+              "locales": {
+                "ar": {
+                  "label": "لينك الصورة"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "name",
+              "type": "text",
+              "label": "Name",
+              "info": "Shown in the Looks style only.",
+              "locales": {
+                "ar": {
+                  "label": "الاسم",
+                  "info": "بيظهر في شكل اللوكات بس."
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "caption",
+              "type": "text",
+              "label": "Caption",
+              "info": "Shown in the Looks style only.",
+              "locales": {
+                "ar": {
+                  "label": "الوصف",
+                  "info": "بيظهر في شكل اللوكات بس."
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "product_label",
+              "type": "text",
+              "label": "Product link text",
+              "info": "Leave empty to show “Shop this look”.",
+              "locales": {
+                "ar": {
+                  "label": "كلام لينك المنتج",
+                  "info": "لو سبته فاضي هيظهر «اتسوّق اللوك»."
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "product_link",
+              "type": "url",
+              "label": "Product link",
+              "locales": {
+                "ar": {
+                  "label": "لينك المنتج"
+                }
+              },
+              "default": ""
+            }
+          ]
+        }
+      ],
+      "max_blocks": 24,
+      "presets": [
+        {
+          "name": "Photo gallery",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Photo gallery"
+            },
+            "ar": {
+              "name": "معرض صور"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-hero": {
+      "type": "lib-hero",
+      "name": "Hero",
+      "name_ar": "البانر الرئيسي",
+      "locales": {
+        "en": {
+          "name": "Hero"
+        },
+        "ar": {
+          "name": "البانر الرئيسي"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "full",
+          "options": [
+            {
+              "value": "full",
+              "label": "Full image — text over the photo",
+              "label_ar": "صورة كاملة والكلام فوقها"
+            },
+            {
+              "value": "split",
+              "label": "Split — photo beside a text panel",
+              "label_ar": "نصّين: صورة وجنبها الكلام"
+            },
+            {
+              "value": "slideshow",
+              "label": "Slideshow — several slides that change",
+              "label_ar": "سلايدر: كذا شريحة بيتغيّروا"
+            },
+            {
+              "value": "minimal",
+              "label": "Minimal — big headline, small photo",
+              "label_ar": "بسيط: عنوان كبير وصورة صغيرة"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": "Add slides as blocks. Every style except Slideshow shows the first slide only.",
+          "locales": {
+            "ar": {
+              "content": "ضيف الشرايح من البلوكات. كل الأشكال ما عدا السلايدر بتعرض أول شريحة بس."
+            }
+          }
+        },
+        {
+          "id": "height",
+          "type": "select",
+          "label": "Height",
+          "locales": {
+            "ar": {
+              "label": "الارتفاع"
+            }
+          },
+          "default": "large",
+          "options": [
+            {
+              "value": "medium",
+              "label": "Medium",
+              "label_ar": "متوسط"
+            },
+            {
+              "value": "large",
+              "label": "Large",
+              "label_ar": "كبير"
+            },
+            {
+              "value": "screen",
+              "label": "Full screen",
+              "label_ar": "الشاشة كلها"
+            }
+          ]
+        },
+        {
+          "id": "text_align",
+          "type": "select",
+          "label": "Text alignment",
+          "locales": {
+            "ar": {
+              "label": "محاذاة الكلام"
+            }
+          },
+          "default": "center",
+          "options": [
+            {
+              "value": "start",
+              "label": "Start",
+              "label_ar": "ناحية البداية"
+            },
+            {
+              "value": "center",
+              "label": "Centre",
+              "label_ar": "في النص"
+            },
+            {
+              "value": "end",
+              "label": "End",
+              "label_ar": "ناحية النهاية"
+            }
+          ]
+        },
+        {
+          "id": "overlay_opacity",
+          "type": "range",
+          "label": "Image darkening",
+          "info": "Full image and Slideshow. Makes the text easier to read.",
+          "locales": {
+            "ar": {
+              "label": "تغميق الصورة",
+              "info": "في الصورة الكاملة والسلايدر. بيخلّي الكلام أوضح."
+            }
+          },
+          "default": 30,
+          "min": 0,
+          "max": 80,
+          "step": 5,
+          "unit": "%"
+        },
+        {
+          "type": "header",
+          "content": "Slideshow",
+          "locales": {
+            "ar": {
+              "content": "السلايدر"
+            }
+          }
+        },
+        {
+          "id": "autoplay",
+          "type": "checkbox",
+          "label": "Change slides automatically",
+          "info": "Stops while a shopper hovers or uses the keyboard, and for anyone who turned on reduced motion.",
+          "locales": {
+            "ar": {
+              "label": "الشرايح تتغيّر لوحدها",
+              "info": "بتقف لما حد يعدّي بالماوس أو يستخدم الكيبورد، ولأي حد مشغّل تقليل الحركة على جهازه."
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "interval",
+          "type": "range",
+          "label": "Seconds per slide",
+          "locales": {
+            "ar": {
+              "label": "ثواني كل شريحة"
+            }
+          },
+          "default": 6,
+          "min": 3,
+          "max": 12,
+          "step": 1,
+          "unit": "s"
+        },
+        {
+          "type": "header",
+          "content": "Split",
+          "locales": {
+            "ar": {
+              "content": "شكل النصّين"
+            }
+          }
+        },
+        {
+          "id": "image_side",
+          "type": "select",
+          "label": "Image side",
+          "locales": {
+            "ar": {
+              "label": "مكان الصورة"
+            }
+          },
+          "default": "end",
+          "options": [
+            {
+              "value": "start",
+              "label": "Start",
+              "label_ar": "ناحية البداية"
+            },
+            {
+              "value": "end",
+              "label": "End",
+              "label_ar": "ناحية النهاية"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "type": "slide",
+          "name": "Slide",
+          "name_ar": "شريحة",
+          "locales": {
+            "en": {
+              "name": "Slide"
+            },
+            "ar": {
+              "name": "شريحة"
+            }
+          },
+          "settings": [
+            {
+              "id": "image",
+              "type": "image_picker",
+              "label": "Image (desktop)",
+              "locales": {
+                "ar": {
+                  "label": "الصورة (كمبيوتر)"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "image_mobile",
+              "type": "image_picker",
+              "label": "Image (mobile)",
+              "info": "Optional taller crop for phones.",
+              "locales": {
+                "ar": {
+                  "label": "الصورة (موبايل)",
+                  "info": "اختياري: صورة طولية تناسب شاشة الموبايل."
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "eyebrow",
+              "type": "text",
+              "label": "Small line above the headline",
+              "locales": {
+                "ar": {
+                  "label": "سطر صغير فوق العنوان"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "headline",
+              "type": "text",
+              "label": "Headline",
+              "locales": {
+                "ar": {
+                  "label": "العنوان"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "subheading",
+              "type": "textarea",
+              "label": "Subheading",
+              "locales": {
+                "ar": {
+                  "label": "الكلام تحت العنوان"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "cta_text",
+              "type": "text",
+              "label": "Button text",
+              "locales": {
+                "ar": {
+                  "label": "كلام الزرار"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "cta_link",
+              "type": "url",
+              "label": "Button link",
+              "locales": {
+                "ar": {
+                  "label": "لينك الزرار"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "cta2_text",
+              "type": "text",
+              "label": "Second button text",
+              "locales": {
+                "ar": {
+                  "label": "كلام الزرار التاني"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "cta2_link",
+              "type": "url",
+              "label": "Second button link",
+              "locales": {
+                "ar": {
+                  "label": "لينك الزرار التاني"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "text_color",
+              "type": "select",
+              "label": "Text colour",
+              "info": "Full image and Slideshow. Pick what stays readable on this photo.",
+              "locales": {
+                "ar": {
+                  "label": "لون الكلام",
+                  "info": "في الصورة الكاملة والسلايدر. اختار اللون اللي يبان واضح على الصورة دي."
+                }
+              },
+              "default": "light",
+              "options": [
+                {
+                  "value": "light",
+                  "label": "Light",
+                  "label_ar": "فاتح"
+                },
+                {
+                  "value": "dark",
+                  "label": "Dark",
+                  "label_ar": "غامق"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "max_blocks": 5,
+      "presets": [
+        {
+          "name": "Hero",
+          "category": "hero",
+          "locales": {
+            "en": {
+              "name": "Hero"
+            },
+            "ar": {
+              "name": "البانر الرئيسي"
+            }
+          },
+          "settings": {},
+          "blocks": [
+            {
+              "type": "slide",
+              "settings": {}
+            }
+          ]
+        }
+      ]
+    },
+    "lib-image-text": {
+      "type": "lib-image-text",
+      "name": "Image with text",
+      "name_ar": "صورة وكلام",
+      "locales": {
+        "en": {
+          "name": "Image with text"
+        },
+        "ar": {
+          "name": "صورة وكلام"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "split",
+          "options": [
+            {
+              "value": "split",
+              "label": "Split — image beside the text",
+              "label_ar": "الصورة جنب الكلام"
+            },
+            {
+              "value": "overlay",
+              "label": "Overlay — text on the image",
+              "label_ar": "الكلام فوق الصورة"
+            },
+            {
+              "value": "story",
+              "label": "Story — quote and value cards",
+              "label_ar": "حكاية البراند: اقتباس وكروت"
+            }
+          ]
+        },
+        {
+          "type": "header",
+          "content": "Image",
+          "locales": {
+            "ar": {
+              "content": "الصورة"
+            }
+          }
+        },
+        {
+          "id": "image",
+          "type": "image_picker",
+          "label": "Image",
+          "locales": {
+            "ar": {
+              "label": "الصورة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "image_position",
+          "type": "select",
+          "label": "Image side",
+          "info": "Split style only. On phones the image always sits above the text.",
+          "locales": {
+            "ar": {
+              "label": "مكان الصورة",
+              "info": "للشكل اللي الصورة جنب الكلام بس. على الموبايل الصورة دايمًا فوق الكلام."
+            }
+          },
+          "default": "start",
+          "options": [
+            {
+              "value": "start",
+              "label": "Start side",
+              "label_ar": "ناحية البداية"
+            },
+            {
+              "value": "end",
+              "label": "End side",
+              "label_ar": "ناحية النهاية"
+            }
+          ]
+        },
+        {
+          "id": "overlay_opacity",
+          "type": "range",
+          "label": "Image darkening",
+          "info": "Overlay style only.",
+          "locales": {
+            "ar": {
+              "label": "تغميق الصورة",
+              "info": "للشكل اللي الكلام فوق الصورة بس."
+            }
+          },
+          "default": 35,
+          "min": 0,
+          "max": 70,
+          "step": 5,
+          "unit": "%"
+        },
+        {
+          "type": "header",
+          "content": "Text",
+          "locales": {
+            "ar": {
+              "content": "الكلام"
+            }
+          }
+        },
+        {
+          "id": "eyebrow",
+          "type": "text",
+          "label": "Small line above the title",
+          "locales": {
+            "ar": {
+              "label": "سطر صغير فوق العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "quote",
+          "type": "textarea",
+          "label": "Quote",
+          "locales": {
+            "ar": {
+              "label": "اقتباس"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "body",
+          "type": "textarea",
+          "label": "Text",
+          "locales": {
+            "ar": {
+              "label": "الكلام"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "cta_text",
+          "type": "text",
+          "label": "Button text",
+          "locales": {
+            "ar": {
+              "label": "كلام الزرار"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "cta_link",
+          "type": "url",
+          "label": "Button link",
+          "locales": {
+            "ar": {
+              "label": "لينك الزرار"
+            }
+          },
+          "default": "/products"
+        }
+      ],
+      "blocks": [
+        {
+          "type": "value",
+          "name": "Value card",
+          "name_ar": "كارت",
+          "locales": {
+            "en": {
+              "name": "Value card"
+            },
+            "ar": {
+              "name": "كارت"
+            }
+          },
+          "settings": [
+            {
+              "id": "title",
+              "type": "text",
+              "label": "Title",
+              "locales": {
+                "ar": {
+                  "label": "العنوان"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "text",
+              "type": "textarea",
+              "label": "Text",
+              "locales": {
+                "ar": {
+                  "label": "الكلام"
+                }
+              },
+              "default": ""
+            }
+          ]
+        }
+      ],
+      "max_blocks": 4,
+      "presets": [
+        {
+          "name": "Image with text",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Image with text"
+            },
+            "ar": {
+              "name": "صورة وكلام"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-logo-list": {
+      "type": "lib-logo-list",
+      "name": "Logos",
+      "name_ar": "لوجوهات",
+      "locales": {
+        "en": {
+          "name": "Logos"
+        },
+        "ar": {
+          "name": "لوجوهات"
+        }
+      },
+      "settings": [
+        {
+          "type": "paragraph",
+          "content": "Brands you carry, press that wrote about you, or partners. Upload logos with a transparent background for the cleanest look.",
+          "locales": {
+            "ar": {
+              "content": "البراندات اللي بتبيعها، أو الصحافة اللي كتبت عنك، أو شركاءك. ارفع اللوجوهات بخلفية شفافة علشان تبان أنضف."
+            }
+          }
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "row",
+          "options": [
+            {
+              "value": "row",
+              "label": "Centred row",
+              "label_ar": "صف في النص"
+            },
+            {
+              "value": "grid",
+              "label": "Grid with borders",
+              "label_ar": "شبكة بخطوط"
+            }
+          ]
+        },
+        {
+          "id": "grayscale",
+          "type": "checkbox",
+          "label": "Grey logos, colour on hover",
+          "locales": {
+            "ar": {
+              "label": "لوجوهات رمادي، وتتلوّن لما الماوس يعدّي عليها"
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "logo_height",
+          "type": "range",
+          "label": "Logo height",
+          "locales": {
+            "ar": {
+              "label": "طول اللوجو"
+            }
+          },
+          "default": 40,
+          "min": 24,
+          "max": 96,
+          "step": 4,
+          "unit": "px"
+        }
+      ],
+      "blocks": [
+        {
+          "type": "logo",
+          "name": "Logo",
+          "name_ar": "لوجو",
+          "locales": {
+            "en": {
+              "name": "Logo"
+            },
+            "ar": {
+              "name": "لوجو"
+            }
+          },
+          "settings": [
+            {
+              "id": "image",
+              "type": "image_picker",
+              "label": "Logo image",
+              "locales": {
+                "ar": {
+                  "label": "صورة اللوجو"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "name",
+              "type": "text",
+              "label": "Name",
+              "info": "Read aloud by screen readers.",
+              "locales": {
+                "ar": {
+                  "label": "الاسم",
+                  "info": "بيتقري بصوت عالي لمستخدمي قارئ الشاشة."
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "link",
+              "type": "url",
+              "label": "Link (optional)",
+              "locales": {
+                "ar": {
+                  "label": "لينك (اختياري)"
+                }
+              },
+              "default": ""
+            }
+          ]
+        }
+      ],
+      "max_blocks": 16,
+      "presets": [
+        {
+          "name": "Logos",
+          "category": "marketing",
+          "locales": {
+            "en": {
+              "name": "Logos"
+            },
+            "ar": {
+              "name": "لوجوهات"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-lookbook": {
+      "type": "lib-lookbook",
+      "name": "Lookbook (editorial spread)",
+      "name_ar": "لوك بوك (زي المجلات)",
+      "locales": {
+        "en": {
+          "name": "Lookbook (editorial spread)"
+        },
+        "ar": {
+          "name": "لوك بوك (زي المجلات)"
+        }
+      },
+      "settings": [
+        {
+          "type": "header",
+          "content": "Content",
+          "locales": {
+            "ar": {
+              "content": "المحتوى"
+            }
+          }
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "عنوان القسم"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "intro",
+          "type": "textarea",
+          "label": "Intro text",
+          "locales": {
+            "ar": {
+              "label": "مقدمة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Look 1",
+          "locales": {
+            "ar": {
+              "content": "لوك 1"
+            }
+          }
+        },
+        {
+          "id": "look_1_image",
+          "type": "image_picker",
+          "label": "Image",
+          "info": "A look shows only when it has an image.",
+          "locales": {
+            "ar": {
+              "label": "الصورة",
+              "info": "اللوك مش هيظهر غير لما يكون له صورة."
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "look_1_caption",
+          "type": "textarea",
+          "label": "Caption",
+          "locales": {
+            "ar": {
+              "label": "الكلام تحت الصورة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_1_link",
+          "type": "url",
+          "label": "Link",
+          "locales": {
+            "ar": {
+              "label": "اللينك"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_1_link_label",
+          "type": "text",
+          "label": "Link text",
+          "info": "Leave empty to show “Shop the look”.",
+          "locales": {
+            "ar": {
+              "label": "كلام اللينك",
+              "info": "لو سبته فاضي هيظهر «اتسوّق اللوك»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Look 2",
+          "locales": {
+            "ar": {
+              "content": "لوك 2"
+            }
+          }
+        },
+        {
+          "id": "look_2_image",
+          "type": "image_picker",
+          "label": "Image",
+          "info": "A look shows only when it has an image.",
+          "locales": {
+            "ar": {
+              "label": "الصورة",
+              "info": "اللوك مش هيظهر غير لما يكون له صورة."
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "look_2_caption",
+          "type": "textarea",
+          "label": "Caption",
+          "locales": {
+            "ar": {
+              "label": "الكلام تحت الصورة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_2_link",
+          "type": "url",
+          "label": "Link",
+          "locales": {
+            "ar": {
+              "label": "اللينك"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_2_link_label",
+          "type": "text",
+          "label": "Link text",
+          "info": "Leave empty to show “Shop the look”.",
+          "locales": {
+            "ar": {
+              "label": "كلام اللينك",
+              "info": "لو سبته فاضي هيظهر «اتسوّق اللوك»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Look 3",
+          "locales": {
+            "ar": {
+              "content": "لوك 3"
+            }
+          }
+        },
+        {
+          "id": "look_3_image",
+          "type": "image_picker",
+          "label": "Image",
+          "info": "A look shows only when it has an image.",
+          "locales": {
+            "ar": {
+              "label": "الصورة",
+              "info": "اللوك مش هيظهر غير لما يكون له صورة."
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "look_3_caption",
+          "type": "textarea",
+          "label": "Caption",
+          "locales": {
+            "ar": {
+              "label": "الكلام تحت الصورة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_3_link",
+          "type": "url",
+          "label": "Link",
+          "locales": {
+            "ar": {
+              "label": "اللينك"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_3_link_label",
+          "type": "text",
+          "label": "Link text",
+          "info": "Leave empty to show “Shop the look”.",
+          "locales": {
+            "ar": {
+              "label": "كلام اللينك",
+              "info": "لو سبته فاضي هيظهر «اتسوّق اللوك»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Look 4",
+          "locales": {
+            "ar": {
+              "content": "لوك 4"
+            }
+          }
+        },
+        {
+          "id": "look_4_image",
+          "type": "image_picker",
+          "label": "Image",
+          "info": "A look shows only when it has an image.",
+          "locales": {
+            "ar": {
+              "label": "الصورة",
+              "info": "اللوك مش هيظهر غير لما يكون له صورة."
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "look_4_caption",
+          "type": "textarea",
+          "label": "Caption",
+          "locales": {
+            "ar": {
+              "label": "الكلام تحت الصورة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_4_link",
+          "type": "url",
+          "label": "Link",
+          "locales": {
+            "ar": {
+              "label": "اللينك"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_4_link_label",
+          "type": "text",
+          "label": "Link text",
+          "info": "Leave empty to show “Shop the look”.",
+          "locales": {
+            "ar": {
+              "label": "كلام اللينك",
+              "info": "لو سبته فاضي هيظهر «اتسوّق اللوك»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Look 5",
+          "locales": {
+            "ar": {
+              "content": "لوك 5"
+            }
+          }
+        },
+        {
+          "id": "look_5_image",
+          "type": "image_picker",
+          "label": "Image",
+          "info": "A look shows only when it has an image.",
+          "locales": {
+            "ar": {
+              "label": "الصورة",
+              "info": "اللوك مش هيظهر غير لما يكون له صورة."
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "look_5_caption",
+          "type": "textarea",
+          "label": "Caption",
+          "locales": {
+            "ar": {
+              "label": "الكلام تحت الصورة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_5_link",
+          "type": "url",
+          "label": "Link",
+          "locales": {
+            "ar": {
+              "label": "اللينك"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_5_link_label",
+          "type": "text",
+          "label": "Link text",
+          "info": "Leave empty to show “Shop the look”.",
+          "locales": {
+            "ar": {
+              "label": "كلام اللينك",
+              "info": "لو سبته فاضي هيظهر «اتسوّق اللوك»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Look 6",
+          "locales": {
+            "ar": {
+              "content": "لوك 6"
+            }
+          }
+        },
+        {
+          "id": "look_6_image",
+          "type": "image_picker",
+          "label": "Image",
+          "info": "A look shows only when it has an image.",
+          "locales": {
+            "ar": {
+              "label": "الصورة",
+              "info": "اللوك مش هيظهر غير لما يكون له صورة."
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "look_6_caption",
+          "type": "textarea",
+          "label": "Caption",
+          "locales": {
+            "ar": {
+              "label": "الكلام تحت الصورة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_6_link",
+          "type": "url",
+          "label": "Link",
+          "locales": {
+            "ar": {
+              "label": "اللينك"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "look_6_link_label",
+          "type": "text",
+          "label": "Link text",
+          "info": "Leave empty to show “Shop the look”.",
+          "locales": {
+            "ar": {
+              "label": "كلام اللينك",
+              "info": "لو سبته فاضي هيظهر «اتسوّق اللوك»."
+            }
+          },
+          "default": ""
+        }
+      ],
+      "presets": [
+        {
+          "name": "Lookbook",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Lookbook"
+            },
+            "ar": {
+              "name": "لوك بوك"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-made-to-order": {
+      "type": "lib-made-to-order",
+      "name": "Made to order",
+      "name_ar": "تفصيل حسب الطلب",
+      "locales": {
+        "en": {
+          "name": "Made to order"
+        },
+        "ar": {
+          "name": "تفصيل حسب الطلب"
+        }
+      },
+      "settings": [
+        {
+          "type": "paragraph",
+          "content": "For pieces made after the order: say how long it takes, what can be personalised, and let customers ask you on WhatsApp.",
+          "locales": {
+            "ar": {
+              "content": "للقطع اللي بتتعمل بعد الطلب: قول بتاخد قد إيه، وإيه اللي ينفع يتخصّص، وخلّي العميل يسألك على واتساب."
+            }
+          }
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "lead_time_text",
+          "type": "textarea",
+          "label": "Lead time",
+          "info": "How long a piece takes before it ships.",
+          "locales": {
+            "ar": {
+              "label": "مدة التجهيز",
+              "info": "القطعة بتاخد قد إيه لحد ما تتشحن."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "personalization_text",
+          "type": "textarea",
+          "label": "Personalisation",
+          "info": "What customers can change: a name, size, colour…",
+          "locales": {
+            "ar": {
+              "label": "التخصيص",
+              "info": "العميل يقدر يغيّر إيه: اسم، مقاس، لون…"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "note",
+          "type": "textarea",
+          "label": "Note",
+          "locales": {
+            "ar": {
+              "label": "ملاحظة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "WhatsApp",
+          "locales": {
+            "ar": {
+              "content": "واتساب"
+            }
+          }
+        },
+        {
+          "id": "whatsapp_number",
+          "type": "text",
+          "label": "WhatsApp number",
+          "info": "For example 01012345678. The button shows only when the number is valid.",
+          "locales": {
+            "ar": {
+              "label": "رقم الواتساب",
+              "info": "مثلًا 01012345678. الزرار بيظهر بس لما الرقم يكون صح."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "button_label",
+          "type": "text",
+          "label": "Button text",
+          "locales": {
+            "ar": {
+              "label": "كلام الزرار"
+            }
+          },
+          "default": ""
+        }
+      ],
+      "presets": [
+        {
+          "name": "Made to order",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Made to order"
+            },
+            "ar": {
+              "name": "تفصيل حسب الطلب"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-marquee": {
+      "type": "lib-marquee",
+      "name": "Scrolling text",
+      "name_ar": "شريط كلام متحرك",
+      "locales": {
+        "en": {
+          "name": "Scrolling text"
+        },
+        "ar": {
+          "name": "شريط كلام متحرك"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "band",
+          "options": [
+            {
+              "value": "band",
+              "label": "Band — short lines on a coloured strip",
+              "label_ar": "شريط ملوّن بجمل قصيرة"
+            },
+            {
+              "value": "statement",
+              "label": "Statement — one big quiet sentence",
+              "label_ar": "جملة واحدة كبيرة وهادية"
+            },
+            {
+              "value": "tilted",
+              "label": "Tilted tape — bold and playful",
+              "label_ar": "شريط مايل وجريء"
+            }
+          ]
+        },
+        {
+          "type": "header",
+          "content": "Text",
+          "locales": {
+            "ar": {
+              "content": "الكلام"
+            }
+          }
+        },
+        {
+          "id": "item_1",
+          "type": "text",
+          "label": "Line 1",
+          "locales": {
+            "ar": {
+              "label": "السطر 1"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_2",
+          "type": "text",
+          "label": "Line 2",
+          "locales": {
+            "ar": {
+              "label": "السطر 2"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_3",
+          "type": "text",
+          "label": "Line 3",
+          "locales": {
+            "ar": {
+              "label": "السطر 3"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_4",
+          "type": "text",
+          "label": "Line 4",
+          "locales": {
+            "ar": {
+              "label": "السطر 4"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_5",
+          "type": "text",
+          "label": "Line 5",
+          "locales": {
+            "ar": {
+              "label": "السطر 5"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_6",
+          "type": "text",
+          "label": "Line 6",
+          "locales": {
+            "ar": {
+              "label": "السطر 6"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "separator",
+          "type": "select",
+          "label": "Between lines",
+          "locales": {
+            "ar": {
+              "label": "الفاصل بين الجمل"
+            }
+          },
+          "default": "dot",
+          "options": [
+            {
+              "value": "dot",
+              "label": "•",
+              "label_ar": "•"
+            },
+            {
+              "value": "star",
+              "label": "★",
+              "label_ar": "★"
+            },
+            {
+              "value": "diamond",
+              "label": "◆",
+              "label_ar": "◆"
+            },
+            {
+              "value": "slash",
+              "label": "/",
+              "label_ar": "/"
+            },
+            {
+              "value": "dash",
+              "label": "—",
+              "label_ar": "—"
+            },
+            {
+              "value": "none",
+              "label": "Nothing",
+              "label_ar": "من غير فاصل"
+            }
+          ]
+        },
+        {
+          "id": "link_url",
+          "type": "url",
+          "label": "Link (optional)",
+          "locales": {
+            "ar": {
+              "label": "لينك (اختياري)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Look",
+          "locales": {
+            "ar": {
+              "content": "الشكل"
+            }
+          }
+        },
+        {
+          "id": "color_scheme",
+          "type": "select",
+          "label": "Colours",
+          "info": "Uses your theme's colours.",
+          "locales": {
+            "ar": {
+              "label": "الألوان",
+              "info": "بياخد ألوان الثيم بتاعك."
+            }
+          },
+          "default": "accent",
+          "options": [
+            {
+              "value": "accent",
+              "label": "Accent strip",
+              "label_ar": "شريط بلون الثيم المميز"
+            },
+            {
+              "value": "ink",
+              "label": "Dark strip",
+              "label_ar": "شريط غامق"
+            },
+            {
+              "value": "light",
+              "label": "Light strip",
+              "label_ar": "شريط فاتح"
+            },
+            {
+              "value": "none",
+              "label": "No background",
+              "label_ar": "من غير خلفية"
+            }
+          ]
+        },
+        {
+          "id": "size",
+          "type": "select",
+          "label": "Text size",
+          "locales": {
+            "ar": {
+              "label": "حجم الكلام"
+            }
+          },
+          "default": "sm",
+          "options": [
+            {
+              "value": "sm",
+              "label": "Small",
+              "label_ar": "صغير"
+            },
+            {
+              "value": "md",
+              "label": "Medium",
+              "label_ar": "متوسط"
+            },
+            {
+              "value": "lg",
+              "label": "Large",
+              "label_ar": "كبير"
+            },
+            {
+              "value": "xl",
+              "label": "Extra large",
+              "label_ar": "كبير جدًا"
+            }
+          ]
+        },
+        {
+          "id": "show_borders",
+          "type": "checkbox",
+          "label": "Lines above and below",
+          "locales": {
+            "ar": {
+              "label": "خط فوق وتحت"
+            }
+          },
+          "default": false
+        },
+        {
+          "id": "padding_y",
+          "type": "range",
+          "label": "Height padding",
+          "locales": {
+            "ar": {
+              "label": "المسافة فوق وتحت"
+            }
+          },
+          "default": 12,
+          "min": 0,
+          "max": 64,
+          "step": 2,
+          "unit": "px"
+        },
+        {
+          "type": "header",
+          "content": "Motion",
+          "locales": {
+            "ar": {
+              "content": "الحركة"
+            }
+          }
+        },
+        {
+          "id": "direction",
+          "type": "select",
+          "label": "Direction",
+          "locales": {
+            "ar": {
+              "label": "الاتجاه"
+            }
+          },
+          "default": "left",
+          "options": [
+            {
+              "value": "left",
+              "label": "To the left",
+              "label_ar": "ناحية الشمال"
+            },
+            {
+              "value": "right",
+              "label": "To the right",
+              "label_ar": "ناحية اليمين"
+            }
+          ]
+        },
+        {
+          "id": "speed_seconds",
+          "type": "range",
+          "label": "One loop takes",
+          "info": "Higher is slower.",
+          "locales": {
+            "ar": {
+              "label": "اللفة الواحدة بتاخد",
+              "info": "الرقم الأكبر أبطأ."
+            }
+          },
+          "default": 30,
+          "min": 5,
+          "max": 120,
+          "step": 5,
+          "unit": "s"
+        },
+        {
+          "id": "pause_on_hover",
+          "type": "checkbox",
+          "label": "Pause when hovered",
+          "locales": {
+            "ar": {
+              "label": "يقف لما الماوس يعدّي عليه"
+            }
+          },
+          "default": true
+        }
+      ],
+      "presets": [
+        {
+          "name": "Scrolling text",
+          "category": "marketing",
+          "locales": {
+            "en": {
+              "name": "Scrolling text"
+            },
+            "ar": {
+              "name": "شريط كلام متحرك"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-materials-care": {
+      "type": "lib-materials-care",
+      "name": "Materials & care",
+      "name_ar": "الخامات والعناية",
+      "locales": {
+        "en": {
+          "name": "Materials & care"
+        },
+        "ar": {
+          "name": "الخامات والعناية"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "list",
+          "options": [
+            {
+              "value": "list",
+              "label": "List — one row under another",
+              "label_ar": "ليستة — صف تحت التاني"
+            },
+            {
+              "value": "columns",
+              "label": "Columns — cards in two columns",
+              "label_ar": "أعمدة — كروت في عمودين"
+            }
+          ]
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "guarantee_text",
+          "type": "textarea",
+          "label": "Guarantee note",
+          "info": "Shown highlighted under the rows.",
+          "locales": {
+            "ar": {
+              "label": "ملحوظة الضمان",
+              "info": "بتظهر مميزة تحت الصفوف."
+            }
+          },
+          "default": ""
+        }
+      ],
+      "blocks": [
+        {
+          "type": "row",
+          "name": "Row",
+          "name_ar": "صف",
+          "locales": {
+            "en": {
+              "name": "Row"
+            },
+            "ar": {
+              "name": "صف"
+            }
+          },
+          "limit": 12,
+          "settings": [
+            {
+              "id": "term",
+              "type": "text",
+              "label": "Title",
+              "info": "e.g. Fabric, Washing",
+              "locales": {
+                "ar": {
+                  "label": "العنوان",
+                  "info": "زي: الخامة، الغسيل"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "description",
+              "type": "textarea",
+              "label": "Description",
+              "locales": {
+                "ar": {
+                  "label": "الوصف"
+                }
+              },
+              "default": ""
+            }
+          ]
+        }
+      ],
+      "max_blocks": 12,
+      "presets": [
+        {
+          "name": "Materials & care",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Materials & care"
+            },
+            "ar": {
+              "name": "الخامات والعناية"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-newsletter": {
+      "type": "lib-newsletter",
+      "name": "Newsletter signup",
+      "name_ar": "اشتراك بالإيميل",
+      "locales": {
+        "en": {
+          "name": "Newsletter signup"
+        },
+        "ar": {
+          "name": "اشتراك بالإيميل"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "centered",
+          "options": [
+            {
+              "value": "centered",
+              "label": "Centred — heading over the form",
+              "label_ar": "في النص: عنوان وتحته الفورم"
+            },
+            {
+              "value": "card",
+              "label": "Card — a tinted panel",
+              "label_ar": "كارت ملوّن"
+            },
+            {
+              "value": "split",
+              "label": "Split — an image beside the form",
+              "label_ar": "صورة وجنبها الفورم"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": "Subscribers are saved to Customers with the \"newsletter\" tag and marketing consent, so you can export them or send them offers.",
+          "locales": {
+            "ar": {
+              "content": "المشتركين بيتسجلوا في صفحة العملاء بتاج «newsletter» وموافقين يوصلهم تسويق، فتقدر تصدّرهم أو تبعتلهم عروض."
+            }
+          }
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "info": "Leave empty to hide.",
+          "locales": {
+            "ar": {
+              "label": "العنوان",
+              "info": "سيبه فاضي علشان يختفي."
+            }
+          }
+        },
+        {
+          "id": "text",
+          "type": "textarea",
+          "label": "Text",
+          "info": "Leave empty to hide.",
+          "locales": {
+            "ar": {
+              "label": "الكلام تحت العنوان",
+              "info": "سيبه فاضي علشان يختفي."
+            }
+          }
+        },
+        {
+          "id": "placeholder",
+          "type": "text",
+          "label": "Email field hint",
+          "locales": {
+            "ar": {
+              "label": "الكلام جوه خانة الإيميل"
+            }
+          }
+        },
+        {
+          "id": "button_text",
+          "type": "text",
+          "label": "Button text",
+          "locales": {
+            "ar": {
+              "label": "كلام الزرار"
+            }
+          }
+        },
+        {
+          "id": "success_text",
+          "type": "text",
+          "label": "Thank-you message",
+          "locales": {
+            "ar": {
+              "label": "رسالة الشكر بعد الاشتراك"
+            }
+          }
+        },
+        {
+          "id": "note",
+          "type": "text",
+          "label": "Small print under the form",
+          "info": "e.g. \"No spam. Unsubscribe any time.\"",
+          "locales": {
+            "ar": {
+              "label": "سطر صغير تحت الفورم",
+              "info": "مثلًا «مش هنزعجك، وتقدر تلغي في أي وقت»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Split style",
+          "locales": {
+            "ar": {
+              "content": "شكل الصورة والفورم"
+            }
+          }
+        },
+        {
+          "id": "image",
+          "type": "image_picker",
+          "label": "Image",
+          "locales": {
+            "ar": {
+              "label": "الصورة"
+            }
+          },
+          "default": ""
+        }
+      ],
+      "presets": [
+        {
+          "name": "Newsletter signup",
+          "category": "marketing",
+          "locales": {
+            "en": {
+              "name": "Newsletter signup"
+            },
+            "ar": {
+              "name": "اشتراك بالإيميل"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-process": {
+      "type": "lib-process",
+      "name": "Process steps",
+      "name_ar": "خطوات الشغل",
+      "locales": {
+        "en": {
+          "name": "Process steps"
+        },
+        "ar": {
+          "name": "خطوات الشغل"
+        }
+      },
+      "settings": [
+        {
+          "type": "paragraph",
+          "content": "Up to five numbered steps. A step shows once it has a title or a description.",
+          "locales": {
+            "ar": {
+              "content": "لحد خمس خطوات مترقّمة. الخطوة بتظهر أول ما يكون ليها عنوان أو وصف."
+            }
+          }
+        },
+        {
+          "type": "header",
+          "content": "Content",
+          "locales": {
+            "ar": {
+              "content": "المحتوى"
+            }
+          }
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "عنوان القسم"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "intro",
+          "type": "textarea",
+          "label": "Intro",
+          "locales": {
+            "ar": {
+              "label": "مقدمة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Step 1",
+          "locales": {
+            "ar": {
+              "content": "الخطوة 1"
+            }
+          }
+        },
+        {
+          "id": "step_1_title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_1_text",
+          "type": "textarea",
+          "label": "Description",
+          "locales": {
+            "ar": {
+              "label": "الوصف"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_1_image",
+          "type": "image_picker",
+          "label": "Photo (optional)",
+          "locales": {
+            "ar": {
+              "label": "صورة (اختياري)"
+            }
+          },
+          "aspect_ratio": "7/5",
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Step 2",
+          "locales": {
+            "ar": {
+              "content": "الخطوة 2"
+            }
+          }
+        },
+        {
+          "id": "step_2_title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_2_text",
+          "type": "textarea",
+          "label": "Description",
+          "locales": {
+            "ar": {
+              "label": "الوصف"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_2_image",
+          "type": "image_picker",
+          "label": "Photo (optional)",
+          "locales": {
+            "ar": {
+              "label": "صورة (اختياري)"
+            }
+          },
+          "aspect_ratio": "7/5",
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Step 3",
+          "locales": {
+            "ar": {
+              "content": "الخطوة 3"
+            }
+          }
+        },
+        {
+          "id": "step_3_title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_3_text",
+          "type": "textarea",
+          "label": "Description",
+          "locales": {
+            "ar": {
+              "label": "الوصف"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_3_image",
+          "type": "image_picker",
+          "label": "Photo (optional)",
+          "locales": {
+            "ar": {
+              "label": "صورة (اختياري)"
+            }
+          },
+          "aspect_ratio": "7/5",
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Step 4",
+          "locales": {
+            "ar": {
+              "content": "الخطوة 4"
+            }
+          }
+        },
+        {
+          "id": "step_4_title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_4_text",
+          "type": "textarea",
+          "label": "Description",
+          "locales": {
+            "ar": {
+              "label": "الوصف"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_4_image",
+          "type": "image_picker",
+          "label": "Photo (optional)",
+          "locales": {
+            "ar": {
+              "label": "صورة (اختياري)"
+            }
+          },
+          "aspect_ratio": "7/5",
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Step 5",
+          "locales": {
+            "ar": {
+              "content": "الخطوة 5"
+            }
+          }
+        },
+        {
+          "id": "step_5_title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_5_text",
+          "type": "textarea",
+          "label": "Description",
+          "locales": {
+            "ar": {
+              "label": "الوصف"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "step_5_image",
+          "type": "image_picker",
+          "label": "Photo (optional)",
+          "locales": {
+            "ar": {
+              "label": "صورة (اختياري)"
+            }
+          },
+          "aspect_ratio": "7/5",
+          "default": ""
+        }
+      ],
+      "presets": [
+        {
+          "name": "Process steps",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Process steps"
+            },
+            "ar": {
+              "name": "خطوات الشغل"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-product-rail": {
+      "type": "lib-product-rail",
+      "name": "Products",
+      "name_ar": "منتجات",
+      "locales": {
+        "en": {
+          "name": "Products"
+        },
+        "ar": {
+          "name": "منتجات"
+        }
+      },
+      "settings": [
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "subheading",
+          "type": "text",
+          "label": "Text under the heading",
+          "locales": {
+            "ar": {
+              "label": "الكلام اللي تحت العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Products",
+          "locales": {
+            "en": {
+              "content": "Products"
+            },
+            "ar": {
+              "content": "المنتجات"
+            }
+          }
+        },
+        {
+          "id": "source",
+          "type": "select",
+          "label": "Which products",
+          "info": "Stores with more than 100 products may see some missing from a collection or tag.",
+          "locales": {
+            "ar": {
+              "label": "المنتجات اللي تظهر",
+              "info": "لو متجرك فيه أكتر من 100 منتج، ممكن شوية منتجات من التصنيف أو التاج ما يظهروش."
+            }
+          },
+          "default": "newest",
+          "options": [
+            {
+              "value": "newest",
+              "label": "Newest",
+              "label_ar": "الأحدث"
+            },
+            {
+              "value": "collection",
+              "label": "From a collection",
+              "label_ar": "من تصنيف"
+            },
+            {
+              "value": "tag",
+              "label": "With a tag",
+              "label_ar": "بتاج معيّن"
+            },
+            {
+              "value": "product_list",
+              "label": "Products I pick",
+              "label_ar": "منتجات بتختارها بنفسك"
+            }
+          ]
+        },
+        {
+          "id": "collection",
+          "type": "collection",
+          "label": "Collection",
+          "info": "Used when \"From a collection\" is picked.",
+          "locales": {
+            "ar": {
+              "label": "التصنيف",
+              "info": "بيتستخدم لما تختار «من تصنيف»."
+            }
+          }
+        },
+        {
+          "id": "tag",
+          "type": "text",
+          "label": "Tag",
+          "info": "Used when \"With a tag\" is picked.",
+          "locales": {
+            "ar": {
+              "label": "التاج",
+              "info": "بيتستخدم لما تختار «بتاج معيّن»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "product_list",
+          "type": "product_list",
+          "label": "Products",
+          "info": "Used when \"Products I pick\" is picked. Shown in this order.",
+          "locales": {
+            "ar": {
+              "label": "المنتجات",
+              "info": "بيتستخدم لما تختار «منتجات بتختارها بنفسك»، وبتظهر بنفس الترتيب."
+            }
+          }
+        },
+        {
+          "id": "limit",
+          "type": "range",
+          "label": "How many products",
+          "locales": {
+            "ar": {
+              "label": "عدد المنتجات"
+            }
+          },
+          "default": 8,
+          "min": 2,
+          "max": 24,
+          "step": 1
+        },
+        {
+          "type": "header",
+          "content": "Layout",
+          "locales": {
+            "en": {
+              "content": "Layout"
+            },
+            "ar": {
+              "content": "الشكل"
+            }
+          }
+        },
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "طريقة العرض"
+            }
+          },
+          "default": "rail",
+          "options": [
+            {
+              "value": "rail",
+              "label": "Rail — scrolls sideways",
+              "label_ar": "شريط بيتحرّك بالعرض"
+            },
+            {
+              "value": "grid",
+              "label": "Grid",
+              "label_ar": "شبكة"
+            }
+          ]
+        },
+        {
+          "id": "columns_desktop",
+          "type": "range",
+          "label": "Products per row (desktop)",
+          "locales": {
+            "ar": {
+              "label": "عدد المنتجات في الصف (كمبيوتر)"
+            }
+          },
+          "default": 4,
+          "min": 2,
+          "max": 6,
+          "step": 1
+        },
+        {
+          "id": "columns_mobile",
+          "type": "range",
+          "label": "Products per row (phone)",
+          "locales": {
+            "ar": {
+              "label": "عدد المنتجات في الصف (موبايل)"
+            }
+          },
+          "default": 2,
+          "min": 1,
+          "max": 2,
+          "step": 1
+        },
+        {
+          "id": "image_ratio",
+          "type": "select",
+          "label": "Image shape",
+          "locales": {
+            "ar": {
+              "label": "شكل الصورة"
+            }
+          },
+          "default": "3-4",
+          "options": [
+            {
+              "value": "3-4",
+              "label": "Portrait (3:4)",
+              "label_ar": "طولي (3:4)"
+            },
+            {
+              "value": "1-1",
+              "label": "Square (1:1)",
+              "label_ar": "مربع (1:1)"
+            },
+            {
+              "value": "4-5",
+              "label": "Portrait (4:5)",
+              "label_ar": "طولي (4:5)"
+            }
+          ]
+        },
+        {
+          "id": "show_quick_add",
+          "type": "checkbox",
+          "label": "Show \"Add to bag\" button",
+          "locales": {
+            "ar": {
+              "label": "اظهر زرار «أضف للسلة»"
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "show_discount_badge",
+          "type": "checkbox",
+          "label": "Show discount percentage",
+          "locales": {
+            "ar": {
+              "label": "اظهر نسبة الخصم"
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "view_all_label",
+          "type": "text",
+          "label": "\"View all\" text",
+          "locales": {
+            "ar": {
+              "label": "كلام لينك «شوف الكل»"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "view_all_link",
+          "type": "url",
+          "label": "\"View all\" link",
+          "info": "Leave empty to hide the link.",
+          "locales": {
+            "ar": {
+              "label": "لينك «شوف الكل»",
+              "info": "سيبه فاضي لو مش عايز اللينك يظهر."
+            }
+          },
+          "default": "/products"
+        }
+      ],
+      "presets": [
+        {
+          "name": "Products",
+          "category": "products",
+          "locales": {
+            "en": {
+              "name": "Products"
+            },
+            "ar": {
+              "name": "منتجات"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-promo-banner": {
+      "type": "lib-promo-banner",
+      "name": "Promo banner",
+      "name_ar": "بانر إعلاني",
+      "locales": {
+        "en": {
+          "name": "Promo banner"
+        },
+        "ar": {
+          "name": "بانر إعلاني"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "photo",
+          "options": [
+            {
+              "value": "photo",
+              "label": "Photo — one wide image, little text",
+              "label_ar": "صورة عريضة وكلام قليل"
+            },
+            {
+              "value": "split",
+              "label": "Offer card — badge, headline and image side by side",
+              "label_ar": "كارت عرض: شارة وعنوان وصورة جنب بعض"
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": "Photo: one wide photograph, edge to edge — the less on top of it, the better. Offer card: a clear offer with a button.",
+          "locales": {
+            "ar": {
+              "content": "الصورة: صورة واحدة عريضة من الطرف للطرف، وكل ما تحط عليها حاجات أقل كل ما تبان أحلى. كارت العرض: عرض واضح وجنبه زرار."
+            }
+          }
+        },
+        {
+          "id": "image",
+          "type": "image_picker",
+          "label": "Image (desktop)",
+          "locales": {
+            "ar": {
+              "label": "الصورة (كمبيوتر)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "image_mobile",
+          "type": "image_picker",
+          "label": "Image (mobile)",
+          "info": "Optional taller crop for phones. Photo style only.",
+          "locales": {
+            "ar": {
+              "label": "الصورة (موبايل)",
+              "info": "اختياري: صورة طولية تناسب شاشة الموبايل. في شكل الصورة بس."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "overlay_text",
+          "type": "text",
+          "label": "Headline",
+          "info": "Photo style: leave empty for a clean photo with no overlay.",
+          "locales": {
+            "ar": {
+              "label": "العنوان",
+              "info": "في شكل الصورة: سيبه فاضي علشان الصورة تفضل نضيفة من غير أي طبقة فوقها."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "badge_text",
+          "type": "text",
+          "label": "Badge",
+          "info": "Offer card only, e.g. \"Limited time\".",
+          "locales": {
+            "ar": {
+              "label": "الشارة",
+              "info": "في كارت العرض بس، مثلًا «لفترة محدودة»."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "subtitle",
+          "type": "textarea",
+          "label": "Subtitle",
+          "info": "Offer card only.",
+          "locales": {
+            "ar": {
+              "label": "سطر تحت العنوان",
+              "info": "في كارت العرض بس."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "cta_text",
+          "type": "text",
+          "label": "Button text",
+          "locales": {
+            "ar": {
+              "label": "كلام الزرار"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "cta_link",
+          "type": "url",
+          "label": "Button link",
+          "locales": {
+            "ar": {
+              "label": "لينك الزرار"
+            }
+          },
+          "default": "/products"
+        },
+        {
+          "type": "header",
+          "content": "Photo style",
+          "locales": {
+            "ar": {
+              "content": "شكل الصورة"
+            }
+          }
+        },
+        {
+          "id": "height",
+          "type": "select",
+          "label": "Height",
+          "locales": {
+            "ar": {
+              "label": "الارتفاع"
+            }
+          },
+          "default": "medium",
+          "options": [
+            {
+              "value": "short",
+              "label": "Short",
+              "label_ar": "قصير"
+            },
+            {
+              "value": "medium",
+              "label": "Medium",
+              "label_ar": "متوسط"
+            },
+            {
+              "value": "tall",
+              "label": "Tall",
+              "label_ar": "طويل"
+            }
+          ]
+        },
+        {
+          "id": "full_width",
+          "type": "checkbox",
+          "label": "Full width",
+          "locales": {
+            "ar": {
+              "label": "بعرض الشاشة كلها"
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "text_position",
+          "type": "select",
+          "label": "Text position",
+          "locales": {
+            "ar": {
+              "label": "مكان الكلام"
+            }
+          },
+          "default": "center",
+          "options": [
+            {
+              "value": "center",
+              "label": "Centre",
+              "label_ar": "في النص"
+            },
+            {
+              "value": "bottom-start",
+              "label": "Bottom, start side",
+              "label_ar": "تحت ناحية البداية"
+            },
+            {
+              "value": "bottom-end",
+              "label": "Bottom, end side",
+              "label_ar": "تحت ناحية النهاية"
+            }
+          ]
+        },
+        {
+          "id": "overlay_opacity",
+          "type": "range",
+          "label": "Image darkening",
+          "info": "Only applies when there is text on the image.",
+          "locales": {
+            "ar": {
+              "label": "تغميق الصورة",
+              "info": "بيتطبق بس لما يكون فيه كلام على الصورة."
+            }
+          },
+          "default": 20,
+          "min": 0,
+          "max": 70,
+          "step": 5,
+          "unit": "%"
+        }
+      ],
+      "presets": [
+        {
+          "name": "Promo banner",
+          "category": "marketing",
+          "locales": {
+            "en": {
+              "name": "Promo banner"
+            },
+            "ar": {
+              "name": "بانر إعلاني"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-rich-text": {
+      "type": "lib-rich-text",
+      "name": "Text block",
+      "name_ar": "فقرة كلام",
+      "locales": {
+        "en": {
+          "name": "Text block"
+        },
+        "ar": {
+          "name": "فقرة كلام"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "plain",
+          "options": [
+            {
+              "value": "plain",
+              "label": "Plain text",
+              "label_ar": "كلام عادي"
+            },
+            {
+              "value": "note",
+              "label": "Editor's note — signed letter",
+              "label_ar": "كلمة المحرر: رسالة بتوقيع"
+            }
+          ]
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "content",
+          "type": "richtext",
+          "label": "Text",
+          "locales": {
+            "ar": {
+              "label": "الكلام"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Editor's note",
+          "locales": {
+            "ar": {
+              "content": "كلمة المحرر"
+            }
+          }
+        },
+        {
+          "id": "kicker",
+          "type": "text",
+          "label": "Small line on top",
+          "info": "Editor's note style only.",
+          "locales": {
+            "ar": {
+              "label": "سطر صغير فوق",
+              "info": "لشكل كلمة المحرر بس."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "byline_name",
+          "type": "text",
+          "label": "Signed by",
+          "locales": {
+            "ar": {
+              "label": "التوقيع (الاسم)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "byline_role",
+          "type": "text",
+          "label": "Role",
+          "locales": {
+            "ar": {
+              "label": "الوظيفة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Layout",
+          "locales": {
+            "ar": {
+              "content": "الترتيب"
+            }
+          }
+        },
+        {
+          "id": "width",
+          "type": "select",
+          "label": "Width",
+          "locales": {
+            "ar": {
+              "label": "العرض"
+            }
+          },
+          "default": "narrow",
+          "options": [
+            {
+              "value": "narrow",
+              "label": "Narrow (easier to read)",
+              "label_ar": "ضيق (أريح في القراية)"
+            },
+            {
+              "value": "wide",
+              "label": "Wide",
+              "label_ar": "عريض"
+            }
+          ]
+        },
+        {
+          "id": "align",
+          "type": "select",
+          "label": "Alignment",
+          "locales": {
+            "ar": {
+              "label": "المحاذاة"
+            }
+          },
+          "default": "start",
+          "options": [
+            {
+              "value": "start",
+              "label": "Start side",
+              "label_ar": "ناحية البداية"
+            },
+            {
+              "value": "center",
+              "label": "Centre",
+              "label_ar": "في النص"
+            }
+          ]
+        }
+      ],
+      "presets": [
+        {
+          "name": "Text block",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Text block"
+            },
+            "ar": {
+              "name": "فقرة كلام"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-shop-the-look": {
+      "type": "lib-shop-the-look",
+      "name": "Shop the look",
+      "name_ar": "اتسوّق اللوك",
+      "locales": {
+        "en": {
+          "name": "Shop the look"
+        },
+        "ar": {
+          "name": "اتسوّق اللوك"
+        }
+      },
+      "settings": [
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "image",
+          "type": "image_picker",
+          "label": "Image (desktop)",
+          "locales": {
+            "ar": {
+              "label": "الصورة (كمبيوتر)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "image_mobile",
+          "type": "image_picker",
+          "label": "Image (mobile)",
+          "info": "Optional. Keep the same framing, or the hotspots will land in the wrong place.",
+          "locales": {
+            "ar": {
+              "label": "الصورة (موبايل)",
+              "info": "اختياري. خلّي الكادر زي صورة الكمبيوتر، وإلا النقط هتيجي في مكان غلط."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "layout",
+          "type": "select",
+          "label": "Photo position",
+          "info": "On phones the list always sits under the photo.",
+          "locales": {
+            "ar": {
+              "label": "مكان الصورة",
+              "info": "على الموبايل القايمة دايمًا بتبقى تحت الصورة."
+            }
+          },
+          "default": "image-start",
+          "options": [
+            {
+              "value": "image-start",
+              "label": "Photo first, list beside it",
+              "label_ar": "الصورة الأول والقايمة جنبها"
+            },
+            {
+              "value": "image-end",
+              "label": "List first, photo beside it",
+              "label_ar": "القايمة الأول والصورة جنبها"
+            }
+          ]
+        }
+      ],
+      "blocks": [
+        {
+          "type": "hotspot",
+          "name": "Hotspot",
+          "name_ar": "نقطة",
+          "locales": {
+            "en": {
+              "name": "Hotspot"
+            },
+            "ar": {
+              "name": "نقطة"
+            }
+          },
+          "settings": [
+            {
+              "id": "x",
+              "type": "range",
+              "label": "Across (from the left edge of the photo)",
+              "locales": {
+                "ar": {
+                  "label": "بالعرض (من شمال الصورة)"
+                }
+              },
+              "default": 50,
+              "min": 0,
+              "max": 100,
+              "step": 1,
+              "unit": "%"
+            },
+            {
+              "id": "y",
+              "type": "range",
+              "label": "Down (from the top)",
+              "locales": {
+                "ar": {
+                  "label": "بالطول (من فوق)"
+                }
+              },
+              "default": 50,
+              "min": 0,
+              "max": 100,
+              "step": 1,
+              "unit": "%"
+            },
+            {
+              "id": "label",
+              "type": "text",
+              "label": "Product name",
+              "locales": {
+                "ar": {
+                  "label": "اسم المنتج"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "price_text",
+              "type": "text",
+              "label": "Price",
+              "info": "Typed as you want it shown, e.g. EGP 450.",
+              "locales": {
+                "ar": {
+                  "label": "السعر",
+                  "info": "اكتبه زي ما عايزه يظهر، زي ‎EGP 450."
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "link",
+              "type": "url",
+              "label": "Link",
+              "locales": {
+                "ar": {
+                  "label": "اللينك"
+                }
+              },
+              "default": ""
+            }
+          ]
+        }
+      ],
+      "max_blocks": 8,
+      "presets": [
+        {
+          "name": "Shop the look",
+          "category": "products",
+          "locales": {
+            "en": {
+              "name": "Shop the look"
+            },
+            "ar": {
+              "name": "اتسوّق اللوك"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-size-guide": {
+      "type": "lib-size-guide",
+      "name": "Size guide",
+      "name_ar": "دليل المقاسات",
+      "locales": {
+        "en": {
+          "name": "Size guide"
+        },
+        "ar": {
+          "name": "دليل المقاسات"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "table",
+          "options": [
+            {
+              "value": "table",
+              "label": "Chart first, then measuring tips",
+              "label_ar": "الجدول الأول وبعده نصايح القياس"
+            },
+            {
+              "value": "fits",
+              "label": "Fit cards first, then the chart",
+              "label_ar": "كروت القصّات الأول وبعدها الجدول"
+            }
+          ]
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "intro",
+          "type": "textarea",
+          "label": "Intro",
+          "locales": {
+            "ar": {
+              "label": "مقدمة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Chart",
+          "locales": {
+            "ar": {
+              "content": "جدول المقاسات"
+            }
+          }
+        },
+        {
+          "id": "unit",
+          "type": "select",
+          "label": "Unit",
+          "locales": {
+            "ar": {
+              "label": "وحدة القياس"
+            }
+          },
+          "default": "cm",
+          "options": [
+            {
+              "value": "cm",
+              "label": "Centimetres",
+              "label_ar": "سنتيمتر"
+            },
+            {
+              "value": "in",
+              "label": "Inches",
+              "label_ar": "بوصة"
+            }
+          ]
+        },
+        {
+          "id": "chart_columns",
+          "type": "text",
+          "label": "Columns after the size",
+          "info": "Separate with commas, e.g. Waist, Hip, Length. Each row's values follow the same order.",
+          "locales": {
+            "ar": {
+              "label": "الأعمدة بعد المقاس",
+              "info": "افصل بينهم بفاصلة، زي: الوسط، الهيب، الطول. أرقام كل صف بتمشي بنفس الترتيب."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "model_note",
+          "type": "text",
+          "label": "Note under the chart",
+          "info": "e.g. The model is 175 cm and wears M.",
+          "locales": {
+            "ar": {
+              "label": "ملحوظة تحت الجدول",
+              "info": "زي: الموديل طوله 175 سم ولابس M."
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Measuring tips",
+          "locales": {
+            "ar": {
+              "content": "نصايح القياس"
+            }
+          }
+        },
+        {
+          "id": "measure_heading",
+          "type": "text",
+          "label": "Tips heading",
+          "locales": {
+            "ar": {
+              "label": "عنوان النصايح"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "WhatsApp",
+          "locales": {
+            "ar": {
+              "content": "واتساب"
+            }
+          }
+        },
+        {
+          "id": "whatsapp_number",
+          "type": "text",
+          "label": "WhatsApp number",
+          "info": "The button shows only when a number is set.",
+          "locales": {
+            "ar": {
+              "label": "رقم الواتساب",
+              "info": "الزرار بيظهر بس لما يكون فيه رقم."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "whatsapp_text",
+          "type": "text",
+          "label": "Button text",
+          "locales": {
+            "ar": {
+              "label": "كلام الزرار"
+            }
+          },
+          "default": ""
+        }
+      ],
+      "blocks": [
+        {
+          "type": "row",
+          "name": "Size row",
+          "name_ar": "صف مقاس",
+          "locales": {
+            "en": {
+              "name": "Size row"
+            },
+            "ar": {
+              "name": "صف مقاس"
+            }
+          },
+          "limit": 20,
+          "settings": [
+            {
+              "id": "size",
+              "type": "text",
+              "label": "Size",
+              "locales": {
+                "ar": {
+                  "label": "المقاس"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "values",
+              "type": "text",
+              "label": "Values",
+              "info": "Comma-separated, in the same order as the columns.",
+              "locales": {
+                "ar": {
+                  "label": "الأرقام",
+                  "info": "بينهم فاصلة، وبنفس ترتيب الأعمدة."
+                }
+              },
+              "default": ""
+            }
+          ]
+        },
+        {
+          "type": "measure",
+          "name": "Measuring tip",
+          "name_ar": "نصيحة قياس",
+          "locales": {
+            "en": {
+              "name": "Measuring tip"
+            },
+            "ar": {
+              "name": "نصيحة قياس"
+            }
+          },
+          "limit": 6,
+          "settings": [
+            {
+              "id": "title",
+              "type": "text",
+              "label": "Title",
+              "locales": {
+                "ar": {
+                  "label": "العنوان"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "text",
+              "type": "textarea",
+              "label": "Text",
+              "locales": {
+                "ar": {
+                  "label": "الشرح"
+                }
+              },
+              "default": ""
+            }
+          ]
+        },
+        {
+          "type": "fit",
+          "name": "Fit",
+          "name_ar": "قصّة",
+          "locales": {
+            "en": {
+              "name": "Fit"
+            },
+            "ar": {
+              "name": "قصّة"
+            }
+          },
+          "limit": 6,
+          "settings": [
+            {
+              "id": "name",
+              "type": "text",
+              "label": "Name",
+              "locales": {
+                "ar": {
+                  "label": "الاسم"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "image",
+              "type": "image_picker",
+              "label": "Image",
+              "locales": {
+                "ar": {
+                  "label": "الصورة"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "best_for",
+              "type": "textarea",
+              "label": "Best for",
+              "locales": {
+                "ar": {
+                  "label": "مناسبة لمين"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "link",
+              "type": "url",
+              "label": "Link",
+              "locales": {
+                "ar": {
+                  "label": "اللينك"
+                }
+              },
+              "default": ""
+            }
+          ]
+        }
+      ],
+      "max_blocks": 32,
+      "presets": [
+        {
+          "name": "Size guide",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Size guide"
+            },
+            "ar": {
+              "name": "دليل المقاسات"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-store-visit": {
+      "type": "lib-store-visit",
+      "name": "Visit our shop",
+      "name_ar": "زورنا في المحل",
+      "locales": {
+        "en": {
+          "name": "Visit our shop"
+        },
+        "ar": {
+          "name": "زورنا في المحل"
+        }
+      },
+      "settings": [
+        {
+          "type": "paragraph",
+          "content": "A shop customers can walk into is the strongest trust signal you have. Give it a real photo and a real address.",
+          "locales": {
+            "ar": {
+              "content": "المحل اللي الزباين يقدروا ييجوا له هو أقوى دليل ثقة عندك. حط له صورة حقيقية وعنوان حقيقي."
+            }
+          }
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "عنوان القسم"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "image",
+          "type": "image_picker",
+          "label": "Photo of the shop",
+          "locales": {
+            "ar": {
+              "label": "صورة المحل"
+            }
+          },
+          "aspect_ratio": "4/3",
+          "default": ""
+        },
+        {
+          "id": "address",
+          "type": "textarea",
+          "label": "Address (English)",
+          "info": "The section shows once an address is filled in.",
+          "locales": {
+            "ar": {
+              "label": "عنوان المحل (إنجليزي)",
+              "info": "القسم بيظهر أول ما تكتب العنوان."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "address_ar",
+          "type": "textarea",
+          "label": "Address (Arabic)",
+          "locales": {
+            "ar": {
+              "label": "عنوان المحل (عربي)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "hours",
+          "type": "text",
+          "label": "Opening hours",
+          "locales": {
+            "ar": {
+              "label": "مواعيد الشغل"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "phone",
+          "type": "text",
+          "label": "Phone",
+          "locales": {
+            "ar": {
+              "label": "رقم التليفون"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "whatsapp",
+          "type": "text",
+          "label": "WhatsApp number",
+          "info": "Egyptian numbers work as typed. For other countries, include the country code.",
+          "locales": {
+            "ar": {
+              "label": "رقم واتساب",
+              "info": "الرقم المصري اكتبه عادي. لو الرقم من بلد تانية، اكتبه بكود الدولة."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "show_directions_button",
+          "type": "checkbox",
+          "label": "Show the directions button",
+          "locales": {
+            "ar": {
+              "label": "اظهر زرار الخريطة"
+            }
+          },
+          "default": true
+        },
+        {
+          "id": "map_link",
+          "type": "url",
+          "label": "Google Maps link",
+          "locales": {
+            "ar": {
+              "label": "لينك جوجل ماب"
+            }
+          },
+          "default": ""
+        }
+      ],
+      "presets": [
+        {
+          "name": "Visit our shop",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Visit our shop"
+            },
+            "ar": {
+              "name": "زورنا في المحل"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-testimonials": {
+      "type": "lib-testimonials",
+      "name": "Testimonials",
+      "name_ar": "آراء العملاء",
+      "locales": {
+        "en": {
+          "name": "Testimonials"
+        },
+        "ar": {
+          "name": "آراء العملاء"
+        }
+      },
+      "settings": [
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "quotes",
+          "options": [
+            {
+              "value": "quotes",
+              "label": "Pull quotes — big, magazine-style",
+              "label_ar": "اقتباسات كبيرة زي المجلات"
+            },
+            {
+              "value": "cards",
+              "label": "Cards — stars, review and name",
+              "label_ar": "كروت فيها نجوم ورأي واسم"
+            }
+          ]
+        },
+        {
+          "type": "header",
+          "content": "Content",
+          "locales": {
+            "ar": {
+              "content": "المحتوى"
+            }
+          }
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Review 1",
+          "locales": {
+            "ar": {
+              "content": "رأي 1"
+            }
+          }
+        },
+        {
+          "id": "review_1_name",
+          "type": "text",
+          "label": "Name",
+          "locales": {
+            "ar": {
+              "label": "الاسم"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_1_city",
+          "type": "text",
+          "label": "City",
+          "locales": {
+            "ar": {
+              "label": "المدينة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_1_text",
+          "type": "textarea",
+          "label": "Review",
+          "locales": {
+            "ar": {
+              "label": "الرأي"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_1_rating",
+          "type": "range",
+          "label": "Stars",
+          "info": "Shown in the Cards style. 0 hides the stars.",
+          "locales": {
+            "ar": {
+              "label": "النجوم",
+              "info": "بتظهر في شكل الكروت. صفر يخفي النجوم."
+            }
+          },
+          "default": 5,
+          "min": 0,
+          "max": 5,
+          "step": 1
+        },
+        {
+          "type": "header",
+          "content": "Review 2",
+          "locales": {
+            "ar": {
+              "content": "رأي 2"
+            }
+          }
+        },
+        {
+          "id": "review_2_name",
+          "type": "text",
+          "label": "Name",
+          "locales": {
+            "ar": {
+              "label": "الاسم"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_2_city",
+          "type": "text",
+          "label": "City",
+          "locales": {
+            "ar": {
+              "label": "المدينة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_2_text",
+          "type": "textarea",
+          "label": "Review",
+          "locales": {
+            "ar": {
+              "label": "الرأي"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_2_rating",
+          "type": "range",
+          "label": "Stars",
+          "info": "Shown in the Cards style. 0 hides the stars.",
+          "locales": {
+            "ar": {
+              "label": "النجوم",
+              "info": "بتظهر في شكل الكروت. صفر يخفي النجوم."
+            }
+          },
+          "default": 5,
+          "min": 0,
+          "max": 5,
+          "step": 1
+        },
+        {
+          "type": "header",
+          "content": "Review 3",
+          "locales": {
+            "ar": {
+              "content": "رأي 3"
+            }
+          }
+        },
+        {
+          "id": "review_3_name",
+          "type": "text",
+          "label": "Name",
+          "locales": {
+            "ar": {
+              "label": "الاسم"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_3_city",
+          "type": "text",
+          "label": "City",
+          "locales": {
+            "ar": {
+              "label": "المدينة"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_3_text",
+          "type": "textarea",
+          "label": "Review",
+          "locales": {
+            "ar": {
+              "label": "الرأي"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "review_3_rating",
+          "type": "range",
+          "label": "Stars",
+          "info": "Shown in the Cards style. 0 hides the stars.",
+          "locales": {
+            "ar": {
+              "label": "النجوم",
+              "info": "بتظهر في شكل الكروت. صفر يخفي النجوم."
+            }
+          },
+          "default": 5,
+          "min": 0,
+          "max": 5,
+          "step": 1
+        }
+      ],
+      "presets": [
+        {
+          "name": "Testimonials",
+          "category": "marketing",
+          "locales": {
+            "en": {
+              "name": "Testimonials"
+            },
+            "ar": {
+              "name": "آراء العملاء"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-trust-strip": {
+      "type": "lib-trust-strip",
+      "name": "Why shop with us",
+      "name_ar": "ليه تشتري مننا",
+      "locales": {
+        "en": {
+          "name": "Why shop with us"
+        },
+        "ar": {
+          "name": "ليه تشتري مننا"
+        }
+      },
+      "settings": [
+        {
+          "type": "paragraph",
+          "content": "Short reassurance points like cash on delivery, fast shipping and easy exchange. Keep each one to a few words.",
+          "locales": {
+            "ar": {
+              "content": "نقط قصيرة بتطمّن العميل، زي الدفع عند الاستلام والشحن السريع والاستبدال السهل. خلّي كل نقطة كلمتين تلاتة."
+            }
+          }
+        },
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "row",
+          "options": [
+            {
+              "value": "row",
+              "label": "Row with dividers",
+              "label_ar": "صف بفواصل"
+            },
+            {
+              "value": "cards",
+              "label": "Cards",
+              "label_ar": "كروت"
+            }
+          ]
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading (optional)",
+          "info": "Shown small above the points.",
+          "locales": {
+            "ar": {
+              "label": "العنوان (اختياري)",
+              "info": "بيظهر صغير فوق النقط."
+            }
+          },
+          "default": ""
+        }
+      ],
+      "blocks": [
+        {
+          "type": "item",
+          "name": "Point",
+          "name_ar": "نقطة",
+          "locales": {
+            "en": {
+              "name": "Point"
+            },
+            "ar": {
+              "name": "نقطة"
+            }
+          },
+          "settings": [
+            {
+              "id": "icon",
+              "type": "select",
+              "label": "Icon",
+              "locales": {
+                "ar": {
+                  "label": "الأيقونة"
+                }
+              },
+              "default": "shield",
+              "options": [
+                {
+                  "value": "truck",
+                  "label": "Delivery truck",
+                  "label_ar": "عربية شحن"
+                },
+                {
+                  "value": "cash",
+                  "label": "Cash",
+                  "label_ar": "فلوس كاش"
+                },
+                {
+                  "value": "return",
+                  "label": "Exchange",
+                  "label_ar": "استبدال"
+                },
+                {
+                  "value": "shield",
+                  "label": "Guarantee",
+                  "label_ar": "ضمان"
+                },
+                {
+                  "value": "star",
+                  "label": "Star",
+                  "label_ar": "نجمة"
+                },
+                {
+                  "value": "chat",
+                  "label": "Chat",
+                  "label_ar": "محادثة"
+                },
+                {
+                  "value": "gift",
+                  "label": "Gift",
+                  "label_ar": "هدية"
+                },
+                {
+                  "value": "clock",
+                  "label": "Clock",
+                  "label_ar": "ساعة"
+                }
+              ]
+            },
+            {
+              "id": "title",
+              "type": "text",
+              "label": "Title",
+              "locales": {
+                "ar": {
+                  "label": "العنوان"
+                }
+              },
+              "default": ""
+            },
+            {
+              "id": "text",
+              "type": "text",
+              "label": "Text",
+              "locales": {
+                "ar": {
+                  "label": "الكلام"
+                }
+              },
+              "default": ""
+            }
+          ]
+        }
+      ],
+      "max_blocks": 6,
+      "presets": [
+        {
+          "name": "Why shop with us",
+          "category": "marketing",
+          "locales": {
+            "en": {
+              "name": "Why shop with us"
+            },
+            "ar": {
+              "name": "ليه تشتري مننا"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-ugc-carousel": {
+      "type": "lib-ugc-carousel",
+      "name": "Shopper reels",
+      "name_ar": "ريلز العملاء",
+      "locales": {
+        "en": {
+          "name": "Shopper reels"
+        },
+        "ar": {
+          "name": "ريلز العملاء"
+        }
+      },
+      "settings": [
+        {
+          "type": "header",
+          "content": "Content",
+          "locales": {
+            "ar": {
+              "content": "المحتوى"
+            }
+          }
+        },
+        {
+          "id": "eyebrow",
+          "type": "text",
+          "label": "Eyebrow",
+          "locales": {
+            "ar": {
+              "label": "نص صغير فوق العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Title",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "subtitle",
+          "type": "text",
+          "label": "Subtitle",
+          "locales": {
+            "ar": {
+              "label": "العنوان الفرعي"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "cta_text",
+          "type": "text",
+          "label": "Button text",
+          "locales": {
+            "ar": {
+              "label": "كلام الزرار"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "cta_link",
+          "type": "url",
+          "label": "Button link",
+          "locales": {
+            "ar": {
+              "label": "لينك الزرار"
+            }
+          },
+          "default": "/products"
+        },
+        {
+          "id": "intro_image",
+          "type": "image_picker",
+          "label": "Intro card image",
+          "locales": {
+            "ar": {
+              "label": "صورة كارت المقدمة"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "badge_text",
+          "type": "text",
+          "label": "Product badge text",
+          "locales": {
+            "ar": {
+              "label": "كلام زرار الشراء"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Reel 1",
+          "locales": {
+            "ar": {
+              "content": "ريل 1"
+            }
+          }
+        },
+        {
+          "id": "item_1_media",
+          "type": "image_picker",
+          "label": "Reel 1 poster image",
+          "locales": {
+            "ar": {
+              "label": "صورة الغلاف (ريل 1)"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "item_1_video",
+          "type": "video_picker",
+          "label": "Reel 1 video link",
+          "info": "Paste a direct MP4/WebM file URL, or a link from YouTube, Vimeo, Instagram, TikTok or Facebook.",
+          "locales": {
+            "ar": {
+              "label": "لينك الفيديو (ريل 1)",
+              "info": "حط لينك ملف MP4 أو WebM مباشر، أو لينك من يوتيوب أو فيميو أو إنستجرام أو تيك توك أو فيسبوك."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_1_caption",
+          "type": "text",
+          "label": "Reel 1 caption",
+          "locales": {
+            "ar": {
+              "label": "التعليق (ريل 1)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_1_product_image",
+          "type": "image_picker",
+          "label": "Reel 1 product thumbnail",
+          "locales": {
+            "ar": {
+              "label": "صورة المنتج (ريل 1)"
+            }
+          },
+          "aspect_ratio": "1/1",
+          "default": ""
+        },
+        {
+          "id": "item_1_product_link",
+          "type": "url",
+          "label": "Reel 1 product link",
+          "locales": {
+            "ar": {
+              "label": "رابط المنتج (ريل 1)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Reel 2",
+          "locales": {
+            "ar": {
+              "content": "ريل 2"
+            }
+          }
+        },
+        {
+          "id": "item_2_media",
+          "type": "image_picker",
+          "label": "Reel 2 poster image",
+          "locales": {
+            "ar": {
+              "label": "صورة الغلاف (ريل 2)"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "item_2_video",
+          "type": "video_picker",
+          "label": "Reel 2 video link",
+          "info": "Paste a direct MP4/WebM file URL, or a link from YouTube, Vimeo, Instagram, TikTok or Facebook.",
+          "locales": {
+            "ar": {
+              "label": "لينك الفيديو (ريل 2)",
+              "info": "حط لينك ملف MP4 أو WebM مباشر، أو لينك من يوتيوب أو فيميو أو إنستجرام أو تيك توك أو فيسبوك."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_2_caption",
+          "type": "text",
+          "label": "Reel 2 caption",
+          "locales": {
+            "ar": {
+              "label": "التعليق (ريل 2)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_2_product_image",
+          "type": "image_picker",
+          "label": "Reel 2 product thumbnail",
+          "locales": {
+            "ar": {
+              "label": "صورة المنتج (ريل 2)"
+            }
+          },
+          "aspect_ratio": "1/1",
+          "default": ""
+        },
+        {
+          "id": "item_2_product_link",
+          "type": "url",
+          "label": "Reel 2 product link",
+          "locales": {
+            "ar": {
+              "label": "رابط المنتج (ريل 2)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Reel 3",
+          "locales": {
+            "ar": {
+              "content": "ريل 3"
+            }
+          }
+        },
+        {
+          "id": "item_3_media",
+          "type": "image_picker",
+          "label": "Reel 3 poster image",
+          "locales": {
+            "ar": {
+              "label": "صورة الغلاف (ريل 3)"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "item_3_video",
+          "type": "video_picker",
+          "label": "Reel 3 video link",
+          "info": "Paste a direct MP4/WebM file URL, or a link from YouTube, Vimeo, Instagram, TikTok or Facebook.",
+          "locales": {
+            "ar": {
+              "label": "لينك الفيديو (ريل 3)",
+              "info": "حط لينك ملف MP4 أو WebM مباشر، أو لينك من يوتيوب أو فيميو أو إنستجرام أو تيك توك أو فيسبوك."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_3_caption",
+          "type": "text",
+          "label": "Reel 3 caption",
+          "locales": {
+            "ar": {
+              "label": "التعليق (ريل 3)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_3_product_image",
+          "type": "image_picker",
+          "label": "Reel 3 product thumbnail",
+          "locales": {
+            "ar": {
+              "label": "صورة المنتج (ريل 3)"
+            }
+          },
+          "aspect_ratio": "1/1",
+          "default": ""
+        },
+        {
+          "id": "item_3_product_link",
+          "type": "url",
+          "label": "Reel 3 product link",
+          "locales": {
+            "ar": {
+              "label": "رابط المنتج (ريل 3)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Reel 4",
+          "locales": {
+            "ar": {
+              "content": "ريل 4"
+            }
+          }
+        },
+        {
+          "id": "item_4_media",
+          "type": "image_picker",
+          "label": "Reel 4 poster image",
+          "locales": {
+            "ar": {
+              "label": "صورة الغلاف (ريل 4)"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "item_4_video",
+          "type": "video_picker",
+          "label": "Reel 4 video link",
+          "info": "Paste a direct MP4/WebM file URL, or a link from YouTube, Vimeo, Instagram, TikTok or Facebook.",
+          "locales": {
+            "ar": {
+              "label": "لينك الفيديو (ريل 4)",
+              "info": "حط لينك ملف MP4 أو WebM مباشر، أو لينك من يوتيوب أو فيميو أو إنستجرام أو تيك توك أو فيسبوك."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_4_caption",
+          "type": "text",
+          "label": "Reel 4 caption",
+          "locales": {
+            "ar": {
+              "label": "التعليق (ريل 4)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_4_product_image",
+          "type": "image_picker",
+          "label": "Reel 4 product thumbnail",
+          "locales": {
+            "ar": {
+              "label": "صورة المنتج (ريل 4)"
+            }
+          },
+          "aspect_ratio": "1/1",
+          "default": ""
+        },
+        {
+          "id": "item_4_product_link",
+          "type": "url",
+          "label": "Reel 4 product link",
+          "locales": {
+            "ar": {
+              "label": "رابط المنتج (ريل 4)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Reel 5",
+          "locales": {
+            "ar": {
+              "content": "ريل 5"
+            }
+          }
+        },
+        {
+          "id": "item_5_media",
+          "type": "image_picker",
+          "label": "Reel 5 poster image",
+          "locales": {
+            "ar": {
+              "label": "صورة الغلاف (ريل 5)"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "item_5_video",
+          "type": "video_picker",
+          "label": "Reel 5 video link",
+          "info": "Paste a direct MP4/WebM file URL, or a link from YouTube, Vimeo, Instagram, TikTok or Facebook.",
+          "locales": {
+            "ar": {
+              "label": "لينك الفيديو (ريل 5)",
+              "info": "حط لينك ملف MP4 أو WebM مباشر، أو لينك من يوتيوب أو فيميو أو إنستجرام أو تيك توك أو فيسبوك."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_5_caption",
+          "type": "text",
+          "label": "Reel 5 caption",
+          "locales": {
+            "ar": {
+              "label": "التعليق (ريل 5)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_5_product_image",
+          "type": "image_picker",
+          "label": "Reel 5 product thumbnail",
+          "locales": {
+            "ar": {
+              "label": "صورة المنتج (ريل 5)"
+            }
+          },
+          "aspect_ratio": "1/1",
+          "default": ""
+        },
+        {
+          "id": "item_5_product_link",
+          "type": "url",
+          "label": "Reel 5 product link",
+          "locales": {
+            "ar": {
+              "label": "رابط المنتج (ريل 5)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Reel 6",
+          "locales": {
+            "ar": {
+              "content": "ريل 6"
+            }
+          }
+        },
+        {
+          "id": "item_6_media",
+          "type": "image_picker",
+          "label": "Reel 6 poster image",
+          "locales": {
+            "ar": {
+              "label": "صورة الغلاف (ريل 6)"
+            }
+          },
+          "aspect_ratio": "3/4",
+          "default": ""
+        },
+        {
+          "id": "item_6_video",
+          "type": "video_picker",
+          "label": "Reel 6 video link",
+          "info": "Paste a direct MP4/WebM file URL, or a link from YouTube, Vimeo, Instagram, TikTok or Facebook.",
+          "locales": {
+            "ar": {
+              "label": "لينك الفيديو (ريل 6)",
+              "info": "حط لينك ملف MP4 أو WebM مباشر، أو لينك من يوتيوب أو فيميو أو إنستجرام أو تيك توك أو فيسبوك."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_6_caption",
+          "type": "text",
+          "label": "Reel 6 caption",
+          "locales": {
+            "ar": {
+              "label": "التعليق (ريل 6)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "item_6_product_image",
+          "type": "image_picker",
+          "label": "Reel 6 product thumbnail",
+          "locales": {
+            "ar": {
+              "label": "صورة المنتج (ريل 6)"
+            }
+          },
+          "aspect_ratio": "1/1",
+          "default": ""
+        },
+        {
+          "id": "item_6_product_link",
+          "type": "url",
+          "label": "Reel 6 product link",
+          "locales": {
+            "ar": {
+              "label": "رابط المنتج (ريل 6)"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Playback",
+          "locales": {
+            "ar": {
+              "content": "التشغيل"
+            }
+          }
+        },
+        {
+          "id": "autoplay",
+          "type": "checkbox",
+          "label": "Autoplay videos",
+          "info": "Plays reels automatically, muted, as they scroll into view. Only the most visible few play at once. Visitors on data-saver or reduced-motion settings tap to play.",
+          "locales": {
+            "ar": {
+              "label": "تشغيل الفيديوهات تلقائي",
+              "info": "الريلز بتشتغل لوحدها من غير صوت أول ما تبان على الشاشة، وأكتر كام ريل ظاهرين بس هما اللي بيشتغلوا. اللي مفعّلين توفير البيانات أو تقليل الحركة هيدوسوا عشان يشغّلوا."
+            }
+          },
+          "default": true
+        }
+      ],
+      "presets": [
+        {
+          "name": "Shopper reels",
+          "category": "marketing",
+          "locales": {
+            "en": {
+              "name": "Shopper reels"
+            },
+            "ar": {
+              "name": "ريلز العملاء"
+            }
+          },
+          "settings": {
+            "cta_link": "/products",
+            "autoplay": true
+          }
+        }
+      ]
+    },
+    "lib-video": {
+      "type": "lib-video",
+      "name": "Video",
+      "name_ar": "فيديو",
+      "locales": {
+        "en": {
+          "name": "Video"
+        },
+        "ar": {
+          "name": "فيديو"
+        }
+      },
+      "settings": [
+        {
+          "type": "header",
+          "content": "Video",
+          "locales": {
+            "ar": {
+              "content": "الفيديو"
+            }
+          }
+        },
+        {
+          "id": "video",
+          "type": "video_picker",
+          "label": "Video",
+          "info": "Paste a direct MP4/WebM file URL, or a link from YouTube, Vimeo, Instagram, TikTok or Facebook.",
+          "locales": {
+            "ar": {
+              "label": "الفيديو",
+              "info": "حط لينك ملف MP4 أو WebM مباشر، أو لينك من يوتيوب أو فيميو أو إنستجرام أو تيك توك أو فيسبوك."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "poster",
+          "type": "image_picker",
+          "label": "Cover image",
+          "info": "Shown before the video plays.",
+          "locales": {
+            "ar": {
+              "label": "صورة الغلاف",
+              "info": "بتظهر قبل ما الفيديو يشتغل."
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "autoplay",
+          "type": "checkbox",
+          "label": "Autoplay",
+          "info": "Plays muted and on repeat while it is on screen. Visitors on data-saver or reduced-motion settings press play themselves.",
+          "locales": {
+            "ar": {
+              "label": "تشغيل تلقائي",
+              "info": "الفيديو بيشتغل لوحده من غير صوت وبيعيد طول ما هو ظاهر على الشاشة. اللي مفعّلين توفير البيانات أو تقليل الحركة هيدوسوا تشغيل بنفسهم."
+            }
+          },
+          "default": false
+        },
+        {
+          "type": "header",
+          "content": "Content",
+          "locales": {
+            "ar": {
+              "content": "المحتوى"
+            }
+          }
+        },
+        {
+          "id": "heading",
+          "type": "text",
+          "label": "Heading",
+          "locales": {
+            "ar": {
+              "label": "العنوان"
+            }
+          },
+          "default": ""
+        },
+        {
+          "id": "text",
+          "type": "textarea",
+          "label": "Text",
+          "locales": {
+            "ar": {
+              "label": "الكلام"
+            }
+          },
+          "default": ""
+        },
+        {
+          "type": "header",
+          "content": "Layout",
+          "locales": {
+            "ar": {
+              "content": "الشكل"
+            }
+          }
+        },
+        {
+          "id": "style",
+          "type": "select",
+          "label": "Style",
+          "locales": {
+            "ar": {
+              "label": "الشكل"
+            }
+          },
+          "default": "contained",
+          "options": [
+            {
+              "value": "contained",
+              "label": "Contained, heading above",
+              "label_ar": "جوّه الصفحة والعنوان فوقه"
+            },
+            {
+              "value": "full",
+              "label": "Full width, text on the video",
+              "label_ar": "بعرض الشاشة والكلام على الفيديو"
+            }
+          ]
+        },
+        {
+          "id": "aspect",
+          "type": "select",
+          "label": "Shape",
+          "locales": {
+            "ar": {
+              "label": "المقاس"
+            }
+          },
+          "default": "16-9",
+          "options": [
+            {
+              "value": "16-9",
+              "label": "Wide (16:9)",
+              "label_ar": "عريض (16:9)"
+            },
+            {
+              "value": "4-5",
+              "label": "Portrait (4:5)",
+              "label_ar": "طولي (4:5)"
+            },
+            {
+              "value": "1-1",
+              "label": "Square (1:1)",
+              "label_ar": "مربع (1:1)"
+            },
+            {
+              "value": "9-16",
+              "label": "Reel (9:16)",
+              "label_ar": "ريل (9:16)"
+            }
+          ]
+        }
+      ],
+      "presets": [
+        {
+          "name": "Video",
+          "category": "content",
+          "locales": {
+            "en": {
+              "name": "Video"
+            },
+            "ar": {
+              "name": "فيديو"
+            }
+          },
+          "settings": {
+            "style": "contained",
+            "aspect": "16-9",
+            "autoplay": false
+          }
+        }
+      ]
+    }
+  }
+}
