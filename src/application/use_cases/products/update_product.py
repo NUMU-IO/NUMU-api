@@ -102,6 +102,12 @@ class UpdateProductUseCase:
             product.seo_title = dto.seo_title
         if dto.seo_description is not None:
             product.seo_description = dto.seo_description
+        if dto.canonical_url is not None:
+            product.canonical_url = dto.canonical_url
+        if dto.robots_noindex is not None:
+            product.robots_noindex = dto.robots_noindex
+        if dto.sitemap_exclude is not None:
+            product.sitemap_exclude = dto.sitemap_exclude
         # `template_suffix` is nullable AND clearable, so — unlike the
         # `is not None` fields above — a null must be able to remove the
         # override. The route sets `template_suffix_provided` from the

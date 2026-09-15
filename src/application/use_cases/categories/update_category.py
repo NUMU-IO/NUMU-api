@@ -100,6 +100,20 @@ class UpdateCategoryUseCase:
             category.template_suffix = dto.template_suffix
         if dto.extra_data is not None:
             category.update_metadata(**dto.extra_data)
+        if dto.seo_title is not None:
+            category.seo_title = dto.seo_title
+        if dto.seo_description is not None:
+            category.seo_description = dto.seo_description
+        if dto.social_image_url is not None:
+            category.social_image_url = dto.social_image_url
+        if dto.canonical_url is not None:
+            category.canonical_url = dto.canonical_url
+        # None = the caller did not send the key, so an unrelated PATCH never
+        # resets a merchant's noindex / sitemap opt-out to False.
+        if dto.robots_noindex is not None:
+            category.robots_noindex = dto.robots_noindex
+        if dto.sitemap_exclude is not None:
+            category.sitemap_exclude = dto.sitemap_exclude
 
         category.touch()
         updated = await self.category_repository.update(category)

@@ -76,6 +76,12 @@ class CreateCategoryUseCase:
             position=dto.position,
             is_active=dto.is_active,
             template_suffix=dto.template_suffix,
+            robots_noindex=dto.robots_noindex,
+            canonical_url=dto.canonical_url,
+            sitemap_exclude=dto.sitemap_exclude,
+            seo_title=dto.seo_title,
+            seo_description=dto.seo_description,
+            social_image_url=dto.social_image_url,
             metadata=dto.extra_data or {},
         )
 

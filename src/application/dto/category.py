@@ -103,9 +103,10 @@ class UpdateCategoryDTO(BaseDTO):
     # `template_suffix_provided` carries whether the client sent the key (route
     # derives it from the request's ``model_fields_set``) so a partial PATCH can
     # clear the override via an explicit null without wiping it when omitted.
-    robots_noindex: bool = False
+    # The two flags are None when the client did not send them.
+    robots_noindex: bool | None = None
     canonical_url: str | None = None
-    sitemap_exclude: bool = False
+    sitemap_exclude: bool | None = None
     seo_title: str | None = None
     seo_description: str | None = None
     social_image_url: str | None = None
