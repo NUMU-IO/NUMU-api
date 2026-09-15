@@ -195,9 +195,13 @@ async def update_category(
         position=request.position,
         is_active=request.is_active,
         seo_title=request.seo_title,
-        robots_noindex=request.robots_noindex,
+        robots_noindex=request.robots_noindex
+        if "robots_noindex" in request.model_fields_set
+        else None,
         canonical_url=request.canonical_url,
-        sitemap_exclude=request.sitemap_exclude,
+        sitemap_exclude=request.sitemap_exclude
+        if "sitemap_exclude" in request.model_fields_set
+        else None,
         seo_description=request.seo_description,
         social_image_url=request.social_image_url,
         template_suffix=request.template_suffix,

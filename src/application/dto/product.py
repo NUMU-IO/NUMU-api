@@ -190,9 +190,10 @@ class UpdateProductDTO(BaseDTO):
     attributes: dict | None = None
     status: str | None = None
     brand: str | None = None
-    robots_noindex: bool = False
+    # None = not sent, so a partial PATCH leaves the stored flag alone.
+    robots_noindex: bool | None = None
     canonical_url: str | None = None
-    sitemap_exclude: bool = False
+    sitemap_exclude: bool | None = None
     seo_title: str | None = None
     seo_description: str | None = None
     # Alternate template variant suffix (Shopify-style); null = base template.

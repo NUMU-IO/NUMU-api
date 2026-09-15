@@ -832,9 +832,13 @@ async def update_product(
         attributes=request.attributes,
         status=request.status,
         brand=request.brand,
-        robots_noindex=request.robots_noindex,
+        robots_noindex=request.robots_noindex
+        if "robots_noindex" in request.model_fields_set
+        else None,
         canonical_url=request.canonical_url,
-        sitemap_exclude=request.sitemap_exclude,
+        sitemap_exclude=request.sitemap_exclude
+        if "sitemap_exclude" in request.model_fields_set
+        else None,
         seo_title=request.seo_title,
         seo_description=request.seo_description,
         template_suffix=request.template_suffix,
