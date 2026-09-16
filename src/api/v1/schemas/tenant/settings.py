@@ -205,6 +205,15 @@ class CodAutopilotResponse(BaseModel):
     assumed_delivered_days: int = 10
     digest_deliverable: bool = False
     auto_rto_days: int = 14
+    #: Both Autopilot templates approved on WhatsApp. Until they are, every
+    #: send is blocked by the template guard and the feature is dark — which
+    #: used to be invisible from the settings page.
+    templates_ready: bool = False
+    #: Templates still waiting on approval, as "name/language".
+    templates_pending: list[str] = Field(default_factory=list)
+    #: Cash on delivery switched on. Autopilot only ever touches COD orders,
+    #: so with COD off there is nothing for it to do.
+    cod_enabled: bool = False
 
 
 class UpdateCodAutopilotRequest(BaseModel):
