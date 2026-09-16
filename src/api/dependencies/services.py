@@ -215,6 +215,7 @@ def get_proof_vision_service_for_store(store_settings: dict):
     Soft-fail by design: the auto-approval engine treats every non-OK
     result as "no signal", so a missing config never breaks checkout.
     """
+    from src.core.entities.instapay import ManualPaymentMethod
     from src.infrastructure.external_services.vision import (
         DeepSeekHFProofService,
         GlmHFProofService,
@@ -225,7 +226,8 @@ def get_proof_vision_service_for_store(store_settings: dict):
 
     payment_settings = (store_settings or {}).get("payment", {})
     provider = ""
-    for rail in ("instapay", "vodafone_cash"):
+    # Any rail may carry the OCR provider; first one configured wins.
+    for rail in (m.value for m in ManualPaymentMethod):
         rail_settings = payment_settings.get(rail) or {}
         candidate = (rail_settings.get("ocr_provider") or "").strip().lower()
         if candidate:

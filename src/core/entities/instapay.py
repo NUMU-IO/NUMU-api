@@ -47,6 +47,20 @@ class ManualPaymentMethod(StrEnum):
 
     INSTAPAY = "instapay"
     VODAFONE_CASH = "vodafone_cash"
+    WE_PAY = "we_pay"
+    ORANGE_CASH = "orange_cash"
+
+    @property
+    def is_wallet(self) -> bool:
+        """True for the mobile-wallet rails, which behave alike everywhere.
+
+        A wallet is paid to a PHONE NUMBER and confirmed by an SMS the
+        customer screenshots; InstaPay is paid to an address and confirmed by
+        a receipt an OCR provider can actually read. Every place that used to
+        ask "is this Vodafone Cash?" meant "is this a wallet?", which is why
+        adding WE Pay and Orange Cash is data rather than another branch.
+        """
+        return self in _WALLET_METHODS
 
     @property
     def reference_prefix(self) -> str:
@@ -63,7 +77,16 @@ _REFERENCE_PREFIXES: dict[ManualPaymentMethod, str] = {
     # codes + merchant muscle memory — do not repurpose it.
     ManualPaymentMethod.INSTAPAY: "NU",
     ManualPaymentMethod.VODAFONE_CASH: "VF",
+    ManualPaymentMethod.WE_PAY: "WE",
+    ManualPaymentMethod.ORANGE_CASH: "OR",
 }
+
+#: The phone-number rails. See ``ManualPaymentMethod.is_wallet``.
+_WALLET_METHODS = frozenset({
+    ManualPaymentMethod.VODAFONE_CASH,
+    ManualPaymentMethod.WE_PAY,
+    ManualPaymentMethod.ORANGE_CASH,
+})
 
 
 class ManualPaymentIntentStatus(StrEnum):

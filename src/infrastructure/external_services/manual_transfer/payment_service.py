@@ -84,16 +84,22 @@ MANUAL_TRANSFER_METHODS: frozenset[str] = frozenset(
 _SETTINGS_KEY = {
     ManualPaymentMethod.INSTAPAY: "instapay",
     ManualPaymentMethod.VODAFONE_CASH: "vodafone_cash",
+    ManualPaymentMethod.WE_PAY: "we_pay",
+    ManualPaymentMethod.ORANGE_CASH: "orange_cash",
 }
 
 _PROVIDER_ENUM = {
     ManualPaymentMethod.INSTAPAY: PaymentProvider.INSTAPAY,
     ManualPaymentMethod.VODAFONE_CASH: PaymentProvider.VODAFONE_CASH,
+    ManualPaymentMethod.WE_PAY: PaymentProvider.WE_PAY,
+    ManualPaymentMethod.ORANGE_CASH: PaymentProvider.ORANGE_CASH,
 }
 
 _HUMAN_NAME = {
     ManualPaymentMethod.INSTAPAY: "InstaPay",
     ManualPaymentMethod.VODAFONE_CASH: "Vodafone Cash",
+    ManualPaymentMethod.WE_PAY: "WE Pay",
+    ManualPaymentMethod.ORANGE_CASH: "Orange Cash",
 }
 
 # Storefront resume-page segments: ``<storefront>/<segment>/<order_id>``.
@@ -103,6 +109,8 @@ _HUMAN_NAME = {
 _ROUTE_SEGMENT = {
     ManualPaymentMethod.INSTAPAY: "instapay",
     ManualPaymentMethod.VODAFONE_CASH: "vodafone-cash",
+    ManualPaymentMethod.WE_PAY: "we-pay",
+    ManualPaymentMethod.ORANGE_CASH: "orange-cash",
 }
 
 _REFERENCE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # Crockford-ish
@@ -177,7 +185,7 @@ def default_auto_approve_enabled(method: ManualPaymentMethod) -> bool:
 
 def default_amount_tolerance_bps(method: ManualPaymentMethod) -> int:
     """Per-rail default for the declared/OCR amount-match tolerance."""
-    if method is ManualPaymentMethod.VODAFONE_CASH:
+    if method.is_wallet:
         return DEFAULT_VC_AMOUNT_TOLERANCE_BPS
     return 100
 
@@ -464,7 +472,7 @@ class ManualTransferPaymentService(IPaymentService):
         on Vodafone Cash so the instructions panel has an unambiguous
         signal to hide its QR block rather than render an empty one.
         """
-        is_wallet = self.method is ManualPaymentMethod.VODAFONE_CASH
+        is_wallet = self.method.is_wallet
         return {
             "provider": self.method.value,
             "type": "manual_verification",

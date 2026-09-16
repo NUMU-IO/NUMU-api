@@ -173,9 +173,7 @@ async def build_config_block(
             # knows ``ipa`` still reads a working value.
             "destination": destination,
             "ipa": destination if method is ManualPaymentMethod.INSTAPAY else None,
-            "wallet_number": (
-                destination if method is ManualPaymentMethod.VODAFONE_CASH else None
-            ),
+            "wallet_number": (destination if method.is_wallet else None),
             "fallback_phone": phone,
         },
         key_id,
@@ -361,15 +359,19 @@ async def read_config_view(
 
 
 def _destination_noun(method: ManualPaymentMethod) -> str:
-    if method is ManualPaymentMethod.VODAFONE_CASH:
+    if method.is_wallet:
         return "wallet number"
     return "InstaPay address (IPA)"
 
 
 def _first_save_required_message(method: ManualPaymentMethod) -> str:
-    if method is ManualPaymentMethod.VODAFONE_CASH:
+    if method.is_wallet:
+        from src.infrastructure.external_services.manual_transfer.payment_service import (
+            human_name,
+        )
+
         return (
-            "A Vodafone Cash wallet number is required for the first save "
-            "(e.g. 01012345678)."
+            f"A {human_name(method)} wallet number is required for the first "
+            "save (e.g. 01012345678)."
         )
     return "InstaPay address (IPA) is required for the first save."

@@ -136,6 +136,16 @@ def _get_default_payment_settings() -> dict:
             "is_configured": False,
             "last_configured": None,
         },
+        "we_pay": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
+        "orange_cash": {
+            "enabled": False,
+            "is_configured": False,
+            "last_configured": None,
+        },
         "bank_transfer": {
             "enabled": False,
             "is_configured": False,
@@ -327,6 +337,8 @@ def _build_payment_response(settings: dict) -> PaymentSettingsResponse:
         kashier=_status("kashier"),
         instapay=_status("instapay"),
         vodafone_cash=_status("vodafone_cash"),
+        we_pay=_status("we_pay"),
+        orange_cash=_status("orange_cash"),
         bank_transfer=_status("bank_transfer"),
         bank_accounts_count=merged.get("bank_accounts_count", 0),
         cod_deposit_policy=deposit_policy,
@@ -532,21 +544,26 @@ async def update_payment_settings(
                 detail="Moyasar is not configured. Contact administrator.",
             )
         payment_settings.setdefault("moyasar", {})["enabled"] = request.moyasar_enabled
-    if request.vodafone_cash_enabled is not None:
-        # "Contact administrator" was a leftover from when Vodafone Cash
-        # was scaffolded as an API gateway needing a partnership. It is a
-        # manual rail: the merchant configures it themselves by saving a
-        # wallet number, which is what sets is_configured.
-        if request.vodafone_cash_enabled and not payment_settings.get(
-            "vodafone_cash", {}
-        ).get("is_configured"):
+    # The mobile-wallet rails behave identically: a merchant configures one by
+    # saving a wallet number (which is what sets is_configured), so the only
+    # gate is "you cannot switch on a rail you have not set up". Looping keeps
+    # the three in step — the Vodafone-only version of this block is how the
+    # scaffolded "contact administrator" error survived long after the rail
+    # became self-serve.
+    for rail, label in (
+        ("vodafone_cash", "Vodafone Cash"),
+        ("we_pay", "WE Pay"),
+        ("orange_cash", "Orange Cash"),
+    ):
+        wanted = getattr(request, f"{rail}_enabled", None)
+        if wanted is None:
+            continue
+        if wanted and not payment_settings.get(rail, {}).get("is_configured"):
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    "Vodafone Cash is not configured. Save your wallet number first."
-                ),
+                detail=f"{label} is not configured. Save your wallet number first.",
             )
-        payment_settings["vodafone_cash"]["enabled"] = request.vodafone_cash_enabled
+        payment_settings.setdefault(rail, {})["enabled"] = wanted
     if request.bank_transfer_enabled is not None:
         if (
             request.bank_transfer_enabled
@@ -3561,6 +3578,184 @@ async def delete_vodafone_cash_credentials(
     return SuccessResponse(
         data=VodafoneCashCredentialsResponse(is_configured=False),
         message="Vodafone Cash settings removed successfully",
+    )
+
+
+# ============ WE Pay Credentials ============
+#
+# Same manual rail as Vodafone Cash, same shape: the merchant publishes a
+# wallet number and a screenshot settles the order. The response model is
+# shared — a wallet's config is a wallet number and the policy around it,
+# whichever network it lives on.
+
+
+@router.put(
+    "/payment/we-pay/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Save WE Pay credentials",
+    operation_id="save_we_pay_credentials",
+)
+async def save_we_pay_credentials(
+    request: SaveVodafoneCashCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save WE Pay configuration for the store.
+
+    The wallet number is normalized and checked against this network's own
+    prefix, so an Orange number cannot be published under WE Pay.
+    """
+    view = await _save_manual_credentials(
+        method=ManualPaymentMethod.WE_PAY,
+        request=request,
+        destination=request.wallet_number,
+        store=store,
+        store_repo=store_repo,
+        onboarding_repo=onboarding_repo,
+    )
+    return SuccessResponse(
+        data=_vodafone_response(view),
+        message="WE Pay settings saved successfully",
+    )
+
+
+@router.get(
+    "/payment/we-pay/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Get WE Pay credentials status",
+    operation_id="get_we_pay_credentials",
+)
+async def get_we_pay_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get the masked WE Pay config status for the store."""
+    block = (store.settings or {}).get("payment", {}).get("we_pay", {})
+    view = await read_config_view(method=ManualPaymentMethod.WE_PAY, block=block)
+    if not view.get("is_configured"):
+        return SuccessResponse(
+            data=_vodafone_response(view),
+            message="WE Pay settings not configured",
+        )
+    if view.get("unreadable"):
+        logger.error(f"Failed to decrypt WE Pay settings for store {store.id}")
+        return SuccessResponse(
+            data=_vodafone_response(view),
+            message="WE Pay settings configured but unreadable",
+        )
+    return SuccessResponse(data=_vodafone_response(view))
+
+
+@router.delete(
+    "/payment/we-pay/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Remove WE Pay credentials",
+    operation_id="delete_we_pay_credentials",
+)
+async def delete_we_pay_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove the stored wallet number and disable WE Pay."""
+    await _delete_manual_credentials(
+        method=ManualPaymentMethod.WE_PAY,
+        store=store,
+        store_repo=store_repo,
+    )
+    return SuccessResponse(
+        data=VodafoneCashCredentialsResponse(is_configured=False),
+        message="WE Pay settings removed successfully",
+    )
+
+
+# ============ Orange Cash Credentials ============
+#
+# Same manual rail as Vodafone Cash, same shape: the merchant publishes a
+# wallet number and a screenshot settles the order. The response model is
+# shared — a wallet's config is a wallet number and the policy around it,
+# whichever network it lives on.
+
+
+@router.put(
+    "/payment/orange-cash/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Save Orange Cash credentials",
+    operation_id="save_orange_cash_credentials",
+)
+async def save_orange_cash_credentials(
+    request: SaveVodafoneCashCredentialsRequest,
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+):
+    """Save Orange Cash configuration for the store.
+
+    The wallet number is normalized and checked against this network's own
+    prefix, so an Orange number cannot be published under WE Pay.
+    """
+    view = await _save_manual_credentials(
+        method=ManualPaymentMethod.ORANGE_CASH,
+        request=request,
+        destination=request.wallet_number,
+        store=store,
+        store_repo=store_repo,
+        onboarding_repo=onboarding_repo,
+    )
+    return SuccessResponse(
+        data=_vodafone_response(view),
+        message="Orange Cash settings saved successfully",
+    )
+
+
+@router.get(
+    "/payment/orange-cash/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Get Orange Cash credentials status",
+    operation_id="get_orange_cash_credentials",
+)
+async def get_orange_cash_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+):
+    """Get the masked Orange Cash config status for the store."""
+    block = (store.settings or {}).get("payment", {}).get("orange_cash", {})
+    view = await read_config_view(method=ManualPaymentMethod.ORANGE_CASH, block=block)
+    if not view.get("is_configured"):
+        return SuccessResponse(
+            data=_vodafone_response(view),
+            message="Orange Cash settings not configured",
+        )
+    if view.get("unreadable"):
+        logger.error(f"Failed to decrypt Orange Cash settings for store {store.id}")
+        return SuccessResponse(
+            data=_vodafone_response(view),
+            message="Orange Cash settings configured but unreadable",
+        )
+    return SuccessResponse(data=_vodafone_response(view))
+
+
+@router.delete(
+    "/payment/orange-cash/credentials",
+    response_model=SuccessResponse[VodafoneCashCredentialsResponse],
+    summary="Remove Orange Cash credentials",
+    operation_id="delete_orange_cash_credentials",
+)
+async def delete_orange_cash_credentials(
+    store: Annotated[Store, Depends(get_current_store)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+):
+    """Remove the stored wallet number and disable Orange Cash."""
+    await _delete_manual_credentials(
+        method=ManualPaymentMethod.ORANGE_CASH,
+        store=store,
+        store_repo=store_repo,
+    )
+    return SuccessResponse(
+        data=VodafoneCashCredentialsResponse(is_configured=False),
+        message="Orange Cash settings removed successfully",
     )
 
 
