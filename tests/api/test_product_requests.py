@@ -110,6 +110,18 @@ def _no_rate_limit(monkeypatch):
     monkeypatch.setattr(storefront_requests, "_over_rate_limit", _allow)
 
 
+@pytest.fixture
+def emitted(monkeypatch):
+    """Capture feed notifications instead of writing + publishing them."""
+    calls = []
+
+    async def _capture(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(storefront_requests, "emit_notification_standalone", _capture)
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_request_is_saved_and_the_merchant_is_emailed():
     db, email = _FakeSession(), _FakeEmail()
@@ -125,12 +137,26 @@ async def test_request_is_saved_and_the_merchant_is_emailed():
 
 
 @pytest.mark.asyncio
-async def test_honeypot_writes_nothing_but_looks_like_success():
+async def test_new_request_notifies_the_merchant_instantly(emitted):
+    """The feed row is what makes the bell ring and the phone buzz."""
+    await _submit(_FakeSession())
+
+    assert len(emitted) == 1
+    call = emitted[0]
+    assert call["kind"] == "product_request.new"
+    assert call["important"] is True
+    assert call["link"] == "/customers/product-requests"
+    assert call["data"]["customer_name"] == "Yahia"
+
+
+@pytest.mark.asyncio
+async def test_honeypot_writes_nothing_but_looks_like_success(emitted):
     db, email = _FakeSession(), _FakeEmail()
     resp = await _submit(db, website="http://spam.example", email=email)
 
     assert db.added == []
     assert email.sent == []
+    assert emitted == []  # a bot must not be able to ring the merchant's bell
     assert resp.data.received is True
     assert resp.data.id is None
 

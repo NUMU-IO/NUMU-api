@@ -26,6 +26,9 @@ from src.api.dependencies.repositories import get_store_repository
 from src.api.dependencies.services import get_email_service, get_storage_service
 from src.api.responses import SuccessResponse
 from src.api.utils.upload_validation import validate_image_upload
+from src.application.services.notification_feed import (
+    emit_notification_standalone,
+)
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.interfaces.services.email_service import EmailMessage
 from src.core.interfaces.services.storage_service import IStorageService, StorageBucket
@@ -206,6 +209,26 @@ async def create_product_request(
             )
         except Exception:
             logger.warning("product_request_email_failed", request_id=str(row.id))
+
+    # Straight to the merchant's feed: the bell updates over SSE within the
+    # second, and `important` also earns a push on the owner's phone. Email is
+    # the record; this is the interruption, and a request answered while the
+    # shopper is still on the site is the one that becomes an order.
+    await emit_notification_standalone(
+        store_id=store_id,
+        category="system",
+        kind="product_request.new",
+        data={
+            "customer_name": row.name,
+            "details": row.details[:140],
+            "images_count": len(urls),
+        },
+        link="/customers/product-requests",
+        entity_type="product_request",
+        entity_id=row.id,
+        important=True,
+        dedupe_key=f"product_request.new:{row.id}",
+    )
 
     logger.info(
         "product_request_created",
