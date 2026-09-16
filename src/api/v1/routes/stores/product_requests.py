@@ -29,7 +29,11 @@ from src.infrastructure.database.models.tenant.product_request import (
     ProductRequestModel,
 )
 
-router = APIRouter()
+# The store id lives in the prefix, the way every other store router declares
+# it. Without it these registered at /stores/product-requests — the storefront
+# half worked (its prefix comes from the API router) and the merchant half was
+# a 404 nobody hit until the hub asked for it.
+router = APIRouter(prefix="/{store_id}/product-requests")
 
 #: What a request can be. "new" until the merchant touches it.
 STATUSES = ("new", "contacted", "sourced", "closed")
@@ -80,7 +84,7 @@ def _out(row: ProductRequestModel) -> ProductRequestOut:
 
 
 @router.get(
-    "/product-requests",
+    "",
     response_model=SuccessResponse[ProductRequestList],
     summary="List product requests",
     operation_id="list_product_requests",
@@ -136,7 +140,7 @@ async def list_product_requests(
 
 
 @router.patch(
-    "/product-requests/{request_id}",
+    "/{request_id}",
     response_model=SuccessResponse[ProductRequestOut],
     summary="Update a product request",
     operation_id="update_product_request",
@@ -180,7 +184,7 @@ async def update_product_request(
 
 
 @router.delete(
-    "/product-requests/{request_id}",
+    "/{request_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a product request",
     operation_id="delete_product_request",
