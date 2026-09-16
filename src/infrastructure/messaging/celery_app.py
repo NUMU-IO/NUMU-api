@@ -85,8 +85,6 @@ celery_app.conf.update(
         # Daily AI insights generation (5 AM UTC, after rollups).
         "src.infrastructure.messaging.tasks.ai_insights_tasks",
         "src.infrastructure.messaging.tasks.social_tasks",
-        # Stream 7.1: Onboarding abandoned nudges
-        "src.infrastructure.messaging.tasks.onboarding_nudge_task",
         # Onboarding inactivity + trial-expiry nudges (separate `_tasks` module).
         "src.infrastructure.messaging.tasks.onboarding_nudge_tasks",
         # Stream 1.5 + 4.6: Demo + trial lifecycle sweepers
@@ -409,11 +407,6 @@ celery_app.conf.beat_schedule = {
     "purge-read-only-tenants": {
         "task": "tasks.purge_read_only_tenants",
         "schedule": crontab(minute=30, hour="*/6"),  # Every 6 hours at :30
-    },
-    # ─── Stream 7.1: Onboarding abandoned nudges (every 6 hours) ─────
-    "send-onboarding-nudges": {
-        "task": "tasks.send_onboarding_nudges",
-        "schedule": crontab(minute=45, hour="*/6"),  # Every 6 hours at :45
     },
     # ─── Staff permission system ────────────────────────────────────────────
     "expire-temporary-grants": {
