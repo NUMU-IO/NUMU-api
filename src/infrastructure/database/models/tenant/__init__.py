@@ -96,6 +96,9 @@ from src.infrastructure.database.models.tenant.payment_transaction import (
     PaymentTransactionModel,
 )
 from src.infrastructure.database.models.tenant.product import ProductModel
+from src.infrastructure.database.models.tenant.product_request import (
+    ProductRequestModel,
+)
 from src.infrastructure.database.models.tenant.product_review import ProductReviewModel
 from src.infrastructure.database.models.tenant.promotion import (
     PromotionDismissalModel,
@@ -220,6 +223,7 @@ __all__ = [
     "RequestPriority",
     "AuditAction",
     "ProductModel",
+    "ProductRequestModel",
     "ProductReviewModel",
     "VariantModel",
     "SeriesModel",
