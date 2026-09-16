@@ -26,6 +26,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.storefront.app_public import (
+    public_manifest,
+    public_settings,
+)
 from src.core.entities.app import AppStatus
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.public.app import (
@@ -155,8 +159,13 @@ async def get_installed_app(store_id: UUID, slug: str):
             description=app.description,
             icon_url=app.icon_url,
             version=app.version,
-            manifest=manifest,
-            settings=install.settings or {},
+            # Default-deny projection. This endpoint is unauthenticated and has
+            # NO host-to-store binding — `store_id` comes off the URL and is
+            # never checked against the caller — so it must never echo an
+            # install's raw settings (the entity docstring describes that field
+            # as holding "API tokens") or the raw manifest.
+            manifest=public_manifest(manifest),
+            settings=public_settings(manifest, install.settings),
             blocks=[
                 AppBlockSummary(
                     type=b.get("type", ""),

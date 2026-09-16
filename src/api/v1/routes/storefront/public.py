@@ -844,12 +844,62 @@ async def storefront_billing_lock_reason(session, store) -> str | None:
     return await resolve_lock_reason(session, tenant)
 
 
+async def _read_installed_apps(session, *, store_id) -> list[dict]:
+    """Enabled installs for a store, projected to what a shopper may see.
+
+    Returns `[{slug, settings}]`, settings filtered to the manifest's
+    `public_settings` allowlist (default-deny — see `storefront/app_public.py`).
+    Suspended apps are excluded by the same `status = PUBLISHED` filter the
+    storefront app routes use, so a suspension takes effect everywhere at once.
+
+    Failures are swallowed to an empty list ON PURPOSE. This runs inside the
+    store payload that every storefront request depends on, and an app-platform
+    hiccup must degrade to "no apps installed" — themes then render their own
+    markup — rather than take down the storefront.
+    """
+    from sqlalchemy import select as _select
+
+    from src.api.v1.routes.storefront.app_public import public_settings
+    from src.core.entities.app import AppStatus
+    from src.infrastructure.database.models.public.app import (
+        AppInstallationModel,
+        AppModel,
+    )
+
+    try:
+        rows = (
+            await session.execute(
+                _select(AppModel, AppInstallationModel)
+                .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
+                .where(
+                    AppInstallationModel.store_id == store_id,
+                    AppInstallationModel.is_enabled.is_(True),
+                    AppModel.status == AppStatus.PUBLISHED,
+                )
+            )
+        ).all()
+    except Exception:  # pragma: no cover - defensive; see docstring
+        from src.core.logging import get_logger
+
+        get_logger(__name__).warning("installed_apps lookup failed", exc_info=True)
+        return []
+
+    return [
+        {
+            "slug": app.slug,
+            "settings": public_settings(app.manifest, install.settings),
+        }
+        for app, install in rows
+    ]
+
+
 def _serialize_public_store(
     store,
     *,
     tenant_feature_flags: dict[str, bool] | None = None,
     indexing_block_reason: str | None = None,
     billing_lock_reason: str | None = None,
+    installed_apps: list[dict] | None = None,
 ) -> dict:
     """Common payload returned by `/store-by-subdomain` and `/store-by-domain`.
 
@@ -927,6 +977,17 @@ def _serialize_public_store(
         "contact_phone": getattr(store, "contact_phone", None),
         "use_nextjs_storefront": getattr(store, "use_nextjs_storefront", False),
         "tenant_feature_flags": tenant_feature_flags or {},
+        # Enabled app installs, each `{slug, settings}` filtered to the
+        # manifest's `public_settings` allowlist.
+        #
+        # It rides the STORE payload rather than its own fetch on purpose. The
+        # SDK's `useApp()` resolves client-side after hydration, so a component
+        # that waited for it would render the theme's own markup on the server,
+        # swap to the app's on hydration, and drop one of them — a visible
+        # double render and a layout shift on every PDP and grid card, on a
+        # mobile-first market. Shipping install state with the store makes the
+        # first paint correct instead.
+        "installed_apps": installed_apps or [],
     }
 
 
@@ -963,6 +1024,7 @@ async def get_store_by_subdomain(
         raise EntityNotFoundError("Store", subdomain, identifier_name="subdomain")
 
     flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
+    apps = await _read_installed_apps(session, store_id=store.id)
     block_reason = await platform_indexing_block_reason(session, store)
     lock_reason = await storefront_billing_lock_reason(session, store)
     payload = _serialize_public_store(
@@ -970,6 +1032,7 @@ async def get_store_by_subdomain(
         tenant_feature_flags=flags,
         indexing_block_reason=block_reason,
         billing_lock_reason=lock_reason,
+        installed_apps=apps,
     )
     await cache.set_store(payload)
     return SuccessResponse(
@@ -1015,6 +1078,7 @@ async def get_store_by_domain(
         raise EntityNotFoundError("Store", domain, identifier_name="domain")
 
     flags = await _read_feature_flags(session, tenant_id=store.tenant_id)
+    apps = await _read_installed_apps(session, store_id=store.id)
     block_reason = await platform_indexing_block_reason(session, store)
     lock_reason = await storefront_billing_lock_reason(session, store)
     payload = _serialize_public_store(
@@ -1022,6 +1086,7 @@ async def get_store_by_domain(
         tenant_feature_flags=flags,
         indexing_block_reason=block_reason,
         billing_lock_reason=lock_reason,
+        installed_apps=apps,
     )
     await cache.set_store(payload)
     return SuccessResponse(
@@ -1147,6 +1212,12 @@ async def browse_products(
             "image_alts": _image_alts(product),
             "tags": product.tags,
             "attributes": product.attributes,
+            # Option axes with their decoration merged on, so a collection card
+            # can paint the same swatches the PDP does. Pure transform over
+            # fields already loaded — no extra query. `variants` deliberately
+            # stays off LIST: without `option_values` there is no variant_id,
+            # and adding to cart without one opens a second cart line.
+            "options": _resolve_options_for_product(product),
             # Meta Catalog product ID — when set, the storefront uses
             # it as `content_ids` on Pixel events. Null = use product.id.
             "meta_catalog_id": product.meta_catalog_id,
@@ -1320,6 +1391,7 @@ async def browse_products_cursor(
             image_alts=_image_alts(product),
             tags=product.tags,
             attributes=product.attributes,
+            options=_resolve_options_for_product(product),
             meta_catalog_id=product.meta_catalog_id,
             brand=product.brand,
             robots_noindex=product.robots_noindex,
@@ -1553,48 +1625,195 @@ async def get_product_by_slug(
     )
 
 
+# The hub writes this grey for any option value it could not resolve a colour
+# for. An axis whose hexes are ALL this value carries no merchant choice — it is
+# the fingerprint of decoration that was overwritten — so it is treated as
+# absent, letting a lower-priority source still supply the real colours.
+_GREY_SENTINEL = "#888888"
+
+
+def _axis_values(axis: dict) -> list:
+    """The value list of a stored or canonical axis.
+
+    Canonical axes key it `values`; the legacy `attributes.variants` blob keys
+    the very same list `options`. Reading only one empties the swatch panel on
+    half the fleet.
+    """
+    values = axis.get("values")
+    if not isinstance(values, list) or not values:
+        values = axis.get("options")
+    return values if isinstance(values, list) else []
+
+
+def _align_to_values(raw, values: list) -> list | None:
+    """Normalise a decoration list to positional alignment with `values`.
+
+    `hexValues` / `imageValues` occur in the wild as both positional arrays and
+    value-keyed dicts. Themes index them positionally (`hex_values[valueIndex]`),
+    so a dict is realigned here rather than passed through in a shape no theme
+    reads.
+    """
+    if isinstance(raw, dict):
+        aligned = [raw.get(v) for v in values]
+        return aligned if any(aligned) else None
+    if isinstance(raw, list) and any(raw):
+        return raw
+    return None
+
+
+def _axis_decoration(axis: dict, values: list) -> dict:
+    """Map one stored axis's decoration onto its public payload keys."""
+    out: dict = {}
+    if axis.get("nameAr"):
+        out["name_ar"] = axis["nameAr"]
+    values_ar = axis.get("optionsAr") or axis.get("valuesAr")
+    if isinstance(values_ar, list) and any(values_ar):
+        out["values_ar"] = values_ar
+    for src, dst in (("hexValues", "hex_values"), ("imageValues", "image_values")):
+        aligned = _align_to_values(axis.get(src), values)
+        if aligned is None:
+            continue
+        if dst == "hex_values":
+            # Drop the sentinel PER VALUE, not just when the whole axis is grey.
+            # The hub writes `defaultHexForName(opt)` into every position on
+            # every save, so a merchant entering "Red, Blue, Ecru" stores two
+            # real hexes and one #888888 — and a mixed axis would otherwise ship
+            # that grey to the storefront as if the merchant had chosen it.
+            # Nulled instead, the value falls down the rest of the ladder
+            # (lexicon -> its own image -> a text pill), which is the documented
+            # fix for "Navy Heather falls back to a default gray".
+            aligned = [
+                None
+                if isinstance(h, str) and h.strip().lower() == _GREY_SENTINEL
+                else h
+                for h in aligned
+            ]
+            if not any(aligned):
+                continue
+        out[dst] = aligned
+    return out
+
+
+def _stored_axes(attrs: dict) -> list[dict]:
+    """Decoration axes as stored on the product, in priority order.
+
+    `attributes.variant_meta.axes` first — that is the key the hub's product
+    editor writes today — then the legacy `attributes.variants` blob it wrote
+    before Wave C. Reading variant_meta first is what makes the hub's
+    forward-written key live; keeping legacy as a fallback is what keeps the
+    products it has not rewritten yet working.
+    """
+    axes: list[dict] = []
+    meta = attrs.get("variant_meta")
+    if isinstance(meta, dict):
+        axes += [a for a in (meta.get("axes") or []) if isinstance(a, dict)]
+    axes += [a for a in (attrs.get("variants") or []) if isinstance(a, dict)]
+    return axes
+
+
+# Decoration keys whose value is a list aligned to the axis's `values`, and so
+# must be merged POSITION BY POSITION rather than whole.
+_POSITIONAL_KEYS = ("hex_values", "image_values", "values_ar")
+
+
+def _decoration_for(axes: list[dict], name, values: list) -> dict:
+    """Merge decoration for one axis name across the priority-ordered sources.
+
+    Merged per KEY — a higher-priority axis carrying only Arabic labels does not
+    shadow the hexes a lower-priority one still holds — and, for the aligned
+    list keys, per POSITION within the key.
+
+    The per-position part matters more than it looks. A product mid-migration
+    has `variant_meta` holding a PARTIAL list (the hub writes a grey sentinel
+    for values it could not resolve, which this module nulls) while the legacy
+    `variants` blob still holds the merchant's real hex for exactly those
+    values. Merging whole lists would let one null in the higher-priority source
+    discard a real colour in the lower one, and the value would fall to a
+    lexicon guess — so a merchant who explicitly chose `#0033CC` would be served
+    a generic blue. Caught in browser QA on a real payload, not in unit tests.
+    """
+    if not name:
+        return {}
+    key = str(name).strip().casefold()
+    merged: dict = {}
+    for axis in axes:
+        if str(axis.get("name") or "").strip().casefold() != key:
+            continue
+        for k, v in _axis_decoration(axis, values or _axis_values(axis)).items():
+            if k in _POSITIONAL_KEYS and isinstance(v, list):
+                current = merged.get(k)
+                if not isinstance(current, list):
+                    merged[k] = list(v)
+                    continue
+                # Fill only the holes the higher-priority source left, and
+                # never GROW past what this axis actually has: a lower-priority
+                # source describing more values than the axis carries would
+                # otherwise attach colours to values that do not exist here.
+                for i, item in enumerate(v):
+                    if i >= len(current):
+                        break
+                    if current[i] in (None, "") and item not in (None, ""):
+                        current[i] = item
+            else:
+                merged.setdefault(k, v)
+    # An aligned list that ended up entirely empty carries nothing.
+    for k in _POSITIONAL_KEYS:
+        if isinstance(merged.get(k), list) and not any(merged[k]):
+            merged.pop(k)
+    return merged
+
+
 def _resolve_options_for_product(product) -> list[dict]:
-    """Option axes for the PDP selector — with a legacy-field fallback.
+    """Option axes for the PDP selector, with their decoration merged back on.
 
     Phase 8.1 stores axes in `product.options` ([{name, position, values}]),
-    written by the hub's "SKU-tracked variants" editor. But the hub's MAIN
-    product editor still writes axes to the legacy `attributes.variants` JSON
-    ([{name, options:[...values], nameAr, optionsAr, hexValues?, imageValues?}])
-    — the very field V2 themes read. A merchant who adds options there leaves
-    `product.options` empty, so the V3 PDP rendered no size/colour selector and
-    let the item be added without a choice.
+    written by the hub's "SKU-tracked variants" editor. But the colour hexes,
+    per-value images and Arabic labels a shopper actually sees have never lived
+    there — they are written to `product.attributes` by the hub's MAIN product
+    editor, as `variant_meta.axes` today and as the legacy `variants` blob
+    before that.
 
-    When `product.options` is empty, derive the axes from `attributes.variants`
-    so those products render a selector on V3 too (matching V2). Real
-    `product.options` always wins when present.
+    So the two halves must be merged. This function used to return
+    `product.options` verbatim the moment it was non-empty, which dropped every
+    decoration key on the floor: from api#578 (2026-09-09) onward, every product
+    with canonical options served a bare {name, position, values}. Themes then
+    fell back to painting the merchant's LABEL as a CSS colour
+    (`background-color:Taupe`), which paints nothing, and Arabic axis labels
+    silently reverted to English. Canonical axes still win on STRUCTURE — names,
+    order and values — they just no longer discard the decoration.
+
+    When `product.options` is empty the axes are derived from `attributes`
+    instead, so products whose options were only ever entered in the main editor
+    still render a selector.
     """
-    options = list(getattr(product, "options", None) or [])
-    if options:
-        return options
+    attrs = getattr(product, "attributes", None)
+    if not isinstance(attrs, dict):
+        attrs = {}
+    stored = _stored_axes(attrs)
 
-    attrs = getattr(product, "attributes", None) or {}
-    legacy = attrs.get("variants") if isinstance(attrs, dict) else None
-    if not isinstance(legacy, list):
-        return []
+    options = [
+        o for o in (getattr(product, "options", None) or []) if isinstance(o, dict)
+    ]
+    if options:
+        merged = []
+        for axis in options:
+            entry = dict(axis)
+            values = _axis_values(entry)
+            for k, v in _decoration_for(stored, entry.get("name"), values).items():
+                entry.setdefault(k, v)
+            merged.append(entry)
+        return merged
 
     derived: list[dict] = []
-    for i, axis in enumerate(legacy):
-        if not isinstance(axis, dict):
-            continue
+    for i, axis in enumerate(stored):
         name = axis.get("name")
-        # Legacy stores the axis VALUES under the `options` key.
-        values = axis.get("options") or axis.get("values") or []
-        if not name or not isinstance(values, list) or not values:
+        values = _axis_values(axis)
+        if not name or not values:
             continue
+        if any(d["name"] == name for d in derived):
+            continue  # the same axis in both sources — the first one wins
         entry: dict = {"name": name, "position": i, "values": values}
-        if axis.get("nameAr"):
-            entry["name_ar"] = axis["nameAr"]
-        if axis.get("optionsAr"):
-            entry["values_ar"] = axis["optionsAr"]
-        if axis.get("hexValues"):
-            entry["hex_values"] = axis["hexValues"]
-        if axis.get("imageValues"):
-            entry["image_values"] = axis["imageValues"]
+        entry.update(_decoration_for(stored, name, values))
         derived.append(entry)
     return derived
 
