@@ -22,7 +22,14 @@ from src.core.entities.instapay import ManualPaymentMethod
 # Vodafone Egypt holds the 010 prefix. Accepted input forms:
 #   01012345678, 1012345678, +201012345678, 00201012345678
 # and the same with spaces / hyphens / Arabic-Indic digits.
-_VODAFONE_LOCAL_RE = re.compile(r"^010\d{8}$")
+#: Each Egyptian wallet lives on its own operator prefix — a WE wallet is
+#: 015, an Orange one 012 — so "is this a valid wallet number?" cannot be
+#: answered without knowing which rail is asking.
+_WALLET_PREFIXES = {
+    ManualPaymentMethod.VODAFONE_CASH: "010",
+    ManualPaymentMethod.WE_PAY: "015",
+    ManualPaymentMethod.ORANGE_CASH: "012",
+}
 
 # Arabic-Indic (U+0660..) and Eastern Arabic-Indic (U+06F0..) digits.
 # Merchants copy their number out of the Ana Vodafone app, which
@@ -39,20 +46,27 @@ class InvalidDestinationError(ValueError):
     """The merchant-supplied destination isn't valid for the rail."""
 
 
-def normalize_wallet_number(raw: str) -> str:
-    """Return an Egyptian Vodafone wallet number as ``010XXXXXXXX``.
+def normalize_wallet_number(
+    raw: str, method: ManualPaymentMethod = ManualPaymentMethod.VODAFONE_CASH
+) -> str:
+    """Return an Egyptian wallet number as ``0XXXXXXXXXX`` for ``method``.
 
-    Normalizing on the way in (rather than storing whatever the
-    merchant typed) matters for two downstream consumers: the OCR
-    wallet-number match rule compares against this string, and the
-    customer-facing instructions panel shows it as a tap-to-copy value
-    that has to be dialable as-is.
+    Normalizing on the way in (rather than storing whatever the merchant
+    typed) matters for two downstream consumers: the OCR wallet-number match
+    rule compares against this string, and the customer-facing instructions
+    panel shows it as a tap-to-copy value that has to be dialable as-is.
 
-    Raises :class:`InvalidDestinationError` on anything that isn't a
-    Vodafone Egypt mobile number.
+    The prefix check is per-rail: a WE wallet is 015, an Orange one 012, a
+    Vodafone one 010. Accepting any of them on every rail would let a merchant
+    publish an Orange number under WE Pay, and the first customer to try would
+    be told to send money to a wallet that cannot receive it.
+
+    Raises :class:`InvalidDestinationError` on anything that is not a mobile
+    number on that rail's network.
     """
+    prefix = _WALLET_PREFIXES[method]
     if not raw:
-        raise InvalidDestinationError("A Vodafone Cash wallet number is required.")
+        raise InvalidDestinationError("A wallet number is required.")
 
     digits = re.sub(r"\D", "", raw.translate(_ARABIC_DIGITS))
 
@@ -64,11 +78,11 @@ def normalize_wallet_number(raw: str) -> str:
     if not digits.startswith("0"):
         digits = "0" + digits
 
-    if not _VODAFONE_LOCAL_RE.match(digits):
+    if not re.match(rf"^{prefix}\d{{8}}$", digits):
         raise InvalidDestinationError(
-            "That doesn't look like a Vodafone Cash number. Egyptian "
-            "Vodafone wallets start with 010 and are 11 digits "
-            "(e.g. 01012345678)."
+            f"That doesn't look like the right number for this wallet. "
+            f"Egyptian wallets on this network start with {prefix} and are "
+            f"11 digits (e.g. {prefix}12345678)."
         )
     return digits
 
@@ -89,7 +103,7 @@ def normalize_ipa(raw: str) -> str:
 def normalize_destination(method: ManualPaymentMethod, raw: str) -> str:
     """Dispatch to the right normalizer for ``method``."""
     if method.is_wallet:
-        return normalize_wallet_number(raw)
+        return normalize_wallet_number(raw, method)
     return normalize_ipa(raw)
 
 

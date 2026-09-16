@@ -15,6 +15,7 @@ from src.api.v1.schemas.tenant.settings import DEPOSIT_GATEWAY_VALUES
 from src.core.entities.instapay import ManualPaymentMethod
 from src.core.interfaces.services.payment_service import PaymentProvider
 from src.infrastructure.external_services.manual_transfer.destinations import (
+    InvalidDestinationError,
     mask_destination,
     normalize_destination,
 )
@@ -66,16 +67,36 @@ def test_checkout_dispatches_every_rail():
 
 
 @pytest.mark.parametrize("method", WALLETS)
-def test_wallet_destinations_normalize_as_phone_numbers(method):
-    assert normalize_destination(method, "+20 100 123 4567").startswith("01")
-
-
-@pytest.mark.parametrize("method", WALLETS)
 def test_wallet_destinations_mask_like_a_phone_number(method):
     masked = mask_destination(method, "01012345678")
     assert masked.startswith("010")
     assert masked.endswith("5678")
     assert "*" in masked
+
+
+@pytest.mark.parametrize(
+    ("method", "prefix"),
+    [
+        (ManualPaymentMethod.VODAFONE_CASH, "010"),
+        (ManualPaymentMethod.WE_PAY, "015"),
+        (ManualPaymentMethod.ORANGE_CASH, "012"),
+    ],
+)
+def test_each_wallet_keeps_to_its_own_network(method, prefix):
+    """A WE wallet is 015, an Orange one 012. Publishing the wrong one sends
+    customers to a wallet that cannot receive their money."""
+    good = f"{prefix}12345678"
+    assert normalize_destination(method, good) == good
+
+    wrong_network = "01112345678" if prefix != "011" else "01012345678"
+    with pytest.raises(InvalidDestinationError):
+        normalize_destination(method, wrong_network)
+
+
+def test_wallet_numbers_survive_how_merchants_paste_them():
+    """+20, 0020, spaces and Arabic-Indic digits all come off the clipboard."""
+    for raw in ("+20 150 123 4567", "0020 150 123 4567", "٠١٥٠١٢٣٤٥٦٧"):
+        assert normalize_destination(ManualPaymentMethod.WE_PAY, raw).startswith("015")
 
 
 def test_wallets_can_carry_a_cod_deposit():
