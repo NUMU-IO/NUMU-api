@@ -34,30 +34,32 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     conn = op.get_bind()
-    insert_stmt = sa.text(
-        """
-        INSERT INTO public.whatsapp_templates
-          (tenant_id, store_id, name, language, category, status,
-           body_text, footer_text, buttons, is_system,
-           submitted_at, created_at, updated_at)
-        SELECT s.tenant_id, s.id,
-               CAST(:name AS text), CAST(:lang AS text),
-               CAST(:cat AS text), 'PENDING',
-               CAST(:body AS text), CAST(:footer AS text),
-               CAST(:buttons AS jsonb), true,
-               NOW(), NOW(), NOW()
-        FROM public.stores s
-        WHERE NOT EXISTS (
-            SELECT 1 FROM public.whatsapp_templates t
-            WHERE t.store_id = s.id
-              AND t.name = CAST(:name AS text)
-              AND t.language = CAST(:lang AS text)
-        )
-        """
-    )
+    # The INSERT is written inline rather than hoisted into a variable so
+    # scripts/check_migration_safety.py can read the SQL it is checking. It is
+    # additive only: rows the running API reads, never a schema change.
     for tmpl in RICH_TEMPLATES:
         conn.execute(
-            insert_stmt,
+            sa.text(
+                """
+                INSERT INTO public.whatsapp_templates
+                  (tenant_id, store_id, name, language, category, status,
+                   body_text, footer_text, buttons, is_system,
+                   submitted_at, created_at, updated_at)
+                SELECT s.tenant_id, s.id,
+                       CAST(:name AS text), CAST(:lang AS text),
+                       CAST(:cat AS text), 'PENDING',
+                       CAST(:body AS text), CAST(:footer AS text),
+                       CAST(:buttons AS jsonb), true,
+                       NOW(), NOW(), NOW()
+                FROM public.stores s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM public.whatsapp_templates t
+                    WHERE t.store_id = s.id
+                      AND t.name = CAST(:name AS text)
+                      AND t.language = CAST(:lang AS text)
+                )
+                """
+            ),
             {
                 "name": tmpl["name"],
                 "lang": tmpl["language"],
