@@ -623,11 +623,7 @@ async def get_instapay_status(
             reference_code=intent.reference_code,
             method=intent.method.value,
             destination=intent.display_destination,
-            destination_kind=(
-                "wallet_number"
-                if intent.method is ManualPaymentMethod.VODAFONE_CASH
-                else "ipa"
-            ),
+            destination_kind=("wallet_number" if intent.method.is_wallet else "ipa"),
             supports_qr=intent.method is ManualPaymentMethod.INSTAPAY,
             qr_payload=(
                 intent.qr_payload or None

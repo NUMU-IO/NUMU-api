@@ -31,7 +31,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.instapay import (
     ManualPaymentIntent,
-    ManualPaymentMethod,
     PaymentProof,
     PaymentProofStatus,
 )
@@ -348,11 +347,7 @@ class SubmitPaymentProofUseCase:
         # come up empty.
         ocr_result: ProofVisionResult = await vision.extract(
             image_bytes,
-            destination_kind=(
-                "wallet_number"
-                if intent.method is ManualPaymentMethod.VODAFONE_CASH
-                else "ipa"
-            ),
+            destination_kind=("wallet_number" if intent.method.is_wallet else "ipa"),
         )
 
         # (#1) Serialize the cap evaluation + proof write per store so

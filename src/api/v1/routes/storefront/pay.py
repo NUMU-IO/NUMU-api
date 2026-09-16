@@ -44,6 +44,7 @@ from src.api.dependencies.repositories import (
 )
 from src.api.responses import SuccessResponse
 from src.config.settings import settings
+from src.core.entities.instapay import ManualPaymentMethod
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -141,7 +142,9 @@ def _enabled_online_methods(store_settings: dict | None) -> list[str]:
     return out
 
 
-_MANUAL_PAY_METHODS = ("instapay", "vodafone_cash")
+# Every rail the enum knows, so a new one is a single enum entry rather than a
+# tuple somebody forgets to extend.
+_MANUAL_PAY_METHODS = tuple(m.value for m in ManualPaymentMethod)
 
 
 def _enabled_manual_methods(store_settings: dict | None) -> list[str]:

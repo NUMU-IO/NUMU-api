@@ -88,7 +88,7 @@ def normalize_ipa(raw: str) -> str:
 
 def normalize_destination(method: ManualPaymentMethod, raw: str) -> str:
     """Dispatch to the right normalizer for ``method``."""
-    if method is ManualPaymentMethod.VODAFONE_CASH:
+    if method.is_wallet:
         return normalize_wallet_number(raw)
     return normalize_ipa(raw)
 
@@ -103,7 +103,7 @@ def mask_destination(method: ManualPaymentMethod, value: str) -> str:
     """
     if not value:
         return ""
-    if method is ManualPaymentMethod.VODAFONE_CASH:
+    if method.is_wallet:
         # 010****5678 — enough for the merchant to recognise their own.
         return f"{value[:3]}{'*' * max(0, len(value) - 7)}{value[-4:]}"
     handle, _, bank = value.partition("@")

@@ -69,6 +69,8 @@ EGYPT = Market(
         "kashier",
         "instapay",
         "vodafone_cash",
+        "we_pay",
+        "orange_cash",
         "cod",
     ),
     timezone="Africa/Cairo",

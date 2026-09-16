@@ -378,6 +378,16 @@ async def configure_from_wizard(
                 "is_configured": False,
                 "last_configured": None,
             },
+            "we_pay": {
+                "enabled": False,
+                "is_configured": False,
+                "last_configured": None,
+            },
+            "orange_cash": {
+                "enabled": False,
+                "is_configured": False,
+                "last_configured": None,
+            },
             "bank_transfer": {
                 "enabled": False,
                 "is_configured": False,

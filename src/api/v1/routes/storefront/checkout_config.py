@@ -44,6 +44,8 @@ _PROVIDER_LABELS: dict[str, tuple[str, str]] = {
     "kashier_applepay": ("Apple Pay", "Apple Pay"),
     "instapay": ("InstaPay", "انستا باي"),
     "vodafone_cash": ("Vodafone Cash", "فودافون كاش"),
+    "we_pay": ("WE Pay", "وي باي"),
+    "orange_cash": ("Orange Cash", "أورنج كاش"),
     "bank_transfer": ("Bank Transfer", "تحويل بنكي"),
     "moyasar": ("Card / mada / Apple Pay (Moyasar)", "بطاقة / مدى / Apple Pay (ميسر)"),
     "hyperpay": ("HyperPay", "هايبر باي"),

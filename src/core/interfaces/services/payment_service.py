@@ -19,6 +19,8 @@ class PaymentProvider(StrEnum):
     FAWATERAK = "fawaterak"  # Fawaterak payment gateway
     INSTAPAY = "instapay"  # InstaPay (manual IPA + proof upload)
     VODAFONE_CASH = "vodafone_cash"  # Wallet number + proof upload (manual)
+    WE_PAY = "we_pay"  # WE Pay wallet — same manual rail as Vodafone Cash
+    ORANGE_CASH = "orange_cash"  # Orange Cash wallet — same manual rail
     # Saudi (KSA) payment methods — Phase 3
     MOYASAR = "moyasar"  # Moyasar gateway (card, mada, Apple Pay) — implemented
     HYPERPAY = "hyperpay"  # HyperPay/COPYandPAY (card, mada, Apple Pay) — stub

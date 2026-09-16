@@ -14,10 +14,24 @@ class PaymentMethodStatus(BaseModel):
     last_configured: str | None = None
 
 
-# Gateway providers allowed to carry a COD deposit. Bank transfer and
-# vodafone-cash aren't on this list because they're manual/async and
-# would defeat the "confirm before create" purpose.
-DepositGateway = Literal["paymob", "kashier", "fawry", "fawaterak", "instapay"]
+# Gateway providers allowed to carry a COD deposit.
+#
+# The mobile wallets are on this list even though they settle manually: the
+# customer transfers and uploads a receipt, and the order waits at
+# awaiting-proof until that is approved (instantly, when the merchant has
+# auto-approval on). That is slower than a card, but it is how most Egyptian
+# shoppers actually pay, and a deposit nobody can pay protects nothing.
+# Bank transfer stays off: there is no receipt to read and settlement is days.
+DepositGateway = Literal[
+    "paymob",
+    "kashier",
+    "fawry",
+    "fawaterak",
+    "instapay",
+    "vodafone_cash",
+    "we_pay",
+    "orange_cash",
+]
 
 DEPOSIT_GATEWAY_VALUES: tuple[str, ...] = (
     "paymob",
@@ -25,6 +39,9 @@ DEPOSIT_GATEWAY_VALUES: tuple[str, ...] = (
     "fawry",
     "fawaterak",
     "instapay",
+    "vodafone_cash",
+    "we_pay",
+    "orange_cash",
 )
 
 
@@ -134,6 +151,8 @@ class PaymentSettingsResponse(BaseModel):
     kashier: PaymentMethodStatus = Field(default_factory=PaymentMethodStatus)
     instapay: PaymentMethodStatus = Field(default_factory=PaymentMethodStatus)
     vodafone_cash: PaymentMethodStatus
+    we_pay: PaymentMethodStatus
+    orange_cash: PaymentMethodStatus
     bank_transfer: PaymentMethodStatus
     bank_accounts_count: int = 0
     # Flattened onto the response so the merchant hub can render it
@@ -152,6 +171,8 @@ class UpdatePaymentSettingsRequest(BaseModel):
     instapay_enabled: bool | None = None
     moyasar_enabled: bool | None = None
     vodafone_cash_enabled: bool | None = None
+    we_pay_enabled: bool | None = None
+    orange_cash_enabled: bool | None = None
     bank_transfer_enabled: bool | None = None
     # Send the full policy object to replace it; omit to leave unchanged.
     cod_deposit_policy: CodDepositPolicy | None = None
