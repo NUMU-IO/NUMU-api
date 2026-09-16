@@ -271,6 +271,29 @@ class CreateStoreUseCase:
         except Exception:
             pass
 
+        # Seed the store's WhatsApp system template rows. Every automated
+        # send is guarded on one of these rows being APPROVED, and until now
+        # they were only ever created by backfill migrations — so a store
+        # created after the last one had none, and every automation (order
+        # confirmation, shipped, delivered, COD Autopilot) skipped silently.
+        # Seeded PENDING; the 15-minute poll flips them to APPROVED off the
+        # platform WABA. Best-effort, like the menus above.
+        try:
+            from src.application.services.whatsapp_template_seed import (
+                seed_system_templates,
+            )
+
+            await seed_system_templates(
+                self.store_repository.session,
+                store_id=created_store.id,
+                tenant_id=tenant.id,
+            )
+        except Exception:
+            logger.warning(
+                "whatsapp_template_seed_failed",
+                extra={"store_id": str(created_store.id)},
+            )
+
         # Initialize onboarding with create_store step already completed
         if self.onboarding_repository:
             from src.application.use_cases.onboarding.auto_complete import (

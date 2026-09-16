@@ -697,7 +697,53 @@ async def update_cod_trust_settings_endpoint(
 # ============ COD Autopilot (004-cod-autopilot) ============
 
 
-def _build_cod_autopilot_response(store: Store) -> CodAutopilotResponse:
+#: The two templates COD Autopilot sends. Both must be APPROVED or the
+#: send guard blocks every message and the feature runs dark.
+AUTOPILOT_TEMPLATES = ("cod_ship_digest_v1", "order_delivery_check_v1")
+
+
+async def _autopilot_template_state(
+    db: AsyncSession, store_id
+) -> tuple[bool, list[str]]:
+    """(both approved?, the ones still waiting) for this store."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.tenant.whatsapp_template import (
+        WhatsAppTemplateModel,
+    )
+
+    rows = (
+        (
+            await db.execute(
+                select(WhatsAppTemplateModel).where(
+                    WhatsAppTemplateModel.store_id == store_id,
+                    WhatsAppTemplateModel.name.in_(AUTOPILOT_TEMPLATES),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    approved = {
+        r.name for r in rows if getattr(r.status, "value", r.status) == "APPROVED"
+    }
+    pending = [
+        f"{r.name}/{r.language}"
+        for r in rows
+        if getattr(r.status, "value", r.status) != "APPROVED"
+    ]
+    # A store with no row at all is not 'ready' either — that is exactly the
+    # silent state this surfaces.
+    missing = [n for n in AUTOPILOT_TEMPLATES if not any(r.name == n for r in rows)]
+    return (len(approved) == len(AUTOPILOT_TEMPLATES)), sorted(pending + missing)
+
+
+def _build_cod_autopilot_response(
+    store: Store,
+    *,
+    templates_ready: bool = False,
+    templates_pending: list[str] | None = None,
+) -> CodAutopilotResponse:
     from src.application.services.cod_autopilot_service import (
         get_cod_autopilot_settings,
     )
@@ -716,6 +762,11 @@ def _build_cod_autopilot_response(store: Store) -> CodAutopilotResponse:
         # UI must surface it.
         digest_deliverable=bool(store.contact_phone),
         auto_rto_days=int(cod_trust.get("auto_rto_days", 14)),
+        templates_ready=templates_ready,
+        templates_pending=templates_pending or [],
+        cod_enabled=bool(
+            ((store.settings or {}).get("payment") or {}).get("cod", {}).get("enabled")
+        ),
     )
 
 
@@ -727,12 +778,16 @@ def _build_cod_autopilot_response(store: Store) -> CodAutopilotResponse:
 )
 async def get_cod_autopilot_settings_endpoint(
     store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """COD Autopilot (WhatsApp ship digest + delivery checks + assumed-
     delivered fallback) settings for the store. Defaults apply when the
     section is absent."""
+    ready, pending = await _autopilot_template_state(db, store.id)
     return SuccessResponse(
-        data=_build_cod_autopilot_response(store),
+        data=_build_cod_autopilot_response(
+            store, templates_ready=ready, templates_pending=pending
+        ),
         message="COD Autopilot settings retrieved",
     )
 
@@ -747,6 +802,7 @@ async def update_cod_autopilot_settings_endpoint(
     request: UpdateCodAutopilotRequest,
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Update COD Autopilot settings. Disabling takes effect immediately
     (FR-023) — the beat sweeps re-read settings every run and skip
@@ -768,8 +824,11 @@ async def update_cod_autopilot_settings_endpoint(
     store.settings = settings
     await store_repo.update(store)
 
+    ready, pending = await _autopilot_template_state(db, store.id)
     return SuccessResponse(
-        data=_build_cod_autopilot_response(store),
+        data=_build_cod_autopilot_response(
+            store, templates_ready=ready, templates_pending=pending
+        ),
         message="COD Autopilot settings updated",
     )
 
