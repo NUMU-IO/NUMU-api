@@ -78,6 +78,7 @@ from src.api.v1.routes.stores import pages as pages_module
 from src.api.v1.routes.stores import payment_proofs as payment_proofs_module
 from src.api.v1.routes.stores import payments as payments_module
 from src.api.v1.routes.stores import plan as plan_module
+from src.api.v1.routes.stores import product_requests as product_requests_module
 from src.api.v1.routes.stores import products as products_module
 from src.api.v1.routes.stores import promotions as promotions_module
 from src.api.v1.routes.stores import reconciliation as reconciliation_module
@@ -135,6 +136,7 @@ router.include_router(variants_module.router, tags=["Store Product Variants"])
 # include order, so the UUID-typed wildcard wins and 422s on the
 # non-UUID literal segment).
 router.include_router(payment_proofs_module.router, tags=["Store InstaPay Proofs"])
+router.include_router(product_requests_module.router, tags=["Store Product Requests"])
 router.include_router(orders_module.router, tags=["Store Orders"])
 router.include_router(
     abandoned_checkouts_module.router, tags=["Store Abandoned Checkouts"]

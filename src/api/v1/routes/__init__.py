@@ -161,6 +161,9 @@ from src.api.v1.routes.storefront import (
     pickup_locations_router as storefront_pickup_locations_router,
 )
 from src.api.v1.routes.storefront import (
+    product_requests_router as storefront_product_requests_router,
+)
+from src.api.v1.routes.storefront import (
     promotions_router as storefront_promotions_router,
 )
 
@@ -541,6 +544,13 @@ api_router.include_router(
     storefront_payment_proofs_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Payment Proofs"],
+)
+
+# Storefront - "can you get me this?" request form (public, scoped to store)
+api_router.include_router(
+    storefront_product_requests_router,
+    prefix="/storefront/store/{store_id}",
+    tags=["Storefront - Product Requests"],
 )
 
 # Storefront - pickup locations (public, Phase 7.2)

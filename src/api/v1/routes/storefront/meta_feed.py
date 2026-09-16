@@ -158,7 +158,12 @@ def _store_shipping(store: object, currency: str) -> dict | None:
 
 
 def _product_to_feed_item(
-    product: dict, *, store_url: str, currency: str, shipping: dict | None = None
+    product: dict,
+    *,
+    store_url: str,
+    currency: str,
+    shipping: dict | None = None,
+    store_name: str | None = None,
 ) -> dict | None:
     """Map one row from ``products`` table → feed entry. Returns None
     when the product should be excluded (out of stock + tracked, etc.).
@@ -219,7 +224,10 @@ def _product_to_feed_item(
         "item_group_id": str(product["id"]),
         "title": str(product.get("name") or "")[:150],
         "description": str(
-            product.get("description") or product.get("short_description") or ""
+            product.get("description")
+            or product.get("short_description")
+            or product.get("name")
+            or ""
         )[:5000],
         "link": product_url,
         "image_link": image_link,
@@ -230,7 +238,7 @@ def _product_to_feed_item(
         # Real column first; `attributes.brand` stays as the legacy fallback so
         # merchants who set it through the API before the column existed don't
         # lose it.
-        "brand": product.get("brand") or attrs.get("brand"),
+        "brand": product.get("brand") or attrs.get("brand") or store_name,
         "product_type": attrs.get("product_type"),
         # Google's taxonomy — a required-ish quality signal for free listings.
         "google_product_category": attrs.get("google_product_category"),
@@ -323,7 +331,11 @@ async def meta_catalog_feed(
     items: list[dict] = []
     for p in products_raw:
         entry = _product_to_feed_item(
-            p, store_url=store_url, currency=currency, shipping=shipping
+            p,
+            store_url=store_url,
+            currency=currency,
+            shipping=shipping,
+            store_name=store.name,
         )
         if entry is not None:
             items.append(entry)

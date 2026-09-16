@@ -163,6 +163,32 @@ class TestProductToFeedItem:
         )
         assert item["description"] == "Short version"
 
+    def test_description_falls_back_to_name(self):
+        item = _product_to_feed_item(
+            _row(description=None, short_description=None),
+            store_url="https://t.numueg.app",
+            currency="EGP",
+        )
+        assert item["description"] == "Test Product"
+
+    def test_brand_falls_back_to_store_name(self):
+        item = _product_to_feed_item(
+            _row(attributes={}),
+            store_url="https://t.numueg.app",
+            currency="EGP",
+            store_name="My Store",
+        )
+        assert item["brand"] == "My Store"
+
+    def test_product_brand_beats_store_name(self):
+        item = _product_to_feed_item(
+            _row(brand="RealBrand"),
+            store_url="https://t.numueg.app",
+            currency="EGP",
+            store_name="My Store",
+        )
+        assert item["brand"] == "RealBrand"
+
     def test_attributes_not_a_dict_handled_gracefully(self):
         # Defensive against half-saved data — older products might have
         # attributes stored as a list or None.

@@ -45,6 +45,9 @@ from src.api.v1.routes.storefront.pay import router as pay_router
 from src.api.v1.routes.storefront.payment_proofs import (
     router as payment_proofs_router,
 )
+from src.api.v1.routes.storefront.product_requests import (
+    router as product_requests_router,
+)
 from src.api.v1.routes.storefront.promotions import router as promotions_router
 from src.api.v1.routes.storefront.public import (
     lookup_router as storefront_lookup_router,
@@ -89,6 +92,7 @@ __all__ = [
     "upsell_router",
     "pay_router",
     "payment_proofs_router",
+    "product_requests_router",
     "promotions_router",
     "tracking_router",
     "order_tracking_router",
