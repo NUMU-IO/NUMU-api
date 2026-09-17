@@ -37,8 +37,17 @@ from src.api.v1.schemas.stores.whatsapp_connection import (
     WhatsAppStatus,
 )
 from src.application.services import admin_notifications
+from src.application.services.whatsapp_entitlement import (
+    BillingUnavailableError,
+    entitlement,
+    open_payment,
+)
 from src.config import settings
 from src.core.entities.store import Store
+from src.core.entities.subscription_payment import SubscriptionPaymentIntentStatus
+from src.infrastructure.database.models.public.subscription_payment import (
+    SubscriptionPaymentIntentModel,
+)
 from src.infrastructure.database.models.public.whatsapp_access import (
     WhatsAppAccessRequestModel,
     WhatsAppAccessStatus,
@@ -935,7 +944,37 @@ def _access_state(row: WhatsAppAccessRequestModel | None) -> WhatsAppAccessState
         # Only a rejected store may re-request itself; pending/approved/disabled
         # are all terminal from the merchant's side (admin drives the rest).
         can_request=row.status == WhatsAppAccessStatus.REJECTED,
+        amount_cents=row.amount_cents,
+        currency=row.currency,
+        billing_cycle=row.billing_cycle,
+        active_until=row.active_until,
+        message_allowance=row.message_allowance,
+        payment_intent_id=str(row.payment_intent_id) if row.payment_intent_id else None,
     )
+
+
+async def _access_response(db: AsyncSession, store_id: UUID) -> WhatsAppAccessState:
+    """The gate state plus what the merchant needs once access is paid for:
+    whether it sends right now, how much of the period is used, and the open
+    bill to pay if there is one."""
+    row = await _load_access_row(db, store_id)
+    state = _access_state(row)
+    live = await entitlement(db, store_id)
+    state.can_send = live.active
+    state.blocked_reason = live.reason
+    state.messages_used = live.used
+
+    if row is not None and row.payment_intent_id is not None:
+        intent = await db.get(SubscriptionPaymentIntentModel, row.payment_intent_id)
+        if intent is not None and intent.status in (
+            SubscriptionPaymentIntentStatus.AWAITING_PROOF.value,
+            SubscriptionPaymentIntentStatus.UNDER_REVIEW.value,
+        ):
+            state.payment_status = intent.status
+            state.payment_reference = intent.special_reference
+            state.payment_destination = intent.display_destination
+            state.payment_expires_at = intent.expires_at
+    return state
 
 
 @router.get(
@@ -951,7 +990,52 @@ async def get_whatsapp_access(
     """Return whether this store is allowed to use WhatsApp (and where in the
     request lifecycle it is). Drives the merchant-hub gate above the connection
     UI. ``status='none'`` means no request has been made yet."""
-    return _access_state(await _load_access_row(db, store.id))
+    return await _access_response(db, store.id)
+
+
+@router.post(
+    "/access/pay",
+    response_model=WhatsAppAccessState,
+    summary="Open (or resume) the bill for this store's WhatsApp access",
+    operation_id="pay_whatsapp_access",
+)
+async def pay_whatsapp_access(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+) -> WhatsAppAccessState:
+    """Renew at the price an admin set, without waiting on the admin.
+
+    The receipt is uploaded to ``/billing/instapay-intents/{payment_intent_id}/proof``
+    like any subscription payment; verifying it extends access by one period.
+    """
+    row = await _load_access_row(db, store.id)
+    if (
+        row is None
+        or not row.amount_cents
+        or row.status
+        not in (
+            WhatsAppAccessStatus.AWAITING_PAYMENT,
+            WhatsAppAccessStatus.APPROVED,
+            WhatsAppAccessStatus.EXPIRED,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "whatsapp_access_not_priced",
+                "message": "WhatsApp access has not been priced for this store yet.",
+            },
+        )
+    try:
+        await open_payment(db, row, created_by_user_id=user_id)
+    except BillingUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Payments are not configured.",
+        ) from exc
+    await db.commit()
+    return await _access_response(db, store.id)
 
 
 @router.post(

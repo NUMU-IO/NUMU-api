@@ -129,7 +129,15 @@ class BYOValidationFailure(BaseModel):
 # request / pending / rejected / disabled states. ``none`` = no row yet.
 
 WhatsAppAccessStatusLiteral = Literal[
-    "none", "pending", "approved", "rejected", "disabled"
+    "none",
+    "pending",
+    # Priced by an admin, waiting on the merchant's transfer + receipt.
+    "awaiting_payment",
+    "approved",
+    "rejected",
+    "disabled",
+    # The paid period ran out; sending is off until the next payment.
+    "expired",
 ]
 
 
@@ -145,6 +153,42 @@ class WhatsAppAccessState(BaseModel):
     review_reason: str | None = Field(
         default=None,
         description="Admin's reason on reject/disable; safe to show the merchant.",
+    )
+    # ── Paid access ──────────────────────────────────────────────────────
+    amount_cents: int | None = Field(
+        default=None, description="What this store pays per period, in piasters."
+    )
+    currency: str | None = None
+    billing_cycle: str | None = None
+    active_until: datetime | None = Field(
+        default=None, description="Access runs until this instant. None = no expiry."
+    )
+    message_allowance: int | None = Field(
+        default=None,
+        description="Template messages included per period. None = uncapped.",
+    )
+    messages_used: int = Field(
+        default=0, description="Template messages sent in the current period."
+    )
+    payment_status: str | None = Field(
+        default=None,
+        description="Open bill: awaiting_proof, or under_review once a receipt is in.",
+    )
+    payment_expires_at: datetime | None = None
+    payment_reference: str | None = Field(
+        default=None, description="Put this in the transfer note so OCR can match it."
+    )
+    payment_destination: str | None = Field(
+        default=None, description="InstaPay address the merchant sends to."
+    )
+    payment_intent_id: str | None = None
+    can_send: bool = Field(
+        default=False,
+        description="Whether WhatsApp will actually send for this store right now.",
+    )
+    blocked_reason: str | None = Field(
+        default=None,
+        description="Why sending is off: awaiting_payment, expired, allowance_exhausted…",
     )
     can_request: bool = Field(
         default=True,

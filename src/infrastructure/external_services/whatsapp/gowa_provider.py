@@ -69,6 +69,7 @@ from src.infrastructure.external_services.whatsapp.gowa_guard import (
 )
 from src.infrastructure.external_services.whatsapp.messaging_service import (
     WhatsAppMessagingService,
+    access_not_active_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,9 @@ class GowaProvider(WhatsAppMessagingService):
         # Only guard real sends. A bare instance (webhook signature checks)
         # has no device to pace.
         self._guard = guard or (GowaSendGuard() if device_id else None)
+        # Set by get_whatsapp_service() from the store's paid WhatsApp access.
+        self.access_active = True
+        self.access_blocked_reason: str | None = None
 
     # ── identity ────────────────────────────────────────────────────────────
 
@@ -382,6 +386,8 @@ class GowaProvider(WhatsAppMessagingService):
         Signature-compatible with the Meta transport so the notification layer
         is provider-agnostic.
         """
+        if not self.access_active:
+            return access_not_active_result(self.access_blocked_reason)
         language = content.recipient.language or "en"
         rendered = render_plain_template(
             content.type, language, content.template_params or {}

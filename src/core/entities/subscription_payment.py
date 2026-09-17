@@ -20,6 +20,8 @@ class SubscriptionPaymentPurpose(StrEnum):
 
     NEW_SUBSCRIPTION = "new_subscription"  # activate plan (trial/read_only → active)
     RENEWAL = "renewal"  # extend next_renewal_at by one cycle
+    #: Buys one store WhatsApp access for a period — never touches the plan.
+    WHATSAPP_ADDON = "whatsapp_addon"
 
 
 class SubscriptionPaymentIntentStatus(StrEnum):

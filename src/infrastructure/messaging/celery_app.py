@@ -72,6 +72,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.whatsapp_scheduled_send_dispatcher",
         # backend-030 / US5 — PENDING template polling sync (every 15 min).
         "src.infrastructure.messaging.tasks.whatsapp_template_poll_task",
+        # Paid WhatsApp access — hourly expiry of lapsed periods.
+        "src.infrastructure.messaging.tasks.whatsapp_access_expiry_task",
         # backend-030 / US6 — 90-day dead-letter purge (daily at 03:00 UTC).
         "src.infrastructure.messaging.tasks.whatsapp_dead_letter_purge",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
@@ -636,6 +638,12 @@ celery_app.conf.beat_schedule = {
     # backend-030 / US5 — poll Meta for PENDING template statuses
     # (FR-028 / FR-028a). 15-minute cadence; only PENDING templates
     # older than 5 minutes are polled per FR-028a.
+    # Paid WhatsApp access: mark lapsed periods expired so the hub shows the
+    # renewal rather than a channel that silently stopped sending.
+    "expire-whatsapp-access": {
+        "task": "tasks.expire_whatsapp_access",
+        "schedule": crontab(minute=10),  # Hourly at :10
+    },
     "poll-whatsapp-pending-templates": {
         "task": "numu_api.whatsapp.poll_pending_templates",
         "schedule": 15 * 60.0,

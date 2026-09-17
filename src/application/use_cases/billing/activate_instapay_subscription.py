@@ -72,6 +72,54 @@ async def activate_verified_subscription_payment(
         )
         return ActivationResult(activated=False, tenant=None, next_renewal_at=None)
 
+    # WhatsApp add-on: the money buys one store's access to the channel, not a
+    # platform plan. Same intent, same proof, same OCR — a different thing
+    # bought, so it never touches tenant.plan or the renewal date. The store is
+    # resolved from the access row that points at this intent, which the admin
+    # set when they priced the request.
+    if intent.purpose == SubscriptionPaymentPurpose.WHATSAPP_ADDON.value:
+        from src.application.services.whatsapp_entitlement import (
+            activate_paid_access,
+        )
+        from src.infrastructure.database.models.public.whatsapp_access import (
+            WhatsAppAccessRequestModel,
+        )
+
+        access = (
+            await db.execute(
+                select(WhatsAppAccessRequestModel).where(
+                    WhatsAppAccessRequestModel.payment_intent_id == intent.id
+                )
+            )
+        ).scalar_one_or_none()
+        row = (
+            await activate_paid_access(
+                db,
+                store_id=access.store_id,
+                billing_cycle=intent.billing_cycle,
+                allowance=access.message_allowance,
+                intent_id=intent.id,
+            )
+            if access is not None
+            else None
+        )
+        intent.status = SubscriptionPaymentIntentStatus.SUCCEEDED.value
+        intent.activated_at = datetime.now(UTC)
+        await db.flush()
+        logger.info(
+            "whatsapp_addon_payment_activated",
+            extra={
+                "intent_id": str(intent.id),
+                "store_id": str(access.store_id) if access else None,
+                "active_until": row.active_until.isoformat() if row else None,
+            },
+        )
+        return ActivationResult(
+            activated=bool(row),
+            tenant=None,
+            next_renewal_at=row.active_until if row else None,
+        )
+
     tenant = (
         await db.execute(
             select(TenantModel)
