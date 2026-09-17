@@ -25,7 +25,15 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID as PyUUID
 
-from sqlalchemy import DateTime, Enum, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,9 +50,13 @@ class WhatsAppAccessStatus(StrEnum):
     """
 
     PENDING = "pending"
+    #: Priced by an admin, waiting on the merchant's transfer + receipt.
+    AWAITING_PAYMENT = "awaiting_payment"
     APPROVED = "approved"
     REJECTED = "rejected"
     DISABLED = "disabled"
+    #: The paid period ran out. Re-activates on the next verified payment.
+    EXPIRED = "expired"
 
 
 class WhatsAppAccessRequestModel(Base, UUIDMixin, TimestampMixin):
@@ -93,6 +105,26 @@ class WhatsAppAccessRequestModel(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
     review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Paid access (the subscription that turns the channel on) ──────────
+    #: What the admin priced this store at, and the intent the merchant pays
+    #: against. The intent carries the InstaPay reference, the proof upload
+    #: and the OCR auto-verify — this row only records which one it is.
+    plan_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    billing_cycle: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    payment_intent_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    #: Access runs until this instant. Past it the expiry sweep flips the row
+    #: to EXPIRED and sending stops.
+    active_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: Template messages included in the paid period. NULL = uncapped (an
+    #: admin grant), 0 = nothing included.
+    message_allowance: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     def __repr__(self) -> str:
         return (

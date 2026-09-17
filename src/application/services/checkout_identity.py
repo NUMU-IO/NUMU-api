@@ -120,9 +120,14 @@ async def otp_available(
     from src.application.services.platform_flags import (
         is_checkout_identity_platform_enabled,
     )
+    from src.application.services.whatsapp_entitlement import entitlement
 
     try:
         if not await is_checkout_identity_platform_enabled(db_session):
+            return False
+        # The code goes out on the store's paid WhatsApp access. Without it the
+        # send is refused, so offering the gate would strand the customer.
+        if not (await entitlement(db_session, store_id)).active:
             return False
     except Exception:
         logger.exception("checkout_identity_platform_flag_read_failed")

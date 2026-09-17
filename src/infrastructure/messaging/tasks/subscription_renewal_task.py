@@ -295,6 +295,7 @@ async def _has_succeeded_instapay_payment(session, tenant_id) -> bool:  # noqa: 
             .where(
                 SubscriptionPaymentIntentModel.tenant_id == tenant_id,
                 SubscriptionPaymentIntentModel.status == "succeeded",
+                SubscriptionPaymentIntentModel.purpose != "whatsapp_addon",
             )
             .limit(1)
         )

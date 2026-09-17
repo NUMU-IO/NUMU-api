@@ -78,6 +78,7 @@ from src.api.v1.schemas.tenant.settings import (
     WhatsAppNotifications,
     WhatsAppSettingsResponse,
 )
+from src.application.services.whatsapp_entitlement import entitlement
 from src.application.use_cases.onboarding.auto_complete import (
     try_complete_onboarding_step,
 )
@@ -760,6 +761,7 @@ def _build_cod_autopilot_response(
     *,
     templates_ready: bool = False,
     templates_pending: list[str] | None = None,
+    whatsapp_access_active: bool = False,
 ) -> CodAutopilotResponse:
     from src.application.services.cod_autopilot_service import (
         get_cod_autopilot_settings,
@@ -781,6 +783,7 @@ def _build_cod_autopilot_response(
         auto_rto_days=int(cod_trust.get("auto_rto_days", 14)),
         templates_ready=templates_ready,
         templates_pending=templates_pending or [],
+        whatsapp_access_active=whatsapp_access_active,
         cod_enabled=bool(
             ((store.settings or {}).get("payment") or {}).get("cod", {}).get("enabled")
         ),
@@ -803,7 +806,10 @@ async def get_cod_autopilot_settings_endpoint(
     ready, pending = await _autopilot_template_state(db, store.id)
     return SuccessResponse(
         data=_build_cod_autopilot_response(
-            store, templates_ready=ready, templates_pending=pending
+            store,
+            templates_ready=ready,
+            templates_pending=pending,
+            whatsapp_access_active=(await entitlement(db, store.id)).active,
         ),
         message="COD Autopilot settings retrieved",
     )
@@ -844,7 +850,10 @@ async def update_cod_autopilot_settings_endpoint(
     ready, pending = await _autopilot_template_state(db, store.id)
     return SuccessResponse(
         data=_build_cod_autopilot_response(
-            store, templates_ready=ready, templates_pending=pending
+            store,
+            templates_ready=ready,
+            templates_pending=pending,
+            whatsapp_access_active=(await entitlement(db, store.id)).active,
         ),
         message="COD Autopilot settings updated",
     )

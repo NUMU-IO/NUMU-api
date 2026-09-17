@@ -232,6 +232,9 @@ class CodAutopilotResponse(BaseModel):
     templates_ready: bool = False
     #: Templates still waiting on approval, as "name/language".
     templates_pending: list[str] = Field(default_factory=list)
+    #: The store's WhatsApp access is paid for and inside its allowance.
+    #: Without it every Autopilot message is refused at the transport.
+    whatsapp_access_active: bool = False
     #: Cash on delivery switched on. Autopilot only ever touches COD orders,
     #: so with COD off there is nothing for it to do.
     cod_enabled: bool = False

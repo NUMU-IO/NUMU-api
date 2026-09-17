@@ -91,6 +91,27 @@ async def get_whatsapp_service(
     db_session: Any,
     tenant_id: UUID | None = None,
 ) -> "WhatsAppMessagingService | GowaProvider":
+    """Resolve the store's transport, stamped with whether it may send templates.
+
+    Paid access is enforced here rather than per call site: every notification,
+    digest, recovery nudge, campaign and OTP resolves its transport through this
+    function, so one lookup covers all of them — including the ones that never
+    pass through the notification send guard.
+    """
+    from src.application.services.whatsapp_entitlement import entitlement
+
+    service = await _resolve_transport(store_id, db_session, tenant_id)
+    access = await entitlement(db_session, store_id)
+    service.access_active = access.active
+    service.access_blocked_reason = access.reason
+    return service
+
+
+async def _resolve_transport(
+    store_id: UUID,
+    db_session: Any,
+    tenant_id: UUID | None = None,
+) -> "WhatsAppMessagingService | GowaProvider":
     """Resolve the WhatsApp transport this store should send through.
 
     Two axes, resolved in this order:

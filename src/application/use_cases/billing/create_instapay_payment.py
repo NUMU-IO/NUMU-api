@@ -122,6 +122,10 @@ class CreateSubscriptionPaymentIntentUseCase:
             await self.db.execute(
                 select(SubscriptionPaymentIntentModel).where(
                     SubscriptionPaymentIntentModel.tenant_id == tenant.id,
+                    # A WhatsApp bill is a separate thing bought; an unpaid one
+                    # must not stop the merchant paying for their plan.
+                    SubscriptionPaymentIntentModel.purpose
+                    != SubscriptionPaymentPurpose.WHATSAPP_ADDON.value,
                     SubscriptionPaymentIntentModel.status.in_((
                         SubscriptionPaymentIntentStatus.AWAITING_PROOF.value,
                         SubscriptionPaymentIntentStatus.UNDER_REVIEW.value,

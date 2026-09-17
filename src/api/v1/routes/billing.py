@@ -393,7 +393,10 @@ async def list_instapay_intents(
         (
             await db.execute(
                 select(SubscriptionPaymentIntentModel)
-                .where(SubscriptionPaymentIntentModel.tenant_id == tenant.id)
+                .where(
+                    SubscriptionPaymentIntentModel.tenant_id == tenant.id,
+                    SubscriptionPaymentIntentModel.purpose != "whatsapp_addon",
+                )
                 .order_by(SubscriptionPaymentIntentModel.created_at.desc())
                 .limit(10)
             )

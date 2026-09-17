@@ -74,6 +74,21 @@ def payment_label(method: str | None, language: str) -> str:
     return key.replace("_", " ").title()
 
 
+def access_not_active_result(reason: str | None) -> MessageResult:
+    """The send a store without paid WhatsApp access gets instead of a message.
+
+    A failed result, not an exception: every caller already treats a failed
+    send as "log it and move on", which is exactly right for an unpaid store.
+    """
+    return MessageResult(
+        success=False,
+        channel=MessageChannel.WHATSAPP,
+        status=MessageStatus.FAILED,
+        error_message=f"WhatsApp access is not active for this store ({reason}).",
+        error_code="whatsapp_access_not_active",
+    )
+
+
 class WhatsAppMessagingService(IMessagingService):
     """WhatsApp Business API messaging service.
 
@@ -103,6 +118,8 @@ class WhatsAppMessagingService(IMessagingService):
         self.enabled = settings.whatsapp_enabled
         # Set by get_whatsapp_service() resolver
         self._is_own: bool = False
+        self.access_active: bool = True
+        self.access_blocked_reason: str | None = None
 
     @property
     def connection_type(self) -> str:
@@ -283,6 +300,9 @@ class WhatsAppMessagingService(IMessagingService):
                 status=MessageStatus.FAILED,
                 error_message="WhatsApp messaging is disabled",
             )
+
+        if not self.access_active:
+            return access_not_active_result(self.access_blocked_reason)
 
         if not self.access_token or not self.phone_number_id:
             return MessageResult(
