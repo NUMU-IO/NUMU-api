@@ -8,8 +8,10 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from src.api.dependencies.auth import get_current_user_id, require_roles
 from src.api.dependencies.database import get_db
@@ -165,6 +167,65 @@ async def get_tenant(
         )
 
     return TenantResponse.model_validate(tenant)
+
+
+class FeatureFlagsPatch(BaseModel):
+    """A partial map of flags to flip. Absent flags are left alone."""
+
+    flags: dict[str, bool]
+
+
+@admin_router.patch(
+    "/{tenant_id}/feature-flags",
+    summary="Set tenant feature flags",
+    description="Merge feature flags for one tenant (super admin only).",
+    operation_id="patch_tenant_feature_flags",
+)
+async def patch_tenant_feature_flags(
+    tenant_id: UUID,
+    body: FeatureFlagsPatch,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
+) -> dict:
+    """Flip per-tenant feature flags.
+
+    This is the rail that did not exist. `require_feature_flag` READS this map
+    to gate dark launches (404-not-403, no superuser bypass), but nothing could
+    WRITE it — so every flip was hand-written SQL against the production
+    database, with no audit trail.
+
+    MERGES, never assigns. Both live tenants carry `golive_exempt: true`, and a
+    plain assignment would drop it and start refusing real orders. That is the
+    entire reason this endpoint exists instead of a one-line UPDATE.
+    """
+    await db.execute(text("SET search_path TO public"))
+
+    tenant_repo = TenantRepository(db)
+    tenant = await tenant_repo.get_by_id(tenant_id)
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found",
+        )
+
+    before = dict(tenant.feature_flags or {})
+    merged = {**before, **body.flags}
+    tenant.feature_flags = merged
+    # JSONB is mutable-in-place as far as SQLAlchemy is concerned; without this
+    # the reassignment above can be missed and the commit writes nothing.
+    flag_modified(tenant, "feature_flags")
+    await db.commit()
+
+    logger.info(
+        "tenant feature flags patched",
+        extra={
+            "tenant_id": str(tenant_id),
+            "changed": sorted(body.flags),
+            "golive_exempt_preserved": before.get("golive_exempt")
+            == merged.get("golive_exempt"),
+        },
+    )
+    return {"tenant_id": str(tenant_id), "feature_flags": merged}
 
 
 @admin_router.patch(

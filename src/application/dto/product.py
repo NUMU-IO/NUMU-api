@@ -57,6 +57,13 @@ class ProductDTO(BaseDTO):
     # collection or search result — and calling the entity's method on a DTO
     # is a 500 (see `_image_alts` in routes/storefront/public.py).
     image_alts: dict[str, str] = field(default_factory=dict)
+    # Phase 8.1 option axes. A FIELD here for the same reason `image_alts` is
+    # one: every storefront LISTING endpoint serialises DTOs, and the entity's
+    # `options` never reached them, so `_resolve_options_for_product` saw no
+    # canonical axes on a collection card and silently fell back to the legacy
+    # `attributes` blob — which is empty on any product whose options were only
+    # ever entered in the SKU-tracked editor.
+    options: list[dict] = field(default_factory=list)
 
     # ── Commerce controls ───────────────────────────────────────────────
     weight: Decimal | None = None
@@ -110,6 +117,7 @@ class ProductDTO(BaseDTO):
             created_at=entity.created_at,
             updated_at=entity.updated_at,
             image_alts=entity.image_alts() if hasattr(entity, "image_alts") else {},
+            options=list(getattr(entity, "options", None) or []),
             weight=getattr(entity, "weight", None),
             requires_shipping=getattr(entity, "requires_shipping", True),
             tax_exempt=getattr(entity, "tax_exempt", False),
