@@ -171,7 +171,7 @@ class TestListProductsUseCase:
         self.mock_product_repo.count_search.return_value = 47
 
         result = await self.use_case.search(
-            store_id=self.store_id, query="blue", page=1, page_size=20
+            store_id=self.store_id, query="blue", page=1, page_size=20, is_active=True
         )
 
         assert len(result.items) == 1
@@ -180,6 +180,10 @@ class TestListProductsUseCase:
         # 47-hit search reports one page and hides the other two.
         assert result.total == 47
         assert result.total_pages == 3
+        # Regression guard: is_active must reach both the item query and the
+        # count, or public storefront search hands out unpublished drafts.
+        assert self.mock_product_repo.search.call_args.kwargs["is_active"] is True
+        assert self.mock_product_repo.count_search.call_args.kwargs["is_active"] is True
 
     @pytest.mark.asyncio
     async def test_list_products_by_category(self):
