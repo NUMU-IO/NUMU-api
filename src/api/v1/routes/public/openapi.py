@@ -93,15 +93,7 @@ def build_public_schema(full: dict[str, Any]) -> dict[str, Any]:
         _referenced_schemas(all_schemas.get(name, {}), wanted)
 
     return {
-        **{
-            k: v
-            for k, v in full.items()
-            if k not in ("paths", "components", "info", "servers")
-        },
-        # FastAPI emits no `servers`, so an imported client or an Apidog
-        # project had no base URL and every request had to be re-pointed by
-        # hand. The contract should say where it lives.
-        "servers": [{"url": "https://numueg.app/api/v1", "description": "Production"}],
+        **{k: v for k, v in full.items() if k not in ("paths", "components", "info")},
         "info": {
             "title": "NUMU API",
             "version": full.get("info", {}).get("version", "1"),

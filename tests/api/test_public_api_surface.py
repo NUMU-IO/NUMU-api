@@ -118,14 +118,6 @@ def test_public_schema_carries_only_what_a_token_can_call():
     assert "/api/v1/stores/{store_id}/access-tokens" not in public["paths"]
 
 
-def test_the_contract_says_where_the_api_lives():
-    """Without this an imported client points at nothing and every request
-    has to be re-pointed by hand."""
-    servers = build_public_schema(_FULL)["servers"]
-
-    assert servers[0]["url"] == "https://numueg.app/api/v1"
-
-
 def test_every_published_operation_states_its_scope_and_auth():
     orders = build_public_schema(_FULL)["paths"]["/api/v1/stores/{store_id}/orders/"]
 
