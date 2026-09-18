@@ -21,6 +21,7 @@ from src.api.v1.schemas.public.tenant import (
     TenantResponse,
     UpdateTenantRequest,
 )
+from src.application.services.api_access import GRANT_FLAG, api_access_for_tenant
 from src.config import settings
 from src.core.entities.user import UserRole
 from src.infrastructure.tenancy.repository import TenantRepository
@@ -226,6 +227,71 @@ async def patch_tenant_feature_flags(
         },
     )
     return {"tenant_id": str(tenant_id), "feature_flags": merged}
+
+
+class ApiAccessPatch(BaseModel):
+    """Grant or revoke the public API for one merchant."""
+
+    enabled: bool
+    note: str | None = None
+
+
+@admin_router.patch(
+    "/{tenant_id}/api-access",
+    summary="Grant or revoke public API access for a tenant",
+    operation_id="patch_tenant_api_access",
+)
+async def patch_tenant_api_access(
+    tenant_id: UUID,
+    body: ApiAccessPatch,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
+) -> dict:
+    """Switch the public API on for a merchant whose plan does not include it.
+
+    A thin, named wrapper over the ``api_access`` feature flag: the plan matrix
+    is too blunt for a partner on a pilot or an agency integrating one Starter
+    merchant, and "flip this JSON key" is not an operation anyone should have
+    to remember. Revoking takes effect immediately — existing tokens are
+    checked on every request, and webhook deliveries stop with them.
+
+    A tenant whose PLAN includes the API keeps it regardless of this flag.
+    """
+    await db.execute(text("SET search_path TO public"))
+
+    tenant_repo = TenantRepository(db)
+    tenant = await tenant_repo.get_by_id(tenant_id)
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found",
+        )
+
+    flags = dict(tenant.feature_flags or {})
+    flags[GRANT_FLAG] = body.enabled
+    tenant.feature_flags = flags
+    flag_modified(tenant, "feature_flags")
+    await db.commit()
+
+    access = await api_access_for_tenant(
+        db, tenant_id, plan=tenant.plan, feature_flags=flags
+    )
+    logger.info(
+        "tenant api access patched",
+        extra={
+            "tenant_id": str(tenant_id),
+            "enabled": body.enabled,
+            "note": body.note,
+            "effective": access.allowed,
+        },
+    )
+    return {
+        "tenant_id": str(tenant_id),
+        "granted": access.granted,
+        "in_plan": access.in_plan,
+        "allowed": access.allowed,
+        "plan": access.plan,
+    }
 
 
 @admin_router.patch(

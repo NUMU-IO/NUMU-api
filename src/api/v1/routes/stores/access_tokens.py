@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.api_access import api_access_for_store
 from src.application.services.personal_access_token_service import (
     VALID_SCOPES,
     PersonalAccessTokenService,
@@ -88,6 +89,40 @@ def _to_response(record: PersonalAccessTokenModel) -> AccessTokenResponse:
     )
 
 
+class ApiAccessState(BaseModel):
+    """Whether this store may use the API, and where that comes from."""
+
+    allowed: bool
+    #: "plan" | "grant" | None
+    source: str | None = None
+    plan: str
+    in_plan: bool
+    granted: bool
+
+
+@router.get(
+    "/access",
+    response_model=SuccessResponse[ApiAccessState],
+    summary="Whether this store may use the public API",
+    operation_id="get_api_access_state",
+)
+async def get_api_access_state(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse[ApiAccessState]:
+    """Drives the Developers page: offer tokens, or explain why not."""
+    access = await api_access_for_store(db, store.id)
+    return SuccessResponse(
+        data=ApiAccessState(
+            allowed=access.allowed,
+            source=access.source,
+            plan=access.plan,
+            in_plan=access.in_plan,
+            granted=access.granted,
+        )
+    )
+
+
 @router.post(
     "/",
     response_model=SuccessResponse[CreatedAccessTokenResponse],
@@ -105,6 +140,20 @@ async def create_access_token(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Store is not associated with a tenant",
+        )
+
+    access = await api_access_for_store(db, store.id)
+    if not access.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "api_access_not_enabled",
+                "message": (
+                    "API access is not enabled for this store. It is included "
+                    "in the Pro plan, or NUMU can enable it for your account."
+                ),
+                "plan": access.plan,
+            },
         )
 
     invalid = sorted(set(request.scopes) - VALID_SCOPES)

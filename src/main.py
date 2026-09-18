@@ -17,6 +17,7 @@ from src.api.middleware import (
     CompressionMiddleware,
     CSRFMiddleware,
     DocsAuthMiddleware,
+    IdempotencyMiddleware,
     LoggingMiddleware,
     MaintenanceModeMiddleware,
     RateLimitMiddleware,
@@ -406,6 +407,10 @@ def create_app() -> FastAPI:
         app.add_middleware(ResponseTimeMiddleware)
 
     # Essential middleware — always active
+    # Outside the auth chain on purpose: it keys on the Authorization header
+    # it is given and never inspects the token, so a replay can only ever
+    # return the response that same header produced.
+    app.add_middleware(IdempotencyMiddleware)
     app.add_middleware(CSRFMiddleware)
     app.add_middleware(TenantMiddleware)
     app.add_middleware(LoggingMiddleware)

@@ -357,6 +357,22 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
                 detail="Access token is bound to a different store",
             )
 
+        # API access is sold: the plan includes it, or an admin granted it to
+        # this merchant. Checked on every request rather than only at minting,
+        # so revoking a grant or downgrading a plan stops the tokens already
+        # out there.
+        from src.application.services.api_access import api_access_for_tenant
+
+        access = await api_access_for_tenant(session, record.tenant_id)
+        if not access.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "API access is not enabled for this store. It is included "
+                    "in the Pro plan, or NUMU can enable it for your account."
+                ),
+            )
+
         # Central scope enforcement (routes stay scope-unaware). NULL scopes =
         # unrestricted legacy token; scoped tokens are default-deny outside the
         # mapped store surface and may never manage tokens themselves.
