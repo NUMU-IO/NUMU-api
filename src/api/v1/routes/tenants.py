@@ -13,7 +13,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from src.api.dependencies.auth import get_current_user_id, require_roles
+from src.api.dependencies.auth import (
+    get_current_user_id,
+    require_admin,
+)
 from src.api.dependencies.database import get_db
 from src.api.v1.schemas.public.tenant import (
     CreateTenantRequest,
@@ -23,7 +26,6 @@ from src.api.v1.schemas.public.tenant import (
 )
 from src.application.services.api_access import GRANT_FLAG, api_access_for_tenant
 from src.config import settings
-from src.core.entities.user import UserRole
 from src.infrastructure.tenancy.repository import TenantRepository
 from src.infrastructure.tenancy.service import TenantService
 
@@ -130,7 +132,7 @@ admin_router = APIRouter()
 )
 async def list_tenants(
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
+    _: Annotated[UUID, Depends(require_admin)],
     skip: int = 0,
     limit: int = 100,
 ) -> list[TenantResponse]:
@@ -153,7 +155,7 @@ async def list_tenants(
 async def get_tenant(
     tenant_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
+    _: Annotated[UUID, Depends(require_admin)],
 ) -> TenantResponse:
     """Get tenant by ID (admin only)."""
     await db.execute(text("SET search_path TO public"))
@@ -186,7 +188,7 @@ async def patch_tenant_feature_flags(
     tenant_id: UUID,
     body: FeatureFlagsPatch,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
+    _: Annotated[UUID, Depends(require_admin)],
 ) -> dict:
     """Flip per-tenant feature flags.
 
@@ -245,7 +247,7 @@ async def patch_tenant_api_access(
     tenant_id: UUID,
     body: ApiAccessPatch,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
+    _: Annotated[UUID, Depends(require_admin)],
 ) -> dict:
     """Switch the public API on for a merchant whose plan does not include it.
 
@@ -305,7 +307,7 @@ async def update_tenant(
     tenant_id: UUID,
     request: UpdateTenantRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
+    _: Annotated[UUID, Depends(require_admin)],
 ) -> TenantResponse:
     """Update tenant settings (admin only)."""
     await db.execute(text("SET search_path TO public"))
@@ -346,7 +348,7 @@ async def update_tenant(
 async def deactivate_tenant(
     tenant_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[None, Depends(require_roles(UserRole.SUPER_ADMIN))],
+    _: Annotated[UUID, Depends(require_admin)],
 ) -> None:
     """Deactivate a tenant (admin only)."""
     await db.execute(text("SET search_path TO public"))
