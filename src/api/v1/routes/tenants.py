@@ -18,6 +18,7 @@ from src.api.dependencies.auth import (
     require_admin,
 )
 from src.api.dependencies.database import get_db
+from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.tenant import (
     CreateTenantRequest,
     TenantCreatedResponse,
@@ -242,13 +243,14 @@ class ApiAccessPatch(BaseModel):
     "/{tenant_id}/api-access",
     summary="Grant or revoke public API access for a tenant",
     operation_id="patch_tenant_api_access",
+    response_model=SuccessResponse[dict],
 )
 async def patch_tenant_api_access(
     tenant_id: UUID,
     body: ApiAccessPatch,
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[UUID, Depends(require_admin)],
-) -> dict:
+) -> SuccessResponse[dict]:
     """Switch the public API on for a merchant whose plan does not include it.
 
     A thin, named wrapper over the ``api_access`` feature flag: the plan matrix
@@ -287,13 +289,23 @@ async def patch_tenant_api_access(
             "effective": access.allowed,
         },
     )
-    return {
-        "tenant_id": str(tenant_id),
-        "granted": access.granted,
-        "in_plan": access.in_plan,
-        "allowed": access.allowed,
-        "plan": access.plan,
-    }
+    # Wrapped like every other endpoint: the admin client reads `data` off
+    # the envelope, so a bare dict arrives as undefined and the page throws
+    # while the grant it just made has actually gone through.
+    return SuccessResponse(
+        data={
+            "tenant_id": str(tenant_id),
+            "granted": access.granted,
+            "in_plan": access.in_plan,
+            "allowed": access.allowed,
+            "plan": access.plan,
+        },
+        message=(
+            "Public API enabled for this merchant"
+            if access.allowed
+            else "Public API disabled for this merchant"
+        ),
+    )
 
 
 @admin_router.patch(
