@@ -39,17 +39,19 @@ class CreateAccessTokenRequest(BaseModel):
         max_length=100,
         description="Human-friendly label, e.g. 'Claude MCP'.",
     )
-    expires_in_days: int | None = Field(
-        default=None,
+    expires_in_days: int = Field(
+        default=90,
         ge=1,
         le=3650,
-        description="Optional lifetime in days. Omit for a non-expiring token.",
+        description="Lifetime in days. Defaults to 90; 3650 is the maximum.",
     )
-    scopes: list[str] | None = Field(
-        default=None,
+    scopes: list[str] = Field(
+        ...,
+        min_length=1,
         description=(
-            "Scope strings such as 'catalog:read', 'orders:write', or '*'. "
-            "Omit for an unrestricted token (owner-equivalent)."
+            "Scope strings such as 'catalog:read', 'orders:write'. Required: "
+            "a token is only as wide as the scopes it names. '*' is the "
+            "owner-equivalent escape hatch and has to be asked for."
         ),
     )
 
@@ -105,24 +107,14 @@ async def create_access_token(
             detail="Store is not associated with a tenant",
         )
 
-    if request.scopes is not None:
-        invalid = sorted(set(request.scopes) - VALID_SCOPES)
-        if invalid:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Unknown scopes: {', '.join(invalid)}",
-            )
-        if not request.scopes:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="scopes must be omitted (unrestricted) or a non-empty list",
-            )
+    invalid = sorted(set(request.scopes) - VALID_SCOPES)
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown scopes: {', '.join(invalid)}",
+        )
 
-    expires_at = (
-        datetime.now(UTC) + timedelta(days=request.expires_in_days)
-        if request.expires_in_days
-        else None
-    )
+    expires_at = datetime.now(UTC) + timedelta(days=request.expires_in_days)
 
     service = PersonalAccessTokenService(db)
     raw, record = await service.create(

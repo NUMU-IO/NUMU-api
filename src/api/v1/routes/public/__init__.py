@@ -20,6 +20,7 @@ from src.api.v1.routes.public.demo import router as demo_router
 from src.api.v1.routes.public.directory import router as directory_router
 from src.api.v1.routes.public.landing import router as landing_router
 from src.api.v1.routes.public.marketing_click import router as marketing_click_router
+from src.api.v1.routes.public.openapi import router as openapi_router
 from src.api.v1.routes.public.reference import router as reference_router
 from src.api.v1.routes.public.waitlist import router as waitlist_router
 
@@ -33,5 +34,6 @@ router.include_router(contact_router, tags=["Public - Contact"])
 router.include_router(marketing_click_router, tags=["Public - Marketing"])
 router.include_router(reference_router, tags=["Public - Reference"])
 router.include_router(directory_router, tags=["Public - Directory"])
+router.include_router(openapi_router)
 
 __all__ = ["router"]

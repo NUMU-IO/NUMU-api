@@ -18,6 +18,7 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from src.application.services.personal_access_token_service import PAT_PREFIX
 from src.config import settings
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -333,6 +334,13 @@ def _get_client_ip(request: Request) -> str:
             return real_ip
 
     return peer or "unknown"
+
+
+def _pat_bucket(request: Request) -> str | None:
+    """A personal access token's own rate-limit bucket, or None."""
+    auth = request.headers.get("authorization", "")
+    token = auth[7:] if auth.lower().startswith("bearer ") else ""
+    return f"pat:{_stable_digest(token)}" if token.startswith(PAT_PREFIX) else None
 
 
 async def _check_rate_limit(ip: str, tier: str, limit: int) -> tuple[bool, int, int]:
@@ -715,6 +723,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             else _get_client_ip(request)
         )
 
+        # An API token gets its own bucket instead of sharing the caller's IP.
+        # Per-IP alone is wrong in both directions for tokens: a merchant's
+        # script and their browser session fought over one budget, while a
+        # script on rotating IPs got a fresh budget each time. Keyed on a
+        # digest, so the limiter never holds the secret.
+        bucket = _pat_bucket(request) or client_ip
+
         # Load-test bypass — controlled by a server-side secret. The
         # request must carry `X-Load-Test-Token: <secret>` matching
         # `settings.load_test_bypass_token`. We DELIBERATELY only honour
@@ -737,7 +752,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
             return await call_next(request)
 
-        is_allowed, count, retry_after = await _check_rate_limit(client_ip, tier, limit)
+        is_allowed, count, retry_after = await _check_rate_limit(bucket, tier, limit)
 
         if not is_allowed:
             logger.warning(
