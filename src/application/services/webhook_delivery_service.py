@@ -9,7 +9,7 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -55,6 +55,18 @@ class WebhookDeliveryService:
         """HMAC-SHA256 signature in GitHub webhook format: sha256=<hex>."""
         mac = hmac.new(secret.encode(), body, hashlib.sha256)
         return f"sha256={mac.hexdigest()}"
+
+    @staticmethod
+    def _sign_v1(secret: str, body: bytes, timestamp: int) -> str:
+        """Stripe-style ``t=<unix>,v1=<hex>`` over ``<timestamp>.<body>``.
+
+        The body-only signature above proves who sent a payload but not when,
+        so a captured delivery stays replayable forever. Signing the timestamp
+        too lets a receiver reject anything older than its own tolerance. Sent
+        alongside the original header, which existing consumers still verify.
+        """
+        mac = hmac.new(secret.encode(), f"{timestamp}.".encode() + body, hashlib.sha256)
+        return f"t={timestamp},v1={mac.hexdigest()}"
 
     @staticmethod
     def _build_envelope(event_type: WebhookEventType, event_data: dict) -> dict:
@@ -134,6 +146,8 @@ async def _attempt_delivery(
 
         body = json.dumps(payload, default=str).encode()
         signature = WebhookDeliveryService._sign(secret, body)
+        sent_at = int(datetime.now(UTC).timestamp())
+        signature_v1 = WebhookDeliveryService._sign_v1(secret, body, sent_at)
 
         now = datetime.now(UTC)
         log.attempt_count += 1
@@ -153,6 +167,8 @@ async def _attempt_delivery(
                     headers={
                         "Content-Type": "application/json",
                         "X-NUMU-Signature": signature,
+                        "X-NUMU-Signature-V1": signature_v1,
+                        "X-NUMU-Timestamp": str(sent_at),
                         "X-NUMU-Event": payload.get("event", ""),
                         "X-NUMU-Delivery": str(log_id),
                     },
@@ -161,7 +177,13 @@ async def _attempt_delivery(
             log.last_status_code = response.status_code
             log.last_response_body = response.text[:1000]
 
-            if 200 <= response.status_code < 300:
+            if response.status_code == 410:
+                # "Gone" is the receiver telling us to stop. Honour it.
+                log.status = WebhookDeliveryStatus.EXHAUSTED
+                log.exhausted_at = datetime.now(UTC)
+                log.next_attempt_at = None
+                logger.info("webhook_endpoint_gone", log_id=str(log_id), url=url)
+            elif 200 <= response.status_code < 300:
                 log.status = WebhookDeliveryStatus.SUCCESS
                 log.next_attempt_at = None
                 logger.info(
@@ -212,6 +234,108 @@ async def _attempt_delivery(
         await log_repo.update(log)
         await session.commit()
 
+    if log.status == WebhookDeliveryStatus.EXHAUSTED:
+        await _deactivate_and_notify(log)
+
+
+async def _deactivate_and_notify(log: WebhookDeliveryLog) -> None:
+    """Switch off an endpoint that has stopped answering, and say so.
+
+    Left active, a dead endpoint burns six attempts per event forever and the
+    merchant finds out when they notice the silence. Turning it off makes the
+    state visible and the fix explicit: correct the URL, then re-enable.
+    """
+    if not log.subscription_id:
+        return
+    from src.application.services.notification_feed import (
+        emit_notification_standalone,
+    )
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories.webhook_subscription_repository import (
+        WebhookSubscriptionRepository,
+    )
+
+    async with AsyncSessionLocal() as session:
+        repo = WebhookSubscriptionRepository(session)
+        sub = await repo.get_by_id(log.subscription_id)
+        if sub is None or not sub.is_active:
+            return
+        sub.is_active = False
+        await repo.update(sub)
+        await session.commit()
+
+    await emit_notification_standalone(
+        store_id=log.store_id,
+        category="system",
+        kind="webhook.deactivated",
+        data={
+            "url": sub.url,
+            "event": log.event_type.value,
+            "attempts": log.attempt_count,
+            "last_error": log.last_error or str(log.last_status_code or ""),
+        },
+        link="/settings/developers",
+        entity_type="webhook_subscription",
+        entity_id=sub.id,
+        important=True,
+        dedupe_key=f"webhook-deactivated:{sub.id}",
+    )
+
+
+async def send_test_delivery(subscription) -> dict:
+    """POST a ``webhook.ping`` once and return what the endpoint answered.
+
+    Signed exactly like a real event, so a receiver that passes this has a
+    working signature check — which is the point of testing at all.
+    """
+    payload = WebhookDeliveryService._build_envelope(
+        WebhookEventType.PING,
+        {
+            "subscription_id": str(subscription.id),
+            "store_id": str(subscription.store_id),
+            "message": "If you can read this, your endpoint is wired correctly.",
+        },
+    )
+    delivery_id = uuid4()
+    body = json.dumps(payload, default=str).encode()
+    sent_at = int(datetime.now(UTC).timestamp())
+
+    try:
+        assert_webhook_target(subscription.url)
+        async with httpx.AsyncClient(
+            timeout=DELIVERY_TIMEOUT, follow_redirects=False
+        ) as client:
+            response = await client.post(
+                subscription.url,
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-NUMU-Signature": WebhookDeliveryService._sign(
+                        subscription.secret, body
+                    ),
+                    "X-NUMU-Signature-V1": WebhookDeliveryService._sign_v1(
+                        subscription.secret, body, sent_at
+                    ),
+                    "X-NUMU-Timestamp": str(sent_at),
+                    "X-NUMU-Event": WebhookEventType.PING.value,
+                    "X-NUMU-Delivery": str(delivery_id),
+                },
+            )
+    except (UnsafeUrlError, httpx.HTTPError) as exc:
+        return {
+            "delivered": False,
+            "status_code": None,
+            "error": str(exc)[:500],
+            "delivery_id": str(delivery_id),
+        }
+
+    return {
+        "delivered": 200 <= response.status_code < 300,
+        "status_code": response.status_code,
+        "error": None if response.is_success else response.text[:500] or None,
+        "delivery_id": str(delivery_id),
+    }
+
 
 def _schedule_retry(log: WebhookDeliveryLog) -> None:
     """Set next_attempt_at using exponential backoff, or mark exhausted."""
@@ -225,6 +349,26 @@ def _schedule_retry(log: WebhookDeliveryLog) -> None:
         log.exhausted_at = datetime.now(UTC)
         log.next_attempt_at = None
         logger.warning("webhook_delivery_exhausted", log_id=str(log.id))
+
+
+#: How long a settled delivery log is kept. Long enough to debug last
+#: month's failure, short enough that the table does not grow forever.
+LOG_RETENTION = timedelta(days=30)
+
+
+async def purge_old_delivery_logs() -> int:
+    """Delete settled delivery logs older than :data:`LOG_RETENTION`."""
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.repositories.webhook_delivery_log_repository import (
+        WebhookDeliveryLogRepository,
+    )
+
+    async with AsyncSessionLocal() as session:
+        deleted = await WebhookDeliveryLogRepository(session).purge_before(
+            datetime.now(UTC) - LOG_RETENTION
+        )
+        await session.commit()
+        return deleted
 
 
 async def retry_pending_deliveries() -> int:
@@ -245,7 +389,8 @@ async def retry_pending_deliveries() -> int:
         log_repo = WebhookDeliveryLogRepository(session)
         sub_repo = WebhookSubscriptionRepository(session)
 
-        pending = await log_repo.get_pending_retries(datetime.now(UTC))
+        pending = await log_repo.claim_pending_retries(datetime.now(UTC))
+        await session.commit()
 
         for log in pending:
             if not log.subscription_id:

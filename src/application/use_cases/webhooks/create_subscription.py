@@ -3,7 +3,11 @@
 import secrets
 from uuid import UUID
 
-from src.core.entities.webhook import WebhookEventType, WebhookSubscription
+from src.core.entities.webhook import (
+    SUBSCRIBABLE_EVENT_TYPES,
+    WebhookEventType,
+    WebhookSubscription,
+)
 from src.core.exceptions import AuthorizationError, EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.interfaces.repositories.webhook_repository import (
@@ -14,7 +18,7 @@ from src.core.url_guard import UnsafeUrlError, assert_webhook_target
 
 logger = get_logger(__name__)
 
-VALID_EVENT_TYPES = {e.value for e in WebhookEventType}
+VALID_EVENT_TYPES = {e.value for e in SUBSCRIBABLE_EVENT_TYPES}
 
 
 class CreateWebhookSubscriptionUseCase:

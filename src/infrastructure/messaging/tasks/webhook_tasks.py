@@ -1,6 +1,7 @@
 """Celery task for webhook retry processing."""
 
 import asyncio
+from datetime import UTC, datetime
 
 from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
@@ -24,10 +25,17 @@ def _run_async(coro):
 def retry_pending_webhook_deliveries(self) -> dict:
     """Pick up all due pending webhook deliveries and fire them.
 
-    Runs every 15 seconds via beat schedule. The shortest retry delay
-    is 10 seconds, so 15-second polling provides adequate coverage.
+    Runs every 60 seconds via the beat schedule, which is also the real floor
+    on the retry ladder: the first two rungs (10s, 30s) land inside one tick.
+    The docstring used to claim 15 seconds, which is where the published
+    backoff and the actual one parted company.
+
+    Prunes settled delivery logs on the first tick of each hour. Nothing
+    pruned them before, so the table grew for the life of the store; doing it
+    here costs one extra query an hour and no new beat entry.
     """
     from src.application.services.webhook_delivery_service import (
+        purge_old_delivery_logs,
         retry_pending_deliveries,
     )
 
@@ -35,7 +43,12 @@ def retry_pending_webhook_deliveries(self) -> dict:
         count = _run_async(retry_pending_deliveries())
         if count:
             logger.info("webhook_retries_dispatched", count=count)
-        return {"processed": count}
+        purged = 0
+        if datetime.now(UTC).minute == 0:
+            purged = _run_async(purge_old_delivery_logs())
+            if purged:
+                logger.info("webhook_delivery_logs_purged", count=purged)
+        return {"processed": count, "purged": purged}
     except Exception as exc:
         logger.error("webhook_retry_task_failed", error=str(exc))
         return {"processed": 0, "error": str(exc)}

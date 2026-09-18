@@ -18,15 +18,20 @@ from src.api.dependencies.repositories import (
 from src.api.responses.base import DeleteResponse, ListResponse, SuccessResponse
 from src.api.v1.schemas.tenant.webhooks import (
     CreateWebhookSubscriptionRequest,
+    UpdateWebhookSubscriptionRequest,
     WebhookDeliveryLogResponse,
     WebhookSubscriptionCreatedResponse,
     WebhookSubscriptionResponse,
+    WebhookTestResponse,
 )
 from src.application.use_cases.webhooks import (
     CreateWebhookSubscriptionUseCase,
     DeleteWebhookSubscriptionUseCase,
     ListWebhookDeliveryLogsUseCase,
     ListWebhookSubscriptionsUseCase,
+    RotateWebhookSecretUseCase,
+    SendTestWebhookUseCase,
+    UpdateWebhookSubscriptionUseCase,
 )
 from src.core.entities.webhook import WebhookDeliveryLog, WebhookSubscription
 from src.infrastructure.repositories import StoreRepository
@@ -128,6 +133,105 @@ async def list_webhook_subscriptions(
     subscriptions = await use_case.execute(store_id=store_id, user_id=user_id)
     items = [_subscription_to_response(s) for s in subscriptions]
     return ListResponse.create(items)
+
+
+@router.patch(
+    "/{subscription_id}",
+    response_model=SuccessResponse[WebhookSubscriptionResponse],
+    summary="Update a webhook subscription",
+)
+async def update_webhook_subscription(
+    store_id: UUID,
+    subscription_id: UUID,
+    request: UpdateWebhookSubscriptionRequest,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    subscription_repo: Annotated[
+        WebhookSubscriptionRepository, Depends(get_webhook_subscription_repository)
+    ],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+) -> SuccessResponse[WebhookSubscriptionResponse]:
+    """Change the URL, the events, the description, or switch it off.
+
+    Re-enabling is how a merchant brings back an endpoint the platform
+    deactivated after it stopped answering.
+    """
+    use_case = UpdateWebhookSubscriptionUseCase(subscription_repo, store_repo)
+    subscription = await use_case.execute(
+        store_id=store_id,
+        user_id=user_id,
+        subscription_id=subscription_id,
+        url=str(request.url) if request.url else None,
+        events=request.events,
+        is_active=request.is_active,
+        description=request.description,
+    )
+    return SuccessResponse(
+        data=_subscription_to_response(subscription),
+        message="Webhook subscription updated",
+    )
+
+
+@router.post(
+    "/{subscription_id}/rotate-secret",
+    response_model=SuccessResponse[WebhookSubscriptionCreatedResponse],
+    summary="Rotate a webhook signing secret",
+)
+async def rotate_webhook_secret(
+    store_id: UUID,
+    subscription_id: UUID,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    subscription_repo: Annotated[
+        WebhookSubscriptionRepository, Depends(get_webhook_subscription_repository)
+    ],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+) -> SuccessResponse[WebhookSubscriptionCreatedResponse]:
+    """Issue a new signing secret. The old one stops working immediately."""
+    use_case = RotateWebhookSecretUseCase(subscription_repo, store_repo)
+    subscription, secret = await use_case.execute(
+        store_id=store_id, user_id=user_id, subscription_id=subscription_id
+    )
+    return SuccessResponse(
+        data=WebhookSubscriptionCreatedResponse(
+            id=str(subscription.id),
+            store_id=str(subscription.store_id),
+            url=subscription.url,
+            events=[e.value for e in subscription.events],
+            is_active=subscription.is_active,
+            description=subscription.description,
+            secret=secret,
+            created_at=subscription.created_at,
+        ),
+        message="Signing secret rotated — save it now, it is shown once",
+    )
+
+
+@router.post(
+    "/{subscription_id}/test",
+    response_model=SuccessResponse[WebhookTestResponse],
+    summary="Send a test event to a webhook endpoint",
+)
+async def test_webhook_subscription(
+    store_id: UUID,
+    subscription_id: UUID,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    subscription_repo: Annotated[
+        WebhookSubscriptionRepository, Depends(get_webhook_subscription_repository)
+    ],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+) -> SuccessResponse[WebhookTestResponse]:
+    """Deliver a signed `webhook.ping` now and report the response.
+
+    One attempt, no retries: this answers "is my endpoint reachable and is my
+    signature check right", which a queued delivery cannot answer.
+    """
+    use_case = SendTestWebhookUseCase(subscription_repo, store_repo)
+    result = await use_case.execute(
+        store_id=store_id, user_id=user_id, subscription_id=subscription_id
+    )
+    return SuccessResponse(
+        data=WebhookTestResponse(**result),
+        message="Test delivered" if result["delivered"] else "Test failed",
+    )
 
 
 @router.delete(

@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
-from src.core.entities.webhook import WebhookEventType
+from src.core.entities.webhook import SUBSCRIBABLE_EVENT_TYPES
 
 
 class CreateWebhookSubscriptionRequest(BaseModel):
@@ -24,9 +24,34 @@ class CreateWebhookSubscriptionRequest(BaseModel):
     events: list[str] = Field(
         ...,
         min_length=1,
-        description=f"Event types to subscribe to. Valid values: {[e.value for e in WebhookEventType]}",
+        description=(
+            "Event types to subscribe to. Valid values: "
+            f"{[e.value for e in SUBSCRIBABLE_EVENT_TYPES]}"
+        ),
     )
     description: str | None = Field(None, max_length=255)
+
+
+class UpdateWebhookSubscriptionRequest(BaseModel):
+    """Change an endpoint in place. Every field is optional."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"events": ["order.paid"], "is_active": False}}
+    )
+
+    url: AnyHttpUrl | None = None
+    events: list[str] | None = Field(default=None, min_length=1)
+    is_active: bool | None = None
+    description: str | None = Field(default=None, max_length=255)
+
+
+class WebhookTestResponse(BaseModel):
+    """The result of the test delivery, as the endpoint answered it."""
+
+    delivered: bool
+    status_code: int | None = None
+    error: str | None = None
+    delivery_id: str
 
 
 class WebhookSubscriptionCreatedResponse(BaseModel):
