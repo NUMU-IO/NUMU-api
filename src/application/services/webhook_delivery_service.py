@@ -50,6 +50,20 @@ class WebhookDeliveryService:
         self.subscription_repo = subscription_repo
         self.delivery_log_repo = delivery_log_repo
 
+    async def _store_may_receive(self, store_id: UUID) -> bool:
+        """Webhooks are part of API access, so a downgrade stops them.
+
+        Checked at dispatch rather than only at subscribe time: a store that
+        drops off the plan keeps its subscription rows, and without this it
+        keeps receiving events it is no longer paying for.
+        """
+        from src.application.services.api_access import api_access_for_store
+
+        session = getattr(self.subscription_repo, "session", None)
+        if session is None:
+            return True
+        return (await api_access_for_store(session, store_id)).allowed
+
     @staticmethod
     def _sign(secret: str, body: bytes) -> str:
         """HMAC-SHA256 signature in GitHub webhook format: sha256=<hex>."""
@@ -90,6 +104,14 @@ class WebhookDeliveryService:
         subscriptions = await self.subscription_repo.get_active_for_event(
             store_id, event_type
         )
+        if subscriptions and not await self._store_may_receive(store_id):
+            logger.info(
+                "webhook_dispatch_skipped_no_api_access",
+                store_id=str(store_id),
+                event=event_type.value,
+                subscriptions=len(subscriptions),
+            )
+            return []
         if not subscriptions:
             return
 

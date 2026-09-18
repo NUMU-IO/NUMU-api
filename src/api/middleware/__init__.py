@@ -9,6 +9,7 @@ from src.api.middleware.error_handler import (
     error_handler_middleware,
     setup_exception_handlers,
 )
+from src.api.middleware.idempotency import IdempotencyMiddleware
 from src.api.middleware.logging import LoggingMiddleware, logging_middleware
 from src.api.middleware.maintenance import MaintenanceModeMiddleware
 from src.api.middleware.rate_limit import RateLimitMiddleware
@@ -27,6 +28,7 @@ __all__ = [
     "CacheHeadersMiddleware",
     "CompressionMiddleware",
     "DocsAuthMiddleware",
+    "IdempotencyMiddleware",
     "LoggingMiddleware",
     "logging_middleware",
     "MaintenanceModeMiddleware",
