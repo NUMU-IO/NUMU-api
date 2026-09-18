@@ -48,3 +48,16 @@ def test_the_api_access_grant_is_one_of_them():
     paths = [path for path, _ in _admin_routes()]
 
     assert "/{tenant_id}/api-access" in paths
+
+
+def test_the_grant_answers_in_the_envelope_the_client_unwraps():
+    """The admin client returns `json.data`. A bare dict arrives as undefined,
+    and the page throws on a grant that actually succeeded."""
+    route = next(
+        r for r in tenants.admin_router.routes if r.path == "/{tenant_id}/api-access"
+    )
+
+    assert route.response_model is not None
+    # Pydantic names the parametrised model, so the name is what identifies it.
+    assert route.response_model.__name__.startswith("SuccessResponse")
+    assert "data" in route.response_model.model_fields
