@@ -23,6 +23,7 @@ from src.core.interfaces.repositories.webhook_repository import (
     IWebhookSubscriptionRepository,
 )
 from src.core.logging import get_logger
+from src.core.url_guard import UnsafeUrlError, assert_webhook_target
 
 logger = get_logger(__name__)
 
@@ -139,7 +140,13 @@ async def _attempt_delivery(
         log.last_attempt_at = now
 
         try:
-            async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT) as client:
+            # Re-checked per attempt: the host may resolve elsewhere than it
+            # did at create time, and a retry can be days later. Redirects stay
+            # off so a public URL cannot bounce us into the private network.
+            assert_webhook_target(url)
+            async with httpx.AsyncClient(
+                timeout=DELIVERY_TIMEOUT, follow_redirects=False
+            ) as client:
                 response = await client.post(
                     url,
                     content=body,
@@ -175,6 +182,20 @@ async def _attempt_delivery(
                     next_attempt_at=str(log.next_attempt_at),
                 )
 
+        except UnsafeUrlError as exc:
+            # Permanent: retrying cannot make the address public, and every
+            # retry is another request at an internal host.
+            log.last_error = str(exc)[:500]
+            log.last_status_code = None
+            log.status = WebhookDeliveryStatus.EXHAUSTED
+            log.next_attempt_at = None
+            log.exhausted_at = datetime.now(UTC)
+            logger.warning(
+                "webhook_delivery_unsafe_target",
+                log_id=str(log_id),
+                url=url,
+                error=str(exc),
+            )
         except Exception as exc:
             log.last_error = str(exc)[:500]
             log.last_status_code = None

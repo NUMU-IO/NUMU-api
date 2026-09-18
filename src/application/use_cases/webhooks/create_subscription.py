@@ -10,6 +10,7 @@ from src.core.interfaces.repositories.webhook_repository import (
     IWebhookSubscriptionRepository,
 )
 from src.core.logging import get_logger
+from src.core.url_guard import UnsafeUrlError, assert_webhook_target
 
 logger = get_logger(__name__)
 
@@ -57,6 +58,15 @@ class CreateWebhookSubscriptionUseCase:
             )
         if not events:
             raise ValidationError("At least one event type is required")
+
+        # The server POSTs to this URL on every matching event, so an
+        # unchecked one turns the API into an SSRF proxy for cloud metadata,
+        # loopback and the private network. Checked again at delivery time
+        # (DNS can be re-pointed after this passes).
+        try:
+            assert_webhook_target(url)
+        except UnsafeUrlError as exc:
+            raise ValidationError(str(exc)) from exc
 
         parsed_events = [WebhookEventType(e) for e in events]
         plain_secret = secrets.token_hex(32)  # 64-char hex — shown once

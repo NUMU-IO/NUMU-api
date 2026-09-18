@@ -39,6 +39,19 @@ def _blocked(
     return ip.is_reserved
 
 
+def assert_webhook_target(url: str) -> None:
+    """Validate a merchant-supplied webhook URL.
+
+    Private and loopback targets are allowed only under ``DEBUG`` — NOT by
+    ``ENVIRONMENT``, because production runs with ``ENVIRONMENT=staging`` and
+    would otherwise keep accepting ``http://127.0.0.1`` and friends. The local
+    receiver in ``scripts/test_webhook_receiver.py`` still works in dev.
+    """
+    from src.config import settings
+
+    assert_public_http_url(url, allow_private=settings.debug)
+
+
 def assert_public_http_url(url: str, *, allow_private: bool | None = None) -> None:
     """Validate ``url`` is an http(s) URL whose host resolves only to allowed IPs.
 

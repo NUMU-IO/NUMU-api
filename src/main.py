@@ -336,8 +336,22 @@ OPENAPI_TAGS = [
 
 
 def _should_expose_docs() -> bool:
-    """Determine if API docs should be exposed (debug or staging)."""
-    return settings.debug or settings.environment == "staging"
+    """Whether to publish the FULL internal schema (843 paths, admin included).
+
+    Local development only. This deliberately does NOT key off
+    ``environment``: production runs with ``ENVIRONMENT=staging``, so the old
+    ``environment == "staging"`` arm served Swagger, ReDoc and openapi.json —
+    every admin, staff and internal route — to anyone on the internet.
+
+    Outside debug it needs an explicit Basic-auth credential pair
+    (``DOCS_USERNAME`` / ``DOCS_PASSWORD``, enforced by ``DocsAuthMiddleware``).
+    Production sets neither, so the internal schema stays unpublished there,
+    and a staging box that wants it opts in by configuring the pair.
+
+    The public, merchant-facing subset is published separately and always:
+    see ``/api/v1/public/openapi.json``.
+    """
+    return settings.debug or bool(settings.docs_username and settings.docs_password)
 
 
 def create_app() -> FastAPI:
