@@ -39,7 +39,7 @@ class IWebhookDeliveryLogRepository(BaseRepository[WebhookDeliveryLog]):
     """Webhook delivery log repository interface."""
 
     @abstractmethod
-    async def get_pending_retries(
+    async def claim_pending_retries(
         self, now: datetime, limit: int = 100
     ) -> list[WebhookDeliveryLog]:
         """Get delivery logs that are pending and due for retry."""

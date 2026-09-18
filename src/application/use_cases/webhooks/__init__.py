@@ -12,10 +12,18 @@ from src.application.use_cases.webhooks.list_delivery_logs import (
 from src.application.use_cases.webhooks.list_subscriptions import (
     ListWebhookSubscriptionsUseCase,
 )
+from src.application.use_cases.webhooks.update_subscription import (
+    RotateWebhookSecretUseCase,
+    SendTestWebhookUseCase,
+    UpdateWebhookSubscriptionUseCase,
+)
 
 __all__ = [
     "CreateWebhookSubscriptionUseCase",
     "DeleteWebhookSubscriptionUseCase",
     "ListWebhookDeliveryLogsUseCase",
     "ListWebhookSubscriptionsUseCase",
+    "RotateWebhookSecretUseCase",
+    "SendTestWebhookUseCase",
+    "UpdateWebhookSubscriptionUseCase",
 ]

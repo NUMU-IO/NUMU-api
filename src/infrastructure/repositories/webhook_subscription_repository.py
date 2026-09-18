@@ -103,6 +103,16 @@ class WebhookSubscriptionRepository(IWebhookSubscriptionRepository):
         await self.session.refresh(model)
         return self._to_entity(model)
 
+    async def set_secret(self, entity_id: UUID, secret: str) -> bool:
+        """Replace the signing secret. Separate from ``update`` so a routine
+        edit can never rewrite it by accident."""
+        model = await self.session.get(WebhookSubscriptionModel, entity_id)
+        if not model:
+            return False
+        model.secret = secret
+        await self.session.flush()
+        return True
+
     async def delete(self, entity_id: UUID) -> bool:
         model = await self.session.get(WebhookSubscriptionModel, entity_id)
         if not model:

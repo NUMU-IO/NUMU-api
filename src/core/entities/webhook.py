@@ -8,33 +8,36 @@ from src.core.entities.base import BaseEntity
 
 
 class WebhookEventType(StrEnum):
+    """Every event that is actually published.
+
+    This list was once three times longer: thirteen names — returns, refunds,
+    customer and review events — were declared and accepted at subscribe time,
+    but nothing ever published them. A merchant could subscribe to
+    ``return.approved``, get a 201, and wait forever. Nothing publishes an
+    event because it appears here, so a name that no handler dispatches is a
+    promise the platform silently breaks; they are gone until their domain
+    events exist.
+
+    Shipping is carried by ``order.status_changed``: it reports the new status
+    (``shipped``, ``delivered``, …) and the tracking number on the same
+    payload, which is what a shipping integration reads.
+    """
+
     ORDER_CREATED = "order.created"
     ORDER_PAID = "order.paid"
     ORDER_STATUS_CHANGED = "order.status_changed"
     PRODUCT_CREATED = "product.created"
     PRODUCT_UPDATED = "product.updated"
     PRODUCT_DELETED = "product.deleted"
-    # Phase 3 additions — additive, no migration needed (the column is
-    # a Postgres array of strings and the dispatcher fans out by name).
-    # Order/refund/return lifecycle so merchants can wire ERPs that
-    # care about post-purchase events.
-    ORDER_FULFILLED = "order.fulfilled"
-    ORDER_REFUNDED = "order.refunded"
-    REFUND_PROCESSED = "refund.processed"
-    RETURN_REQUESTED = "return.requested"
-    RETURN_APPROVED = "return.approved"
-    RETURN_REJECTED = "return.rejected"
-    RETURN_RECEIVED = "return.received"
-    RETURN_COMPLETED = "return.completed"
-    # Customer profile changes — useful for CRM sync.
-    CUSTOMER_CREATED = "customer.created"
-    CUSTOMER_UPDATED = "customer.updated"
-    # Phase 3.4/3.5 — review + back-in-stock signals so merchants can
-    # forward to managed moderation (e.g. Perspective API) or build
-    # custom out-of-stock dashboards.
-    REVIEW_HELD = "review.held"
-    REVIEW_PUBLISHED = "review.published"
-    BACK_IN_STOCK_NOTIFIED = "back_in_stock.notified"
+    #: Delivered only by the test endpoint, never by an event. Not
+    #: subscribable — see ``SUBSCRIBABLE_EVENT_TYPES``.
+    PING = "webhook.ping"
+
+
+#: What a merchant may subscribe to. PING is deliverable but not subscribable.
+SUBSCRIBABLE_EVENT_TYPES = tuple(
+    e for e in WebhookEventType if e is not WebhookEventType.PING
+)
 
 
 class WebhookDeliveryStatus(StrEnum):

@@ -1,9 +1,9 @@
 """Webhook delivery log repository implementation."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.webhook import (
@@ -15,6 +15,9 @@ from src.core.interfaces.repositories.webhook_repository import (
     IWebhookDeliveryLogRepository,
 )
 from src.infrastructure.database.models.tenant.webhook import WebhookDeliveryLogModel
+
+#: How long a claimed delivery stays off the queue while it is attempted.
+CLAIM_LEASE = timedelta(minutes=2)
 
 
 class WebhookDeliveryLogRepository(IWebhookDeliveryLogRepository):
@@ -60,10 +63,18 @@ class WebhookDeliveryLogRepository(IWebhookDeliveryLogRepository):
         result = await self.session.execute(query)
         return [self._to_entity(m) for m in result.scalars().all()]
 
-    async def get_pending_retries(
+    async def claim_pending_retries(
         self, now: datetime, limit: int = 100
     ) -> list[WebhookDeliveryLog]:
-        """Fetch logs due for retry — drives the Celery beat poller."""
+        """Take ownership of the deliveries due now — drives the beat poller.
+
+        Locking and leasing together: ``SKIP LOCKED`` keeps two pollers from
+        selecting the same row, and pushing ``next_attempt_at`` a lease ahead
+        keeps the next tick from re-selecting it while this attempt is still
+        in flight. Without both, a slow endpoint received every event twice.
+        The lease is short enough that a worker lost mid-attempt only delays
+        that delivery, because the row is still PENDING and comes back.
+        """
         query = (
             select(WebhookDeliveryLogModel)
             .where(
@@ -72,9 +83,44 @@ class WebhookDeliveryLogRepository(IWebhookDeliveryLogRepository):
             )
             .order_by(WebhookDeliveryLogModel.next_attempt_at.asc())
             .limit(limit)
+            .with_for_update(skip_locked=True)
         )
-        result = await self.session.execute(query)
-        return [self._to_entity(m) for m in result.scalars().all()]
+        models = (await self.session.execute(query)).scalars().all()
+        for model in models:
+            model.next_attempt_at = now + CLAIM_LEASE
+        return [self._to_entity(m) for m in models]
+
+    async def purge_before(self, cutoff: datetime, limit: int = 5000) -> int:
+        """Delete settled delivery logs older than ``cutoff``.
+
+        Nothing pruned these, so the table grew for the life of the store.
+        Only settled rows go: a PENDING row is still owed an attempt.
+        """
+        ids = (
+            (
+                await self.session.execute(
+                    select(WebhookDeliveryLogModel.id)
+                    .where(
+                        WebhookDeliveryLogModel.created_at < cutoff,
+                        WebhookDeliveryLogModel.status.in_((
+                            WebhookDeliveryStatus.SUCCESS,
+                            WebhookDeliveryStatus.FAILED,
+                            WebhookDeliveryStatus.EXHAUSTED,
+                        )),
+                    )
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if ids:
+            await self.session.execute(
+                delete(WebhookDeliveryLogModel).where(
+                    WebhookDeliveryLogModel.id.in_(ids)
+                )
+            )
+        return len(ids)
 
     async def get_by_subscription(
         self,
