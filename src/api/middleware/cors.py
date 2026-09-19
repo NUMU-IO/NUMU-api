@@ -4,6 +4,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.config import settings
 
@@ -44,6 +45,58 @@ DEFAULT_EXPOSED_HEADERS = [
     # never advance its concurrency token and every save after the first 409s.
     "ETag",
 ]
+
+
+PUBLIC_READ_PATHS = frozenset({"/api/v1/public/openapi.json"})
+
+
+class PublicReadCORSMiddleware:
+    """Let any site read the published API contract, and nothing else.
+
+    The main policy allows credentials, so it has to stay a short allow-list.
+    The public contract carries no user data, and browser-based API tools
+    (Apidog imports it from app.apidog.com) fetch it from their own origin, so
+    it is readable from anywhere — without credentials, which a wildcard
+    origin never carries.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] not in PUBLIC_READ_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        if scope["method"] == "OPTIONS":
+            headers = [
+                (b"access-control-allow-origin", b"*"),
+                (b"access-control-allow-methods", b"GET, OPTIONS"),
+                (b"access-control-max-age", b"86400"),
+            ]
+            requested = dict(scope["headers"]).get(b"access-control-request-headers")
+            if requested:
+                headers.append((b"access-control-allow-headers", requested))
+            await send({
+                "type": "http.response.start",
+                "status": 204,
+                "headers": headers,
+            })
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        async def send_public(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = [
+                    (key, value)
+                    for key, value in message.get("headers", [])
+                    if not key.lower().startswith(b"access-control-allow-")
+                ]
+                headers.append((b"access-control-allow-origin", b"*"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_public)
 
 
 def _validate_origins(origins: list[str], environment: str) -> list[str]:
@@ -206,6 +259,8 @@ def setup_cors(app: FastAPI) -> None:
         if environment == "production"
         else 0,  # Cache preflight for 10 min in prod
     )
+    # Added after CORSMiddleware so it is outermost and answers first.
+    app.add_middleware(PublicReadCORSMiddleware)
 
     if settings.debug:
         logger.debug(
