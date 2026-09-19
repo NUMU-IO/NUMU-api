@@ -19,10 +19,46 @@ from src.application.services.personal_access_token_service import (
     SCOPE_DOMAINS,
     required_scope_for,
 )
+from src.config import settings
 
 router = APIRouter(tags=["Public"])
 
 _METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
+
+# Operations are grouped by the scope domain that guards them, not by the
+# router they live in: docs tools turn tags into folders, and "Store Product
+# Variants" or "Store Themes V2" mirror the code layout rather than what a
+# developer is looking for. Listed in reading order; the published docs link
+# to these names, so renaming one breaks those links.
+_DOMAIN_TAGS = (
+    (
+        "catalog",
+        "Catalog",
+        "Products, variants, inventory, categories, bundles and gift cards.",
+    ),
+    (
+        "orders",
+        "Orders & fulfillment",
+        "Orders, shipments, waybills, returns, refunds and abandoned checkouts.",
+    ),
+    ("customers", "Customers", "Customer records and their addresses."),
+    (
+        "marketing",
+        "Marketing",
+        "Coupons, promotions, campaigns, WhatsApp and the inbox.",
+    ),
+    ("analytics", "Analytics", "Store metrics, reports and dashboard figures."),
+    ("themes", "Online store", "Themes, pages, menus and the editor."),
+    (
+        "settings",
+        "Settings & money",
+        "Store settings, locations, shipping, payments and invoices.",
+    ),
+    ("media", "Media", "File uploads and stored assets."),
+    ("risk", "Risk", "Risk assessments for orders."),
+    ("any", "Identity", "Who a token belongs to. Reachable with any valid token."),
+)
+_TAG_BY_DOMAIN = {domain: name for domain, name, _ in _DOMAIN_TAGS}
 
 _DESCRIPTION = f"""
 The NUMU merchant API, as a third party can use it.
@@ -70,9 +106,11 @@ def build_public_schema(full: dict[str, Any]) -> dict[str, Any]:
             scope = required_scope_for(path, method)
             if scope is None:
                 continue
+            scope = "any" if scope == "__identity__" else scope
             kept[method] = {
                 **operation,
-                "x-numu-scope": "any" if scope == "__identity__" else scope,
+                "tags": [_TAG_BY_DOMAIN[scope.split(":")[0]]],
+                "x-numu-scope": scope,
                 "security": [{"bearerAuth": []}],
             }
         if kept:
@@ -92,13 +130,34 @@ def build_public_schema(full: dict[str, Any]) -> dict[str, Any]:
         seen.add(name)
         _referenced_schemas(all_schemas.get(name, {}), wanted)
 
+    used_tags = {
+        operation["tags"][0]
+        for operations in paths.values()
+        for method, operation in operations.items()
+        if method in _METHODS
+    }
+
     return {
-        **{k: v for k, v in full.items() if k not in ("paths", "components", "info")},
+        **{
+            k: v
+            for k, v in full.items()
+            if k not in ("paths", "components", "info", "tags", "servers", "security")
+        },
         "info": {
             "title": "NUMU API",
             "version": full.get("info", {}).get("version", "1"),
             "description": _DESCRIPTION.strip(),
         },
+        # Paths already start with /api/v1, so the server is the bare host.
+        "servers": [
+            {"url": (settings.public_api_url or "https://numueg.app").rstrip("/")}
+        ],
+        "security": [{"bearerAuth": []}],
+        "tags": [
+            {"name": name, "description": description}
+            for _, name, description in _DOMAIN_TAGS
+            if name in used_tags
+        ],
         "paths": paths,
         "components": {
             "schemas": {n: all_schemas[n] for n in sorted(seen) if n in all_schemas},

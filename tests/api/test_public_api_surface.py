@@ -12,8 +12,9 @@ SSRF check resolves them without a DNS lookup).
 import pytest
 from pydantic import ValidationError
 
-from src.api.v1.routes.public.openapi import build_public_schema
+from src.api.v1.routes.public.openapi import _TAG_BY_DOMAIN, build_public_schema
 from src.api.v1.routes.stores.access_tokens import CreateAccessTokenRequest
+from src.application.services.personal_access_token_service import SCOPE_DOMAINS
 from src.core.url_guard import UnsafeUrlError, assert_public_http_url
 from src.main import _should_expose_docs
 
@@ -131,3 +132,30 @@ def test_internal_model_shapes_are_pruned_from_the_contract():
     schemas = build_public_schema(_FULL)["components"]["schemas"]
 
     assert set(schemas) == {"OrderList", "Order"}  # transitively reachable only
+
+
+def test_operations_are_grouped_by_what_they_are_for():
+    """Docs tools turn tags into folders; the published docs link to these names."""
+    public = build_public_schema(_FULL)
+
+    orders = public["paths"]["/api/v1/stores/{store_id}/orders/"]
+    identity = public["paths"]["/api/v1/auth/api-key/me"]
+    assert orders["get"]["tags"] == ["Orders & fulfillment"]
+    assert identity["get"]["tags"] == ["Identity"]
+    assert [t["name"] for t in public["tags"]] == ["Orders & fulfillment", "Identity"]
+
+
+def test_every_scope_domain_has_a_docs_folder():
+    """A new domain without a folder name would fail the whole document."""
+    assert set(SCOPE_DOMAINS) | {"any"} <= set(_TAG_BY_DOMAIN)
+
+
+def test_the_contract_says_where_to_send_requests_and_how_to_authenticate(monkeypatch):
+    """Paths start with /api/v1, so the server is the bare host."""
+    import src.api.v1.routes.public.openapi as openapi
+
+    monkeypatch.setattr(openapi.settings, "public_api_url", "https://numueg.app/")
+    public = build_public_schema(_FULL)
+
+    assert public["servers"] == [{"url": "https://numueg.app"}]
+    assert public["security"] == [{"bearerAuth": []}]
