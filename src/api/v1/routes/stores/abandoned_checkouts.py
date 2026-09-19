@@ -540,7 +540,12 @@ async def convert_abandoned_checkout(
         onboarding_repo=onboarding_repo,
         network_repo=network_repo,
     )
-    updated = await repo.mark_recovered(checkout_id, order_id=created.data.id)
+    # OrderResponse.id is a string (`str(order_dto.id)`), and the column it
+    # lands in is UUID(as_uuid=True) — asyncpg refuses the string, and it
+    # refuses it AFTER the order exists, leaving an order nothing points at.
+    updated = await repo.mark_recovered(
+        checkout_id, order_id=UUID(str(created.data.id))
+    )
     return SuccessResponse(
         data=_to_response(updated),
         message="Order created from checkout",

@@ -63,8 +63,11 @@ async def test_convert_creates_cod_order_and_links_it(monkeypatch):
         get_by_email=AsyncMock(return_value=None),
         create=AsyncMock(return_value=customer),
     )
+    # create_order answers with OrderResponse, whose id is a STRING. The
+    # fake returned a UUID, which is the one shape production never sends —
+    # and hid that the string went on to a UUID column.
     create_order = AsyncMock(
-        return_value=SimpleNamespace(data=SimpleNamespace(id=order_id))
+        return_value=SimpleNamespace(data=SimpleNamespace(id=str(order_id)))
     )
     monkeypatch.setattr("src.api.v1.routes.stores.orders.create_order", create_order)
     # Live offer + shipping figures, not the row's stale 6000 / 5000.
@@ -95,6 +98,8 @@ async def test_convert_creates_cod_order_and_links_it(monkeypatch):
     assert req.line_items[0].quantity == 2 and req.line_items[0].unit_price == 25000
     assert req.shipping_address.address_line1 == "6 اكتوبر الحي السادس"
     repo.mark_recovered.assert_awaited_once_with(checkout.id, order_id=order_id)
+    # Not the string: the column is UUID(as_uuid=True) and asyncpg is strict.
+    assert isinstance(repo.mark_recovered.await_args.kwargs["order_id"], type(order_id))
 
 
 @pytest.mark.asyncio
