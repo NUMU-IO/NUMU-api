@@ -17,8 +17,11 @@ from typing import Annotated
 
 from pydantic import BeforeValidator
 
-# Regex to match HTML/XML tags (including self-closing, attributes, etc.)
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
+# Regex to match HTML/XML tags (including self-closing, attributes, etc.).
+# The closing `>` is optional: a browser still opens `<img src=x onerror=...`
+# as a tag when a later `>` in the page closes it. `<` followed by a space or
+# digit never opens a tag, so text like "price < 100" is kept.
+_HTML_TAG_RE = re.compile(r"<[a-zA-Z/!?][^>]*>?")
 
 # Regex to match HTML entities like &amp; &lt; &#123; &#x1A;
 _HTML_ENTITY_RE = re.compile(r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z]+);")
