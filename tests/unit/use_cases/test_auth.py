@@ -237,11 +237,30 @@ class TestRefreshTokenUseCase:
             return_value="new_refresh_token"
         )
 
+        self.mock_revocation_service = MagicMock()
+        self.mock_revocation_service.is_revoked = AsyncMock(return_value=False)
+        self.mock_payload.iat = 1_700_000_000
+
         self.use_case = RefreshTokenUseCase(
             user_repository=self.mock_user_repo,
             token_service=self.mock_token_service,
             blacklist_service=self.mock_blacklist_service,
+            revocation_service=self.mock_revocation_service,
         )
+
+    @pytest.mark.asyncio
+    async def test_refresh_rejects_token_issued_before_revocation(self):
+        """After a password change or sign-out-everywhere, an older refresh
+        token must not mint a new session."""
+        self.mock_revocation_service.is_revoked.return_value = True
+
+        with pytest.raises(InvalidTokenError):
+            await self.use_case.execute(RefreshTokenDTO(refresh_token="old"))
+
+        self.mock_revocation_service.is_revoked.assert_awaited_once_with(
+            self.user_id, 1_700_000_000
+        )
+        self.mock_token_service.create_access_token.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_refresh_token_success(self):

@@ -4,6 +4,7 @@ from src.application.dto.auth import RefreshTokenDTO, TokenDTO
 from src.application.services.refresh_token_blacklist_service import (
     RefreshTokenBlacklistService,
 )
+from src.application.services.token_revocation_service import TokenRevocationService
 from src.config import settings
 from src.core.exceptions import EntityNotFoundError, InvalidTokenError
 from src.core.interfaces.repositories.user_repository import IUserRepository
@@ -26,10 +27,12 @@ class RefreshTokenUseCase:
         user_repository: IUserRepository,
         token_service: ITokenService,
         blacklist_service: RefreshTokenBlacklistService,
+        revocation_service: TokenRevocationService,
     ) -> None:
         self.user_repository = user_repository
         self.token_service = token_service
         self.blacklist_service = blacklist_service
+        self.revocation_service = revocation_service
 
     async def execute(self, dto: RefreshTokenDTO) -> TokenDTO:
         """Refresh access token using refresh token."""
@@ -37,6 +40,12 @@ class RefreshTokenUseCase:
         payload = self.token_service.verify_token(dto.refresh_token)
 
         if payload.token_type != "refresh":
+            raise InvalidTokenError()
+
+        # A password change or "sign out everywhere" revokes every token
+        # issued before it. Checking only access tokens let other devices
+        # refresh their way back in.
+        if await self.revocation_service.is_revoked(payload.user_id, payload.iat):
             raise InvalidTokenError()
 
         # Detect token reuse — potential theft. Within the rotation grace
