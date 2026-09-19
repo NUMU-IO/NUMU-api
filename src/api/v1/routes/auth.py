@@ -5,6 +5,7 @@ Tokens are set via httpOnly cookies — never exposed in JSON response body.
 """
 
 import secrets
+import time
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -126,6 +127,37 @@ def _user_response(user) -> UserResponse:
     )
 
 
+async def _revoke_other_sessions(
+    request: Request,
+    response: Response,
+    payload: TokenPayload,
+    user_repo: UserRepository,
+    token_service: TokenService,
+    revocation_service: TokenRevocationService,
+) -> None:
+    """Revoke every token issued so far, then re-issue the caller's own pair.
+
+    Every other device is signed out the next time it calls the API or tries
+    to refresh; the browser session that asked keeps working. Only a cookie
+    session gets a new pair: a personal access token must never be traded for
+    a session.
+    """
+    await revocation_service.revoke_all(payload.user_id, int(time.time()))
+    if not request.cookies.get("refresh_token") or getattr(request.state, "pat", None):
+        return
+    user = await user_repo.get_by_id(payload.user_id)
+    claims = {
+        "tenant_id": payload.tenant_id,
+        "membership_id": payload.membership_id,
+        "perm_version": payload.perm_version or 0,
+    }
+    set_auth_cookies(
+        response,
+        token_service.create_access_token(user, **claims),
+        token_service.create_refresh_token(user, **claims),
+    )
+
+
 # ---------------------------------------------------------------------------
 # CSRF Token
 # ---------------------------------------------------------------------------
@@ -187,6 +219,13 @@ async def token_handoff(
     then set fresh httpOnly cookies so the dashboard can operate normally.
     """
     payload = token_service.verify_token(request.access_token)
+    if payload.token_type != "access" or await TokenRevocationService(
+        RedisCacheService()
+    ).is_revoked(payload.user_id, payload.iat):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
     user = await user_repo.get_by_id(payload.user_id)
     if not user:
         raise HTTPException(
@@ -769,6 +808,7 @@ async def refresh_token(
         user_repository=user_repo,
         token_service=token_service,
         blacklist_service=RefreshTokenBlacklistService(RedisCacheService()),
+        revocation_service=TokenRevocationService(RedisCacheService()),
     )
 
     dto = RefreshTokenDTO(refresh_token=refresh_tok)
@@ -1298,17 +1338,19 @@ async def update_profile(
 )
 async def change_password(
     request: ChangePasswordRequest,
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    http_request: Request,
+    response: Response,
+    payload: Annotated[TokenPayload, Depends(get_current_token_payload)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[PasswordService, Depends(get_password_service)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
 ):
-    """Change current user's password."""
-    from uuid import UUID
-
+    """Change current user's password and sign out every other device."""
+    revocation_service = TokenRevocationService(RedisCacheService())
     use_case = ChangePasswordUseCase(
         user_repository=user_repo,
         password_service=password_service,
-        revocation_service=TokenRevocationService(RedisCacheService()),
+        revocation_service=revocation_service,
     )
 
     dto = ChangePasswordDTO(
@@ -1316,9 +1358,9 @@ async def change_password(
         new_password=request.new_password,
     )
 
-    await use_case.execute(
-        user_id=UUID(user_id) if isinstance(user_id, str) else user_id,
-        dto=dto,
+    await use_case.execute(user_id=payload.user_id, dto=dto)
+    await _revoke_other_sessions(
+        http_request, response, payload, user_repo, token_service, revocation_service
     )
 
     return SuccessResponse(
@@ -1683,14 +1725,26 @@ async def revoke_session_endpoint(
     operation_id="revoke_all_sessions",
 )
 async def revoke_all_sessions_endpoint(
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    request: Request,
+    response: Response,
+    payload: Annotated[TokenPayload, Depends(get_current_token_payload)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    token_service: Annotated[TokenService, Depends(get_token_service)],
 ):
-    """Revoke all sessions except the current one."""
+    """Sign out every device except the one making the request."""
     from src.application.services.session_service import revoke_all_other_sessions
 
-    count = await revoke_all_other_sessions(db, UUID(user_id))
+    count = await revoke_all_other_sessions(db, payload.user_id)
     await db.commit()
+    await _revoke_other_sessions(
+        request,
+        response,
+        payload,
+        user_repo,
+        token_service,
+        TokenRevocationService(RedisCacheService()),
+    )
 
     return SuccessResponse(
         data={"revoked_count": count},
