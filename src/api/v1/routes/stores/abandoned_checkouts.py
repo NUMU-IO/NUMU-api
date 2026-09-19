@@ -13,7 +13,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
@@ -21,19 +21,50 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import (
     get_abandoned_checkout_repository,
+    get_customer_repository,
+    get_onboarding_repository,
+    get_order_repository,
+    get_store_repository,
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
+from src.api.dependencies.plan import require_order_limit
+from src.api.dependencies.repositories import (
+    get_coupon_repository,
+    get_network_reputation_repository,
+    get_product_repository,
+    get_promotion_event_repository,
+    get_promotion_repository,
+    get_promotion_target_repository,
+    get_shipping_zone_repository,
+)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.abandoned_checkout import (
     AbandonedCheckoutListResponse,
     AbandonedCheckoutResponse,
     SendRecoveryEmailResponse,
 )
+from src.api.v1.schemas.tenant.order import (
+    CreateOrderRequest,
+    OrderAddressRequest,
+    OrderLineItemRequest,
+)
 from src.core.entities.abandoned_checkout import AbandonedCheckout
+from src.core.entities.customer import Customer
 from src.core.entities.store import Store
 from src.core.exceptions import EntityNotFoundError
-from src.infrastructure.repositories import AbandonedCheckoutRepository
+from src.core.value_objects.phone import PhoneNumber
+from src.infrastructure.repositories import (
+    AbandonedCheckoutRepository,
+    CustomerRepository,
+    OnboardingRepository,
+    OrderRepository,
+    StoreRepository,
+)
+
+# Cart-line keys an order line accepts (cart rows also carry image_url and
+# total_price, which the order recomputes).
+_LINE_KEYS = tuple(OrderLineItemRequest.model_fields)
 
 
 class NotifyWhatsAppResponse(BaseModel):
@@ -383,6 +414,234 @@ async def mark_abandoned_checkout_recovered(
         data=_to_response(updated),
         message="Checkout marked as recovered",
     )
+
+
+@router.post(
+    "/{checkout_id}/convert",
+    response_model=SuccessResponse[AbandonedCheckoutResponse],
+    summary="Turn an abandoned checkout into a real COD order",
+    operation_id="convert_abandoned_checkout",
+    dependencies=[Depends(require_order_limit())],
+)
+async def convert_abandoned_checkout(
+    checkout_id: Annotated[UUID, Path(description="Abandoned-checkout ID")],
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    repo: Annotated[
+        AbandonedCheckoutRepository, Depends(get_abandoned_checkout_repository)
+    ],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+    network_repo: Annotated[object, Depends(get_network_reputation_repository)],
+    product_repo: Annotated[object, Depends(get_product_repository)],
+    shipping_repo: Annotated[object, Depends(get_shipping_zone_repository)],
+    coupon_repo: Annotated[object, Depends(get_coupon_repository)],
+    promotion_repo: Annotated[object, Depends(get_promotion_repository)],
+    promotion_target_repo: Annotated[object, Depends(get_promotion_target_repository)],
+    promotion_event_repo: Annotated[object, Depends(get_promotion_event_repository)],
+):
+    """Create the order the shopper confirmed off-channel, then link it.
+
+    "Mark recovered" alone only flips ``recovered_at``: the hub shows the cart
+    as Recovered while no order exists, so nothing reaches Orders, shipping or
+    analytics (Vionne, 2026-09-18). This builds a COD order from the cart's own
+    lines, address and totals through the normal merchant create-order path
+    (same COD trust check and OrderCreatedEvent), then records the order id.
+
+    Offers and shipping are re-priced with the storefront checkout's engines:
+    the cart row never stores the automatic offer discount, and its shipping
+    is whatever the shopper had on screen (often 0 before a governorate).
+    """
+    from src.api.v1.routes.stores.orders import create_order
+    from src.core.value_objects.email import Email as EmailVO
+    from src.core.value_objects.phone import InvalidPhoneError
+
+    checkout = await repo.get_by_id(checkout_id)
+    if not checkout or checkout.store_id != store.id:
+        raise EntityNotFoundError("AbandonedCheckout", str(checkout_id))
+    if checkout.recovered_order_id is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "already_converted")
+    if not checkout.line_items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty_cart")
+    addr = dict(checkout.shipping_address or {})
+    phone = addr.get("phone") or checkout.phone
+    if not phone or not addr.get("address_line1"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "missing_address")
+
+    # Same identity rule as guest checkout: phone first, then real email,
+    # else a new guest row with a placeholder email (customers.email is
+    # NOT NULL and unique per store).
+    try:
+        phone_vo = PhoneNumber.parse(phone, default_region="EG")
+    except InvalidPhoneError:
+        phone_vo = PhoneNumber(value=phone)
+    customer = await customer_repo.get_by_phone(store.id, phone_vo.value)
+    email_vo = EmailVO(value=checkout.email) if checkout.email else None
+    if customer is None and email_vo is not None:
+        customer = await customer_repo.get_by_email(store.id, email_vo)
+    if customer is None:
+        customer = await customer_repo.create(
+            Customer(
+                store_id=store.id,
+                email=email_vo
+                or EmailVO(value=f"guest+{uuid4().hex[:12]}@noemail.numueg.app"),
+                first_name=(addr.get("first_name") or "Guest").strip(),
+                last_name=(addr.get("last_name") or "").strip(),
+                phone=phone_vo,
+                is_verified=False,
+                metadata={"guest": True, "has_real_email": email_vo is not None},
+            ),
+            tenant_id=store.tenant_id,
+        )
+
+    shipping_cents, discount_cents = await _reprice(
+        checkout,
+        addr,
+        store=store,
+        customer_id=customer.id,
+        product_repo=product_repo,
+        shipping_repo=shipping_repo,
+        coupon_repo=coupon_repo,
+        promotion_repo=promotion_repo,
+        promotion_target_repo=promotion_target_repo,
+        promotion_event_repo=promotion_event_repo,
+    )
+
+    request = CreateOrderRequest(
+        customer_id=customer.id,
+        line_items=[
+            OrderLineItemRequest(**{
+                k: li[k] for k in _LINE_KEYS if li.get(k) is not None
+            })
+            for li in checkout.line_items
+        ],
+        shipping_address=OrderAddressRequest(
+            **{
+                k: v
+                for k, v in {**addr, "phone": phone}.items()
+                if k in OrderAddressRequest.model_fields and v is not None
+            }
+            | {"country": addr.get("country") or "EG"},
+        ),
+        shipping_cost=shipping_cents,
+        discount_amount=discount_cents,
+        currency=checkout.currency,
+        payment_method="cod",
+    )
+    created = await create_order(
+        request=request,
+        store=store,
+        order_repo=order_repo,
+        store_repo=store_repo,
+        customer_repo=customer_repo,
+        onboarding_repo=onboarding_repo,
+        network_repo=network_repo,
+    )
+    updated = await repo.mark_recovered(checkout_id, order_id=created.data.id)
+    return SuccessResponse(
+        data=_to_response(updated),
+        message="Order created from checkout",
+    )
+
+
+async def _reprice(
+    checkout: AbandonedCheckout,
+    addr: dict,
+    *,
+    store: Store,
+    customer_id: UUID,
+    product_repo,
+    shipping_repo,
+    coupon_repo,
+    promotion_repo,
+    promotion_target_repo,
+    promotion_event_repo,
+) -> tuple[int, int]:
+    """(shipping_cents, automatic_discount_cents) for a COD order of this cart.
+
+    Same calls as storefront checkout: the offers calculator over the cart's
+    lines with their categories, and the cheapest COD rate for the address's
+    governorate on the pre-discount subtotal (the free-over threshold uses
+    the subtotal there too). A coupon on the cart is not re-applied.
+    """
+    from src.application.dto.promotion_resolution import VisitorContextInput
+    from src.application.services.shipping_resolver import ShippingResolver
+    from src.application.use_cases.promotions.calculate_cart_discounts import (
+        CalculateCartDiscountsUseCase,
+    )
+    from src.core.entities.cart import Cart
+    from src.core.services.discount_calculator import DiscountCalculator
+    from src.core.services.promotion_eligibility_checker import (
+        PromotionEligibilityChecker,
+    )
+    from src.core.value_objects.cart_item import CartItem
+    from src.core.value_objects.geography import resolve_governorate
+
+    lines = checkout.line_items
+    subtotal = sum(int(li["unit_price"]) * int(li["quantity"]) for li in lines)
+
+    categories: dict[str, UUID | None] = {}
+    for li in lines:
+        product = await product_repo.get_by_id(UUID(str(li["product_id"])))
+        categories[str(li["product_id"])] = getattr(product, "category_id", None)
+
+    offers = await CalculateCartDiscountsUseCase(
+        promotion_repo=promotion_repo,
+        target_repo=promotion_target_repo,
+        coupon_repo=coupon_repo,
+        eligibility_checker=PromotionEligibilityChecker(),
+        calculator=DiscountCalculator(),
+        event_repo=promotion_event_repo,
+    ).execute(
+        store_id=store.id,
+        tenant_id=store.tenant_id,
+        cart=Cart(
+            session_id=f"convert-{checkout.id}",
+            store_id=store.id,
+            customer_id=customer_id,
+            items=[
+                CartItem(
+                    product_id=UUID(str(li["product_id"])),
+                    product_name=li.get("product_name") or "",
+                    quantity=int(li["quantity"]),
+                    unit_price=int(li["unit_price"]),
+                    category_id=categories[str(li["product_id"])],
+                )
+                for li in lines
+            ],
+        ),
+        applied_coupon_codes=[],
+        visitor=VisitorContextInput(
+            customer_id=customer_id,
+            cart_subtotal_cents=subtotal,
+            cart_product_ids=[UUID(str(li["product_id"])) for li in lines],
+            cart_category_ids=[c for c in set(categories.values()) if c],
+        ),
+    )
+    discount = max(0, min(int(offers.automatic_discount_cents), subtotal))
+
+    gov = resolve_governorate(addr.get("state") or "") or resolve_governorate(
+        addr.get("city") or ""
+    )
+    if gov is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "missing_governorate")
+    resolved = await ShippingResolver(
+        shipping_repo, currency=checkout.currency
+    ).resolve_options(
+        store_id=store.id,
+        governorate_code=gov.code,
+        cart_subtotal_cents=subtotal,
+        cart_weight_g=0,
+        cod_requested=True,
+    )
+    cod_rates = [o.amount_cents for o in resolved.options if o.cod_supported]
+    if not cod_rates:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "cod_unavailable")
+    shipping = 0 if offers.free_shipping else min(cod_rates)
+    return shipping, discount
 
 
 def _recipient_name_from_checkout(c: AbandonedCheckout) -> str | None:
