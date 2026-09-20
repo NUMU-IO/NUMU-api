@@ -66,10 +66,25 @@ class PaymentProofModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
                 "NOT (recorded_method IS NOT NULL AND status = 'rejected')"
             ),
         ),
-        UniqueConstraint(
+        # Bank-reference replay guard, with the same voided-merchant-row
+        # exemption as the image-hash index above: the reference on the row
+        # being voided is the only one the merchant has, so void-then-
+        # re-record must be allowed to reuse it. Narrowed to
+        # merchant-recorded rows so a rejected customer proof still blocks
+        # its own reference.
+        #
+        # Must stay in step with
+        # ``PaymentProofRepository.transaction_ref_exists``: a pre-check
+        # that is kinder than the index turns a clean 409 into a 500
+        # at INSERT.
+        Index(
+            "uq_payment_proofs_store_transaction_ref",
             "store_id",
             "transaction_ref",
-            name="uq_payment_proofs_store_transaction_ref",
+            unique=True,
+            postgresql_where=text(
+                "NOT (recorded_method IS NOT NULL AND status = 'rejected')"
+            ),
         ),
         # Scoped to store so two different merchants can use the same
         # client-generated key without colliding. An old key on an

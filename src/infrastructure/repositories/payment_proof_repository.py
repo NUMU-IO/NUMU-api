@@ -288,11 +288,26 @@ class PaymentProofRepository:
     async def transaction_ref_exists(
         self, store_id: UUID, transaction_ref: str
     ) -> bool:
-        """Returns True if the same bank ref was already used in this store."""
+        """Returns True if the same bank ref was already used in this store.
+
+        Voided merchant-recorded payments are excluded, for the same reason
+        as ``image_hash_exists``: void-then-re-record with the same reference
+        is the documented typo-correction path, and the row being voided
+        holds the only reference the merchant has. Narrowed to
+        merchant-recorded rows so a rejected customer proof still blocks its
+        own reference.
+
+        Mirrors the partial unique index of the same name; the two must stay
+        in step, or a passing pre-check becomes a 500 at INSERT.
+        """
         query = select(PaymentProofModel.id).where(
             and_(
                 PaymentProofModel.store_id == store_id,
                 PaymentProofModel.transaction_ref == transaction_ref,
+                ~(
+                    PaymentProofModel.recorded_method.is_not(None)
+                    & (PaymentProofModel.status == PaymentProofStatus.REJECTED)
+                ),
             )
         )
         result = await self.session.execute(query)

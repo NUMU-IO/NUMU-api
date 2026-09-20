@@ -116,8 +116,15 @@ class _FakeProofRepo:
         )
 
     async def transaction_ref_exists(self, store_id, transaction_ref) -> bool:
+        # Mirrors the real query, including the exemption for voided
+        # merchant-recorded rows — same reason as image_hash_exists.
         return any(
-            p.store_id == store_id and p.transaction_ref == transaction_ref
+            p.store_id == store_id
+            and p.transaction_ref == transaction_ref
+            and not (
+                p.recorded_method is not None
+                and p.status is PaymentProofStatus.REJECTED
+            )
             for p in self.rows
         )
 
@@ -479,7 +486,9 @@ async def test_timeline_entry_is_written(wiring, paid_calls):
 # ── Void ─────────────────────────────────────────────────────────────
 
 
-async def _void(order, proof_id, *, proofs, reason="Wrong amount typed"):
+async def _void(
+    order, proof_id, *, proofs, reason="Wrong amount typed", order_repo=None
+):
     return await void_recorded_payment(
         store=SimpleNamespace(id=STORE_ID),
         proof_id=proof_id,
@@ -487,7 +496,7 @@ async def _void(order, proof_id, *, proofs, reason="Wrong amount typed"):
         user_id=USER_ID,
         db=object(),
         storage_service=_FakeStorage(),
-        order_repo=_FakeOrderRepo(order),
+        order_repo=order_repo or _FakeOrderRepo(order),
         activity_repo=_FakeActivityRepo(),
     )
 
@@ -559,6 +568,95 @@ async def test_a_rejected_customer_proof_still_blocks_its_own_bytes(wiring, paid
         await _record(order, amount=5000, image=receipt)
 
     assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_the_same_reference_can_be_reused_after_a_void(wiring, paid_calls):
+    """Void-then-re-record keeps the rail's own transaction number.
+
+    The reference on the voided row is the only one the merchant has — the
+    blanket uniqueness made correcting a typo impossible without inventing
+    a fake reference.
+    """
+    order = _order(total=35000)
+
+    await _record(order, amount=10000, image=_png((23, 23, 23)), reference="VF-7788")
+    await _void(order, wiring.proofs.rows[0].id, proofs=wiring.proofs)
+
+    corrected = await _record(
+        order, amount=12000, image=_png((24, 24, 24)), reference="VF-7788"
+    )
+
+    assert corrected.data.payment.transaction_ref == "VF-7788"
+    assert corrected.data.amount_paid_cents == 12000
+    assert len(wiring.proofs.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_customer_proof_still_blocks_its_reference(wiring, paid_calls):
+    """The reference exemption is for merchant rows only."""
+    from src.core.entities.instapay import PaymentProof
+
+    order = _order()
+    rejected = PaymentProof.new(
+        tenant_id=TENANT_ID,
+        store_id=STORE_ID,
+        order_id=order.id,
+        proof_image_key="k",
+        proof_image_hash=b"other-hash",
+        transaction_ref="CUST-REF-1",
+        declared_amount_cents=5000,
+    )
+    rejected.mark_rejected(uuid4(), "not a real receipt")
+    wiring.proofs.rows.append(rejected)
+
+    with pytest.raises(HTTPException) as exc:
+        await _record(
+            order, amount=5000, image=_png((25, 25, 25)), reference="CUST-REF-1"
+        )
+
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_void_response_reflects_an_order_settled_concurrently(wiring):
+    """The void answers with a re-read order, not the row from the top.
+
+    A concurrent request may mark the order PAID after this request loaded
+    it but before the void lands; the money totals are recomputed post-void
+    either way, but the status field must not lag them.
+    """
+
+    class _RaceOrderRepo:
+        """First read PENDING so the guard passes, second read PAID."""
+
+        def __init__(self, before, after) -> None:
+            self.reads = 0
+            self.before = before
+            self.after = after
+
+        async def get_by_id(self, order_id):
+            self.reads += 1
+            return self.after if self.reads > 1 else self.before
+
+        async def update(self, order):
+            return order
+
+    order = _order(total=35000)
+    await _record(order, amount=10000)
+    proof_id = wiring.proofs.rows[0].id
+
+    settled = _order(total=35000, id=order.id, payment_status=PaymentStatus.PAID)
+    result = await _void(
+        order,
+        proof_id,
+        proofs=wiring.proofs,
+        order_repo=_RaceOrderRepo(order, settled),
+    )
+
+    assert result.data.order_payment_status == PaymentStatus.PAID.value
+    assert result.data.amount_paid_cents == 0
+    assert result.data.balance_due_cents == 35000
 
 
 @pytest.mark.asyncio
@@ -737,6 +835,62 @@ async def test_partial_unique_index_lets_a_voided_receipt_be_reused(test_session
     # ...but only once. The live row holds the hash again.
     assert await repo.image_hash_exists(STORE_ID, shared_hash) is True
     third = _proof("REPLAY")
+    third.mark_approved(USER_ID)
+    with pytest.raises(IntegrityError):
+        await repo.create(third)
+
+
+@pytest.mark.asyncio
+async def test_partial_unique_index_lets_a_voided_reference_be_reused(
+    test_session,
+):
+    """Same agreement as the image hash, for the bank reference.
+
+    Void-then-re-record reuses the rail's own number; the pre-check and the
+    index must both allow it, while a live row still blocks a replay.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from src.core.entities.instapay import PaymentProof
+    from src.infrastructure.repositories.payment_proof_repository import (
+        PaymentProofRepository,
+    )
+
+    repo = PaymentProofRepository(test_session)
+    order_id = uuid4()
+    shared_ref = "VF-7788"
+
+    def _proof(image_tag):
+        return PaymentProof.new(
+            tenant_id=TENANT_ID,
+            store_id=STORE_ID,
+            order_id=order_id,
+            proof_image_key=f"k-{image_tag}",
+            proof_image_hash=image_tag.encode(),
+            transaction_ref=shared_ref,
+            declared_amount_cents=10000,
+            recorded_method="vodafone_cash",
+        )
+
+    first = _proof("receipt")
+    first.mark_approved(USER_ID)
+    await repo.create(first)
+
+    # While it stands, the reference is taken.
+    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is True
+
+    first.mark_rejected(USER_ID, "typo")
+    await repo.update(first)
+
+    # Voided: the merchant may re-record with the same reference.
+    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is False
+    second = _proof("receipt-again")
+    second.mark_approved(USER_ID)
+    await repo.create(second)
+
+    # ...but only once. The live row holds the reference again.
+    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is True
+    third = _proof("replay")
     third.mark_approved(USER_ID)
     with pytest.raises(IntegrityError):
         await repo.create(third)

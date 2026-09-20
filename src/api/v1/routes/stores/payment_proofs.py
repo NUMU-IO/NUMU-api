@@ -943,6 +943,15 @@ async def void_recorded_payment(
     proof.mark_rejected(user_id, body.reason)
     updated = await proof_repo.update(proof)
 
+    # Re-read the order after the void lands: a concurrent request may have
+    # marked it PAID in between, and answering with the row we loaded at the
+    # top would show the hub a stale status next to fresh money totals.
+    order = await order_repo.get_by_id(proof.order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Order not found."
+        )
+
     paid, balance = await _payment_totals(proof_repo, order)
 
     await activity_repo.create(
