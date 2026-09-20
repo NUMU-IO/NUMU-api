@@ -7,6 +7,7 @@ and horizontal scaling.
 """
 
 import logging
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -204,6 +205,7 @@ async def _compute_cart_discounts(
         PromotionEligibilityChecker,
     )
     from src.infrastructure.repositories.coupon_repository import CouponRepository
+    from src.infrastructure.repositories.customer_repository import CustomerRepository
     from src.infrastructure.repositories.promotion_event_repository import (
         PromotionEventRepository,
     )
@@ -247,6 +249,16 @@ async def _compute_cart_discounts(
     )
 
     session = product_repo.session
+    customer = (
+        await CustomerRepository(session).get_by_id(cart.customer_id)
+        if cart.customer_id is not None
+        else None
+    )
+    visitor = visitor.model_copy(
+        update={
+            "customer_tags": customer.tags if customer else [],
+        }
+    )
     use_case = CalculateCartDiscountsUseCase(
         promotion_repo=PromotionRepository(session),
         target_repo=PromotionTargetRepository(session),
@@ -255,13 +267,7 @@ async def _compute_cart_discounts(
         calculator=DiscountCalculator(),
         event_repo=PromotionEventRepository(session),
     )
-    # NOTE (verified 2026-07-28): `Cart` declares no `discount_code` field, and
-    # both `POST/DELETE /cart/discount` guard their writes with
-    # `hasattr(cart, "discount_code")` — which is always False. So no code is
-    # ever actually pinned to a cart today and this resolves to None. Reading
-    # it defensively means the cart starts pricing codes the moment that field
-    # is added, instead of silently continuing to ignore them.
-    pinned_code = getattr(cart, "discount_code", None)
+    pinned_code = cart.discount_code
     out = await use_case.execute(
         store_id=cart.store_id,
         tenant_id=tenant_id,
@@ -269,10 +275,39 @@ async def _compute_cart_discounts(
         applied_coupon_codes=[pinned_code] if pinned_code else [],
         visitor=visitor,
     )
-    total_discount = min(
-        out.automatic_discount_cents + out.code_discount_cents, subtotal_cents
-    )
-    return out.automatic_discount_cents, total_discount, list(out.applied_promotions)
+    code_cents = out.code_discount_cents
+    if pinned_code and code_cents == 0:
+        coupon_repo = CouponRepository(session)
+        coupon = await coupon_repo.get_by_code(cart.store_id, pinned_code)
+        if (
+            coupon is not None
+            and coupon.is_usable
+            and coupon.meets_minimum_order(Decimal(subtotal_cents) / Decimal(100))
+            and await PromotionRepository(session).get_by_coupon_id(
+                cart.store_id, coupon.id
+            )
+            is None
+        ):
+            major = coupon.calculate_discount(
+                Decimal(subtotal_cents) / Decimal(100),
+                line_items=[
+                    {
+                        "product_id": item.product_id,
+                        "unit_price": Decimal(item.unit_price) / Decimal(100),
+                        "quantity": item.quantity,
+                    }
+                    for item in priced_cart.items
+                ],
+            )
+            code_cents = int(major * 100)
+    automatic_cents = min(out.automatic_discount_cents, subtotal_cents - code_cents)
+    remaining = automatic_cents
+    applied_promotions = []
+    for entry in out.applied_promotions:
+        amount = min(int(entry.get("amount") or 0), remaining)
+        applied_promotions.append({**entry, "amount": amount})
+        remaining -= amount
+    return automatic_cents, code_cents + automatic_cents, applied_promotions
 
 
 async def _build_cart_response(
@@ -385,6 +420,7 @@ async def _build_cart_response(
             total_quantity=sum(i.quantity for i in items),
             subtotal=subtotal,
             currency=currency,
+            discount_code=cart.discount_code,
             automatic_discount_cents=automatic_cents,
             discount_amount=discount_amount,
             total=max(0, subtotal - discount_amount),

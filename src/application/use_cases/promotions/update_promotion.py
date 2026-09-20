@@ -4,6 +4,7 @@ from uuid import UUID
 
 from src.application.dto.promotion import PromotionOutput, UpdatePromotionInput
 from src.application.use_cases.promotions._mapping import promotion_to_output
+from src.application.use_cases.promotions._sync_coupon import sync_coupon_rule
 from src.application.use_cases.promotions._validation import (
     validate_surface_payload,
 )
@@ -84,6 +85,11 @@ class UpdatePromotionUseCase:
                 raise CouponPromotionLinkError(
                     f"coupon {payload.coupon_id} not found in store {store_id}"
                 )
+            other = await self._promotion_repo.get_by_coupon_id(store_id, coupon.id)
+            if other is not None and other.id != current.id:
+                raise CouponPromotionLinkError(
+                    f"coupon {coupon.id} is already linked to a promotion"
+                )
             current.coupon_id = payload.coupon_id
         if payload.discount_rule is not None:
             current.discount_rule = payload.discount_rule
@@ -108,6 +114,10 @@ class UpdatePromotionUseCase:
         current.updated_by = actor_user_id
         current.touch()
         saved = await self._promotion_repo.update(current)
+        if saved.coupon_id is not None and payload.discount_rule is not None:
+            coupon = await self._coupon_repo.get_by_id(saved.coupon_id)
+            if coupon is not None:
+                await sync_coupon_rule(self._coupon_repo, coupon, saved.discount_rule)
 
         # Replace child collections only when the caller sent them.
         if payload.displays is not None:

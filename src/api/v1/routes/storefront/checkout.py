@@ -82,7 +82,7 @@ from src.core.checkout_fields import (
 from src.core.entities.abandoned_checkout import AbandonedCheckout
 from src.core.entities.customer import Customer
 from src.core.entities.product import PURCHASABLE_STATUSES
-from src.core.exceptions import EntityNotFoundError
+from src.core.exceptions import EntityNotFoundError, ValidationError
 from src.core.value_objects.geography import resolve_governorate
 from src.core.value_objects.phone import PhoneNumber
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -1444,6 +1444,7 @@ async def checkout(
     discount_amount = 0
     coupon_code = None
     coupon_id = None
+    linked_code_promotion = None
     # Free shipping can be granted by either a FREE_SHIPPING coupon or an
     # offers-v2 promotion. When set, the resolved shipping cost is zeroed
     # below (after server-side rate resolution). Captured here so both the
@@ -1451,8 +1452,7 @@ async def checkout(
     free_shipping = False
     # Offers-v2 snapshot persisted on the order: list of
     # {id, title, title_ar?, amount(cents)}. Populated only when the
-    # ff_apply_offers_at_checkout flag is on and an automatic promotion
-    # matched. coupon_* above remain the single-code surface.
+    # automatic promotion matched. coupon_* above remain the single-code surface.
     applied_promotions: list[dict] = []
     # If the redeemed coupon was issued under a marketing campaign,
     # we want to attribute the order to that campaign when no
@@ -1475,6 +1475,11 @@ async def checkout(
     if request.coupon_code:
         from src.application.use_cases.coupons.apply_coupon import ApplyCouponUseCase
 
+        prechecked_coupon = await coupon_repo.get_by_code(store_id, request.coupon_code)
+        if prechecked_coupon is not None:
+            linked_code_promotion = await promotion_repo.get_by_coupon_id(
+                store_id, prechecked_coupon.id
+            )
         apply_coupon = ApplyCouponUseCase(coupon_repository=coupon_repo)
         # Coupon math runs in STORE-CURRENCY DECIMALS (the entity's `value`,
         # `min_order_amount` and `max_discount_amount` are EGP decimals, not
@@ -1488,6 +1493,7 @@ async def checkout(
             code=request.coupon_code,
             order_amount=Decimal(str(subtotal)) / Decimal(100),
             for_update=True,
+            promotion_linked=linked_code_promotion is not None,
             # Pass line items so BUY_X_GET_Y coupons can compute the
             # cheapest-unit discount; ignored for simpler coupon types.
             line_items=[
@@ -1504,8 +1510,8 @@ async def checkout(
         if coupon_result.free_shipping:
             free_shipping = True
 
-    # ── Offers-v2 engine at order-create (feature-flagged) ─────────────
-    # When ff_apply_offers_at_checkout is on, run the SAME calculator the
+    # ── Offers-v2 engine at order-create ─────────────
+    # Run the SAME calculator the
     # storefront's POST /cart/discounts uses so the discount applied to the
     # order reconciles with what the cart drawer showed. We fold the
     # automatic discount in on top of any coupon (the calculator already
@@ -1513,13 +1519,13 @@ async def checkout(
     # free-shipping result, and snapshot the applied automatic promotions
     # onto the order. The single-coupon code is still applied above via
     # ApplyCouponUseCase (which also records usage + row-locks); we pass the
-    # code through to the calculator only so its at-most-one code-discount
-    # rule is reconciled — its code_discount is NOT re-added to the total to
-    # avoid double-counting the coupon.
+    # code through to the calculator so a linked promotion's discount rule
+    # replaces the coupon's legacy amount (older tiered codes were stored
+    # as a fixed EGP 1 placeholder).
     # current_customer is guaranteed non-None here: guests get a created
     # customer above. Narrow it for the offers block + downstream order build.
     _customer_id = current_customer.id if current_customer else None
-    if settings.ff_apply_offers_at_checkout and store.tenant_id is not None:
+    if store.tenant_id is not None:
         from src.application.dto.promotion_resolution import VisitorContextInput
         from src.application.use_cases.promotions.calculate_cart_discounts import (
             CalculateCartDiscountsUseCase,
@@ -1550,7 +1556,10 @@ async def checkout(
         )
         _offers_visitor = VisitorContextInput(
             customer_id=_customer_id,
+            customer_tags=current_customer.tags if current_customer else [],
             is_logged_in=not is_guest,
+            country=shipping_address.country,
+            city=shipping_address.city,
             cart_subtotal_cents=subtotal,
             cart_product_ids=[li.product_id for li in line_items],
             cart_category_ids=[
@@ -1577,11 +1586,21 @@ async def checkout(
                 applied_coupon_codes=[coupon_code] if coupon_code else [],
                 visitor=_offers_visitor,
             )
-        except Exception as exc:  # noqa: BLE001 — offers must never block checkout
+        except Exception as exc:  # noqa: BLE001
+            if linked_code_promotion is not None:
+                raise ValidationError(
+                    "Unable to validate this coupon right now"
+                ) from exc
             logger.warning("offers_at_checkout_error store=%s err=%s", store_id, exc)
             _offers_out = None
 
         if _offers_out is not None:
+            if linked_code_promotion is not None:
+                if linked_code_promotion.id not in _offers_out.applied_promotion_ids:
+                    raise ValidationError(
+                        "This coupon's offer does not apply to this order"
+                    )
+                discount_amount = min(int(_offers_out.code_discount_cents), subtotal)
             _auto_cents = int(_offers_out.automatic_discount_cents)
             if _offers_out.free_shipping:
                 free_shipping = True
@@ -1589,7 +1608,7 @@ async def checkout(
             # total can never go negative even if a coupon + automatic promo
             # together exceed the cart value.
             _auto_cents = max(0, min(_auto_cents, subtotal - discount_amount))
-            if _auto_cents > 0:
+            if _offers_out.applied_promotions:
                 discount_amount += _auto_cents
                 # Snapshot the automatic promotions that fired. Resolve each
                 # promotion's title for the order read; amount is the engine's
@@ -1597,7 +1616,7 @@ async def checkout(
                 applied_promotions = await _build_applied_promotions(
                     promotion_repo,
                     store_id,
-                    list(_offers_out.applied_promotion_ids),
+                    [UUID(str(e["id"])) for e in _offers_out.applied_promotions],
                     _auto_cents,
                     # Real per-promotion split from the engine, so a stacked
                     # cart records what each offer actually saved.
@@ -1615,6 +1634,8 @@ async def checkout(
                 free_shipping,
                 len(applied_promotions),
             )
+    elif linked_code_promotion is not None:
+        raise ValidationError("Unable to validate this coupon right now")
 
     # Atomically debit stock BEFORE creating the order, through the single
     # write path (stock_service) so products.quantity, the variant row the

@@ -23,6 +23,7 @@ import pytest
 from src.application.dto.order import OrderDTO
 from src.application.dto.promotion_resolution import VisitorContextInput
 from src.application.use_cases.coupons.apply_coupon import ApplyCouponUseCase
+from src.application.use_cases.promotions._sync_coupon import sync_coupon_rule
 from src.application.use_cases.promotions.calculate_cart_discounts import (
     CalculateCartDiscountsUseCase,
 )
@@ -34,6 +35,7 @@ from src.core.entities.order import (
     OrderShippingAddress,
 )
 from src.core.entities.promotion import Promotion
+from src.core.entities.promotion_event import PromotionEvent
 from src.core.enums.promotion_enums import PromotionStatus, PromotionSurface
 from src.core.services.discount_calculator import DiscountCalculator
 from src.core.services.promotion_eligibility_checker import (
@@ -90,6 +92,60 @@ async def test_apply_coupon_percentage(ids, coupon_repo):
     )
     assert int(out.discount_amount) == 1000
     assert out.free_shipping is False
+
+
+@pytest.mark.asyncio
+async def test_apply_tiered_coupon_uses_egp_cap(ids, coupon_repo):
+    coupon = Coupon(
+        id=uuid4(),
+        tenant_id=ids["tenant"],
+        store_id=ids["store"],
+        code="F2453",
+        coupon_type=CouponType.TIERED,
+        value=Decimal("0"),
+        config={"tiers": [{"min_subtotal_cents": 100000, "discount_percentage": 10}]},
+        max_discount_amount=Decimal("100"),
+    )
+    await coupon_repo.create(coupon)
+
+    out = await ApplyCouponUseCase(coupon_repository=coupon_repo).execute(
+        store_id=ids["store"], code="F2453", order_amount=Decimal("6000")
+    )
+    assert out.discount_amount == Decimal("100")
+
+
+def test_tiered_coupon_uses_highest_threshold_not_highest_percentage(ids):
+    coupon = Coupon(
+        store_id=ids["store"],
+        code="STEPS",
+        coupon_type=CouponType.TIERED,
+        config={
+            "tiers": [
+                {"min_subtotal_cents": 0, "discount_percentage": 20},
+                {"min_subtotal_cents": 100000, "discount_percentage": 10},
+            ]
+        },
+    )
+    assert coupon.calculate_discount(Decimal("2000")) == Decimal("200")
+
+
+@pytest.mark.asyncio
+async def test_linked_coupon_defers_threshold_to_offer(ids, coupon_repo):
+    coupon = Coupon(
+        store_id=ids["store"],
+        code="OLDMIN",
+        coupon_type=CouponType.FIXED,
+        value=Decimal("1"),
+        min_order_amount=Decimal("1000"),
+    )
+    await coupon_repo.create(coupon)
+    out = await ApplyCouponUseCase(coupon_repository=coupon_repo).execute(
+        store_id=ids["store"],
+        code=coupon.code,
+        order_amount=Decimal("500"),
+        promotion_linked=True,
+    )
+    assert out.coupon_id == coupon.id
 
 
 @pytest.mark.asyncio
@@ -325,6 +381,95 @@ async def test_offers_free_shipping_promo(
 
 
 # --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_per_customer_offer_cap_uses_conversion_history(
+    ids, promotion_repo, target_repo, coupon_repo, event_repo
+):
+    customer_id = uuid4()
+    product_id = uuid4()
+    promo = _automatic_percentage_promo(ids, 10)
+    promo.usage_limit_per_customer = 1
+    await promotion_repo.create(promo)
+    cart = Cart(
+        session_id="cap",
+        store_id=ids["store"],
+        customer_id=customer_id,
+        items=[
+            CartItem(
+                product_id=product_id, product_name="Item", quantity=1, unit_price=10000
+            )
+        ],
+    )
+    visitor = VisitorContextInput(
+        customer_id=customer_id,
+        cart_subtotal_cents=10000,
+        cart_product_ids=[product_id],
+    )
+    first = await _calc(
+        store_id=ids["store"],
+        tenant_id=ids["tenant"],
+        promotion_repo=promotion_repo,
+        target_repo=target_repo,
+        coupon_repo=coupon_repo,
+        event_repo=event_repo,
+        cart=cart,
+        applied_codes=[],
+        visitor=visitor,
+    )
+    assert first.automatic_discount_cents == 1000
+    await event_repo.record(
+        PromotionEvent.convert(
+            tenant_id=ids["tenant"],
+            store_id=ids["store"],
+            promotion_id=promo.id,
+            order_id=uuid4(),
+            customer_id=customer_id,
+        )
+    )
+    second = await _calc(
+        store_id=ids["store"],
+        tenant_id=ids["tenant"],
+        promotion_repo=promotion_repo,
+        target_repo=target_repo,
+        coupon_repo=coupon_repo,
+        event_repo=event_repo,
+        cart=cart,
+        applied_codes=[],
+        visitor=visitor,
+    )
+    assert second.automatic_discount_cents == 0
+
+
+def test_cart_discount_code_round_trips():
+    cart = Cart(session_id="s", store_id=uuid4(), discount_code="F2453")
+    assert Cart.from_dict(cart.to_dict()).discount_code == "F2453"
+
+
+@pytest.mark.asyncio
+async def test_editing_tiered_offer_updates_linked_coupon(ids, coupon_repo):
+    from src.core.value_objects.discount_rule import DiscountTier
+
+    coupon = Coupon(
+        store_id=ids["store"],
+        code="F2453",
+        coupon_type=CouponType.FIXED,
+        value=Decimal("1"),
+    )
+    await coupon_repo.create(coupon)
+    await sync_coupon_rule(
+        coupon_repo,
+        coupon,
+        DiscountRule(
+            kind=DiscountRuleKind.TIERED,
+            tiers=[DiscountTier(threshold_cents=100000, percent=10)],
+            max_discount_cents=10000,
+        ),
+    )
+    stored = await coupon_repo.get_by_id(coupon.id)
+    assert stored.coupon_type == CouponType.TIERED
+    assert stored.calculate_discount(Decimal("6000")) == Decimal("100")
+
+
 # _build_applied_promotions snapshot helper                                   #
 # --------------------------------------------------------------------------- #
 

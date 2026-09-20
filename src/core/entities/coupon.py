@@ -230,6 +230,7 @@ def _calculate_tiered_discount(
     if not isinstance(tiers, list):
         return Decimal("0")
     order_cents = int(order_amount * Decimal("100"))
+    best_threshold = -1
     best_pct = Decimal("0")
     for tier in tiers:
         if not isinstance(tier, dict):
@@ -238,8 +239,9 @@ def _calculate_tiered_discount(
         pct = tier.get("discount_percentage")
         if not isinstance(threshold, int | float) or not isinstance(pct, int | float):
             continue
-        if order_cents >= int(threshold):
-            best_pct = max(best_pct, Decimal(str(pct)))
+        if order_cents >= int(threshold) and int(threshold) > best_threshold:
+            best_threshold = int(threshold)
+            best_pct = Decimal(str(pct))
     return order_amount * best_pct / Decimal("100")
 
 

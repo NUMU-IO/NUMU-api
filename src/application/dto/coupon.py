@@ -66,6 +66,7 @@ class CreateCouponDTO(BaseDTO):
     code: str
     coupon_type: str
     value: Decimal = Decimal("0")
+    is_active: bool = True
     min_order_amount: Decimal | None = None
     max_discount_amount: Decimal | None = None
     usage_limit: int | None = None

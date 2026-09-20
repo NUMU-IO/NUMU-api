@@ -27,6 +27,7 @@ class ApplyCouponUseCase:
         order_amount: Decimal,
         for_update: bool = False,
         line_items: list[dict[str, Any]] | None = None,
+        promotion_linked: bool = False,
     ) -> ApplyCouponDTO:
         """Apply a coupon and record its usage.
 
@@ -38,6 +39,8 @@ class ApplyCouponUseCase:
             line_items: Optional cart line items (each with product_id /
                 unit_price / quantity). Required for BUY_X_GET_Y
                 coupons (Phase 8.4); ignored for simpler types.
+            promotion_linked: The promotion owns schedule and minimum-order
+                eligibility; still require an active coupon with uses left.
 
         Returns:
             ApplyCouponDTO with the calculated discount details.
@@ -53,10 +56,15 @@ class ApplyCouponUseCase:
         if not coupon:
             raise EntityNotFoundError("Coupon", code, identifier_name="code")
 
-        if not coupon.is_usable:
+        usable = (
+            coupon.is_active and coupon.has_remaining_uses
+            if promotion_linked
+            else coupon.is_usable
+        )
+        if not usable:
             raise ValidationError("This coupon cannot be applied")
 
-        if not coupon.meets_minimum_order(order_amount):
+        if not promotion_linked and not coupon.meets_minimum_order(order_amount):
             raise ValidationError(
                 f"Order total must be at least {coupon.min_order_amount} "
                 f"to use this coupon"

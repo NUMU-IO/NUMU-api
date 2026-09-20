@@ -8,6 +8,7 @@ from src.application.dto.promotion import (
     PromotionOutput,
 )
 from src.application.use_cases.promotions._mapping import promotion_to_output
+from src.application.use_cases.promotions._sync_coupon import sync_coupon_rule
 from src.application.use_cases.promotions._validation import (
     validate_surface_payload,
 )
@@ -87,6 +88,10 @@ class CreatePromotionUseCase:
                 raise CouponPromotionLinkError(
                     f"coupon {payload.coupon_id} not found in store {store_id}"
                 )
+            if await self._promotion_repo.get_by_coupon_id(store_id, coupon.id):
+                raise CouponPromotionLinkError(
+                    f"coupon {coupon.id} is already linked to a promotion"
+                )
 
         # 4. Auto-flip status: active in the future → scheduled.
         status = payload.status
@@ -119,6 +124,10 @@ class CreatePromotionUseCase:
 
         # 6. Persist atomically — promotion → displays → targets → translations.
         created = await self._promotion_repo.create(promo)
+        if payload.coupon_id is not None:
+            await sync_coupon_rule(
+                self._coupon_repo, coupon, payload.discount_rule, activate=True
+            )
 
         # Inject a sane default display when the merchant didn't configure
         # one for a visual surface. Without this, the resolver filters

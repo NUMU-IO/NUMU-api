@@ -1,5 +1,7 @@
 """ResolveActivePromotionsUseCase — grouping by surface."""
 
+from uuid import uuid4
+
 import pytest
 
 from src.application.dto.promotion_resolution import VisitorContextInput
@@ -8,6 +10,7 @@ from src.application.use_cases.promotions.resolve_active_promotions import (
 )
 from src.core.entities.promotion import Promotion
 from src.core.entities.promotion_display import PromotionDisplay
+from src.core.entities.promotion_event import PromotionEvent
 from src.core.enums.promotion_enums import (
     DisplayFrequency,
     DisplayTrigger,
@@ -97,3 +100,51 @@ async def test_groups_by_surface_and_emits_fingerprint(
     assert out.announcement_bars[0].fingerprint
     assert out.announcement_bars[0].promotion_id == bar.id
     assert out.popups[0].promotion_id == pop.id
+
+
+@pytest.mark.asyncio
+async def test_visible_offer_respects_customer_usage_cap(
+    ids,
+    promotion_repo,
+    display_repo,
+    target_repo,
+    dismissal_repo,
+    coupon_repo,
+    event_repo,
+):
+    customer_id = uuid4()
+    bar = _bar(ids["store"], ids["tenant"])
+    bar.usage_limit_per_customer = 1
+    await promotion_repo.create(bar)
+    await display_repo.replace_for_promotion(bar.id, [_display(bar)])
+    resolver = PromotionResolver(
+        promotion_repo=promotion_repo,
+        display_repo=display_repo,
+        target_repo=target_repo,
+        dismissal_repo=dismissal_repo,
+        eligibility_checker=PromotionEligibilityChecker(),
+        event_repo=event_repo,
+    )
+    uc = ResolveActivePromotionsUseCase(resolver=resolver, coupon_repo=coupon_repo)
+    visitor = VisitorContextInput(customer_id=customer_id)
+    before = await uc.execute(
+        store_id=ids["store"],
+        tenant_id=ids["tenant"],
+        visitor=visitor,
+    )
+    assert len(before.announcement_bars) == 1
+    await event_repo.record(
+        PromotionEvent.convert(
+            tenant_id=ids["tenant"],
+            store_id=ids["store"],
+            promotion_id=bar.id,
+            order_id=uuid4(),
+            customer_id=customer_id,
+        )
+    )
+    after = await uc.execute(
+        store_id=ids["store"],
+        tenant_id=ids["tenant"],
+        visitor=visitor,
+    )
+    assert after.announcement_bars == []

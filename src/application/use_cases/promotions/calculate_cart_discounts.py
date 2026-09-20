@@ -121,9 +121,20 @@ class CalculateCartDiscountsUseCase:
             if self._event_repo is not None and promo.usage_limit_total is not None:
                 counts = await self._event_repo.counts_for_promotion(promo.id)
                 convert_count_total = counts.conversions
+            convert_count_per_customer = 0
+            if (
+                self._event_repo is not None
+                and promo.usage_limit_per_customer is not None
+                and visitor.customer_id is not None
+            ):
+                convert_count_per_customer = (
+                    await self._event_repo.count_conversions_for_customer(
+                        promo.id, visitor.customer_id
+                    )
+                )
             scoped_ctx = (
                 ctx
-                if convert_count_total == 0
+                if convert_count_total == 0 and convert_count_per_customer == 0
                 else EligibilityContext(
                     customer_id=ctx.customer_id,
                     customer_tags=ctx.customer_tags,
@@ -137,6 +148,7 @@ class CalculateCartDiscountsUseCase:
                     is_logged_in=ctx.is_logged_in,
                     dismissed_promotion_ids=ctx.dismissed_promotion_ids,
                     convert_count_total=convert_count_total,
+                    convert_count_per_customer=convert_count_per_customer,
                 )
             )
 
