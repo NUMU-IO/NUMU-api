@@ -270,6 +270,18 @@ def _dispatch_alert(payload: dict[str, Any]) -> None:
 _LEVELS = frozenset({"debug", "info", "warning", "error", "critical", "exception"})
 
 
+def _context(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Keep caller context that collides with structlog's own key.
+
+    structlog calls the message itself ``event``, so ``log.info("x",
+    event="order.paid")`` is two values for one argument. The context is the
+    part worth keeping, under a name that survives.
+    """
+    if "event" in kwargs:
+        kwargs["event_name"] = kwargs.pop("event")
+    return kwargs
+
+
 class Log:
     """Readable, consistent logger used across the codebase.
 
@@ -295,44 +307,47 @@ class Log:
     # -- context -----------------------------------------------------------
     def bind(self, **kwargs: Any) -> Log:
         """Return a new logger with the given context bound to every line."""
-        return Log._wrap(self._log.bind(**kwargs))
+        return Log._wrap(self._log.bind(**_context(kwargs)))
 
     def unbind(self, *keys: str) -> Log:
         """Return a new logger with the given context keys removed."""
         return Log._wrap(self._log.unbind(*keys))
 
     # -- standard levels ---------------------------------------------------
-    def debug(self, event: str, **kwargs: Any) -> None:
-        self._log.debug(event, **kwargs)
+    # The message is positional-only: `event` is structlog's own name for it,
+    # so a call that also passed domain context as `event="order.paid"` — six
+    # of them did — raised TypeError and took down whatever was logging.
+    def debug(self, event: str, /, **kwargs: Any) -> None:
+        self._log.debug(event, **_context(kwargs))
 
-    def info(self, event: str, **kwargs: Any) -> None:
-        self._log.info(event, **kwargs)
+    def info(self, event: str, /, **kwargs: Any) -> None:
+        self._log.info(event, **_context(kwargs))
 
-    def warning(self, event: str, **kwargs: Any) -> None:
-        self._log.warning(event, **kwargs)
+    def warning(self, event: str, /, **kwargs: Any) -> None:
+        self._log.warning(event, **_context(kwargs))
 
     warn = warning
 
-    def error(self, event: str, **kwargs: Any) -> None:
-        self._log.error(event, **kwargs)
+    def error(self, event: str, /, **kwargs: Any) -> None:
+        self._log.error(event, **_context(kwargs))
 
-    def critical(self, event: str, **kwargs: Any) -> None:
-        self._log.critical(event, **kwargs)
+    def critical(self, event: str, /, **kwargs: Any) -> None:
+        self._log.critical(event, **_context(kwargs))
 
-    def exception(self, event: str, **kwargs: Any) -> None:
+    def exception(self, event: str, /, **kwargs: Any) -> None:
         """Log at error level WITH the current exception traceback."""
-        self._log.exception(event, **kwargs)
+        self._log.exception(event, **_context(kwargs))
 
     # -- NUMU channels -----------------------------------------------------
-    def insight(self, event: str, **kwargs: Any) -> None:
+    def insight(self, event: str, /, **kwargs: Any) -> None:
         """Emit a business/analytics insight, tagged ``kind="insight"``.
 
         Use for meaningful domain events you'll want to query or dashboard:
         ``log.insight("order_placed", order_id=..., amount_cents=..., ...)``.
         """
-        self._log.info(event, kind="insight", **kwargs)
+        self._log.info(event, kind="insight", **_context(kwargs))
 
-    def alert(self, event: str, *, level: str = "error", **kwargs: Any) -> None:
+    def alert(self, event: str, /, *, level: str = "error", **kwargs: Any) -> None:
         """Log the event AND dispatch it to the alert webhook (if configured).
 
         Use for things a human should see in real time:
@@ -340,8 +355,9 @@ class Log:
         plain log when no webhook URL is set.
         """
         emit = getattr(self._log, level, self._log.error)
-        emit(event, kind="alert", **kwargs)
-        _dispatch_alert({"event": event, "level": level, **kwargs})
+        context = _context(kwargs)
+        emit(event, kind="alert", **context)
+        _dispatch_alert({"event": event, "level": level, **context})
 
     # -- compatibility fallback -------------------------------------------
     def __getattr__(self, item: str) -> Any:
