@@ -19,7 +19,10 @@ class PromotionEventCounts:
     dismissals: int = 0
     redemptions: int = 0
     conversions: int = 0
+    # Order value attributed to the promotion (from convert events).
     revenue_cents: int = 0
+    # What the promotion took off those orders.
+    discount_total_cents: int = 0
 
 
 class IPromotionEventRepository(ABC):

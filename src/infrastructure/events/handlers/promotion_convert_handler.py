@@ -36,6 +36,31 @@ from src.infrastructure.repositories.promotion_event_repository import (
 log = logging.getLogger(__name__)
 
 
+def split_order_discounts(
+    applied_promotions: list[dict] | None,
+    order_discount_cents: int | None,
+) -> tuple[dict[str, int], int]:
+    """Split an order's total discount into per-promotion and code shares.
+
+    The order records what each automatic promotion saved; the code's own
+    share is whatever is left of the order's total discount. Every convert
+    event used to store 0 here, so a merchant's offer page reported "0
+    revenue, 0 discount" no matter how well the offer sold — numbers are
+    only worth showing if they're real.
+
+    Malformed rows are skipped rather than raised on: analytics must never
+    be the reason a paid order's handler fails.
+    """
+    auto_amounts: dict[str, int] = {}
+    for applied in applied_promotions or []:
+        try:
+            auto_amounts[str(applied["id"])] = int(applied.get("amount") or 0)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    code_cents = max(0, int(order_discount_cents or 0) - sum(auto_amounts.values()))
+    return auto_amounts, code_cents
+
+
 async def handle_promotion_convert_on_order_paid(event: OrderPaidEvent) -> None:
     """Emit convert events for every promotion attributable to this order."""
     try:
@@ -87,6 +112,10 @@ async def handle_promotion_convert_on_order_paid(event: OrderPaidEvent) -> None:
 
             convert_events: list[PromotionEvent] = []
 
+            auto_amounts, code_discount_cents = split_order_discounts(
+                order.applied_promotions, order.discount_amount
+            )
+
             # 1) Resolve any code-based promotion linked to the order's
             #    coupon code.
             if coupon_code:
@@ -106,6 +135,7 @@ async def handle_promotion_convert_on_order_paid(event: OrderPaidEvent) -> None:
                                 store_id=store_id,
                                 promotion_id=linked_promo.id,
                                 order_id=event.order_id,
+                                discount_amount_cents=code_discount_cents,
                                 customer_id=event.customer_id,
                                 metadata={
                                     "source": "code",
@@ -129,6 +159,7 @@ async def handle_promotion_convert_on_order_paid(event: OrderPaidEvent) -> None:
                         store_id=store_id,
                         promotion_id=promo_id,
                         order_id=event.order_id,
+                        discount_amount_cents=auto_amounts.get(str(promo_id), 0),
                         customer_id=event.customer_id,
                         metadata={
                             "source": "automatic",

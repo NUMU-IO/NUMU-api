@@ -282,6 +282,13 @@ class DiscountRule(BaseModel):
         `buy_filter` / `get_filter` restrict which cart lines
         participate:
 
+        * PERCENTAGE / FIXED — `buy_filter` is the set the discount
+          applies TO ("20% off Bags"): the percentage is taken on those
+          lines, and a fixed amount is capped at what they are worth.
+          Omitted ⇒ the whole cart, which is what every offer written
+          before scoping existed keeps doing. `get_filter` is ignored.
+          Note `min_subtotal_cents` still gates on the WHOLE cart — it
+          is a "spend this much" condition, not part of the scope.
         * BOGO — the "customer buys" / "customer gets" sets. When
           omitted, BOGO falls back to the original "any-product,
           cheapest-unit free" semantics so existing rules without
@@ -314,9 +321,9 @@ class DiscountRule(BaseModel):
                     explanation="free shipping",
                 )
             case DiscountRuleKind.PERCENTAGE:
-                return self._percentage(context)
+                return self._percentage(context, buy_filter)
             case DiscountRuleKind.FIXED:
-                return self._fixed(context)
+                return self._fixed(context, buy_filter)
             case DiscountRuleKind.BOGO:
                 return self._bogo(context, buy_filter, get_filter)
             case DiscountRuleKind.TIERED:
@@ -344,22 +351,59 @@ class DiscountRule(BaseModel):
             capped = min(capped, self.max_discount_cents)
         return min(capped, context.subtotal_cents)
 
-    def _percentage(self, context: DiscountContext) -> DiscountResult:
+    def _scoped_base_cents(
+        self, context: DiscountContext, buy_filter: LineFilter | None
+    ) -> tuple[int, bool]:
+        """The amount a percentage/fixed rule discounts, and whether it is scoped.
+
+        With no filter this is the cart subtotal — the behaviour every
+        unscoped offer has always had. With one, it is the value of the
+        matching lines ONLY: "20% off Bags" must take 20% of the bags, not
+        20% of a cart that happens to contain one.
+
+        Falls back to the subtotal when the context carries no line items.
+        Some callers (the legacy `/coupons/apply` preview) know an order
+        total and nothing else; charging them the unscoped amount would be
+        worse than the approximation, and the authoritative recompute at
+        order-create always has the lines.
+        """
+        if buy_filter is None or not context.line_items:
+            return context.subtotal_cents, False
+        base = sum(
+            li.unit_price_cents * li.quantity
+            for li in context.line_items
+            if buy_filter(li)
+        )
+        return base, True
+
+    def _percentage(
+        self, context: DiscountContext, buy_filter: LineFilter | None = None
+    ) -> DiscountResult:
         assert self.value_percent is not None  # validated
-        raw = (context.subtotal_cents * self.value_percent) // 100
+        base, scoped = self._scoped_base_cents(context, buy_filter)
+        raw = (base * self.value_percent) // 100
         capped = self._cap(raw, context)
         explanation = f"{self.value_percent}% off"
+        if scoped:
+            explanation += f" (on {base} cents of matching items)"
         if self.max_discount_cents is not None and capped == self.max_discount_cents:
             explanation += f" (capped at {self.max_discount_cents} cents)"
         return DiscountResult(discount_cents=capped, explanation=explanation)
 
-    def _fixed(self, context: DiscountContext) -> DiscountResult:
+    def _fixed(
+        self, context: DiscountContext, buy_filter: LineFilter | None = None
+    ) -> DiscountResult:
         assert self.value_cents is not None  # validated
-        capped = self._cap(self.value_cents, context)
-        return DiscountResult(
-            discount_cents=capped,
-            explanation=f"{self.value_cents} cents off",
-        )
+        base, scoped = self._scoped_base_cents(context, buy_filter)
+        # A scoped fixed discount can never exceed what the matching lines are
+        # worth: "EGP 50 off Bags" on a EGP 30 bag is EGP 30, not a EGP 50
+        # discount funded by the rest of the cart.
+        raw = min(self.value_cents, base) if scoped else self.value_cents
+        capped = self._cap(raw, context)
+        explanation = f"{self.value_cents} cents off"
+        if scoped:
+            explanation += f" (limited to {base} cents of matching items)"
+        return DiscountResult(discount_cents=capped, explanation=explanation)
 
     def _bogo(
         self,

@@ -44,6 +44,8 @@ def promotion_to_output(
     displays: list[PromotionDisplay],
     targets: list[PromotionTarget],
     metrics: PromotionMetricsBlock | None = None,
+    code: str | None = None,
+    usage_count: int = 0,
 ) -> PromotionOutput:
     """Full read model. `metrics` is a no-op zeroed block if not provided."""
     content_payload: PromotionContent = promo.content
@@ -55,6 +57,8 @@ def promotion_to_output(
         surface=promo.surface,
         status=promo.status,
         coupon_id=promo.coupon_id,
+        code=code,
+        usage_count=usage_count,
         discount_rule=promo.discount_rule,
         content=content_payload.model_dump(),
         translations=promo.translations,

@@ -264,11 +264,13 @@ async def get_promotion(
     event_repo: Annotated[
         PromotionEventRepository, Depends(get_promotion_event_repository)
     ],
+    coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
 ) -> SuccessResponse[PromotionOutput]:
     use_case = GetPromotionUseCase(
         promotion_repo=promo_repo,
         display_repo=display_repo,
         target_repo=target_repo,
+        coupon_repo=coupon_repo,
     )
     out = await use_case.execute(
         tenant_id=store.tenant_id,
@@ -281,9 +283,13 @@ async def get_promotion(
         impressions=counts.impressions,
         clicks=counts.clicks,
         dismissals=counts.dismissals,
-        redemptions=counts.redemptions,
+        # A code offer records no `redeem` rows — its real usage lives on the
+        # coupon, incremented at order create. Prefer that over a count that
+        # is structurally always zero.
+        redemptions=max(counts.redemptions, out.usage_count),
         conversions=counts.conversions,
         revenue_cents=counts.revenue_cents,
+        discount_total_cents=counts.discount_total_cents,
     )
     return SuccessResponse(data=out)
 

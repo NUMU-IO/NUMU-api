@@ -70,7 +70,7 @@ class GetPromotionAnalyticsUseCase:
             redemptions=redemptions,
             conversions=conversions,
             revenue_cents=counts.revenue_cents,
-            discount_total_cents=counts.revenue_cents,  # placeholder until step 13 splits
+            discount_total_cents=counts.discount_total_cents,
             by_day=[],  # filled in by step 13's daily rollup
             conversion_rate=round(conversion_rate, 4),
             impression_to_click_rate=round(impression_to_click, 4),

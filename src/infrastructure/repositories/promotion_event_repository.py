@@ -1,9 +1,10 @@
 """SQLAlchemy implementation of `IPromotionEventRepository`."""
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+from sqlalchemy import Numeric, case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.promotion_event import PromotionEvent
@@ -54,21 +55,31 @@ class PromotionEventRepository(IPromotionEventRepository):
         if until is not None:
             filters.append(PromotionEventModel.occurred_at <= until)
 
+        # `revenue` is the order value a convert event carries, written by
+        # the convert handler into `metadata.order_total` (major units).
+        # `discount` is what the offer took off, on whichever event type
+        # recorded it. Summing them in the same GROUP BY keeps this one
+        # query — the merchant detail page fires it on every page view.
+        order_total = cast(
+            PromotionEventModel.event_metadata["order_total"].astext, Numeric
+        )
         stmt = (
             select(
                 PromotionEventModel.event_type,
                 func.count().label("cnt"),
                 func.coalesce(
                     func.sum(PromotionEventModel.discount_amount_cents), 0
-                ).label("revenue"),
+                ).label("discount"),
+                func.coalesce(func.sum(order_total), 0).label("revenue_major"),
             )
             .where(*filters)
             .group_by(PromotionEventModel.event_type)
         )
         rows = (await self.session.execute(stmt)).all()
 
-        impressions = clicks = dismissals = redemptions = conversions = revenue = 0
-        for event_type, cnt, rev in rows:
+        impressions = clicks = dismissals = redemptions = conversions = 0
+        revenue = discount = 0
+        for event_type, cnt, disc, revenue_major in rows:
             cnt_int = int(cnt or 0)
             if event_type == "impression":
                 impressions = cnt_int
@@ -78,9 +89,14 @@ class PromotionEventRepository(IPromotionEventRepository):
                 dismissals = cnt_int
             elif event_type == "redeem":
                 redemptions = cnt_int
-                revenue = int(rev or 0)
             elif event_type == "convert":
                 conversions = cnt_int
+                revenue = int(Decimal(revenue_major or 0) * 100)
+            # Discount is reported on redeem AND convert rows; sum both so a
+            # promotion that only ever recorded converts still reports what
+            # it gave away (it used to read 0 on every code offer).
+            if event_type in ("redeem", "convert"):
+                discount += int(disc or 0)
         return PromotionEventCounts(
             promotion_id=promotion_id,
             impressions=impressions,
@@ -89,6 +105,7 @@ class PromotionEventRepository(IPromotionEventRepository):
             redemptions=redemptions,
             conversions=conversions,
             revenue_cents=revenue,
+            discount_total_cents=discount,
         )
 
     async def count_conversions_for_customer(
