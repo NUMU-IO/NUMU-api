@@ -38,6 +38,7 @@ class CreateCouponRequest(BaseModel):
         ge=0,
         description="Discount value — percentage (0-100) or fixed amount",
     )
+    is_active: bool = True
     min_order_amount: Decimal | None = Field(
         None, ge=0, description="Minimum order subtotal required to apply the coupon"
     )

@@ -91,6 +91,20 @@ class PromotionEventRepository(IPromotionEventRepository):
             revenue_cents=revenue,
         )
 
+    async def count_conversions_for_customer(
+        self, promotion_id: UUID, customer_id: UUID
+    ) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(PromotionEventModel)
+            .where(
+                PromotionEventModel.promotion_id == promotion_id,
+                PromotionEventModel.customer_id == customer_id,
+                PromotionEventModel.event_type == "convert",
+            )
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
     async def counts_for_store(
         self,
         store_id: UUID,

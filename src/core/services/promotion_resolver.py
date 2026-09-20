@@ -5,7 +5,7 @@ final list of active promotions grouped by surface, after eligibility
 filtering and priority sorting.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -58,12 +58,14 @@ class PromotionResolver:
         target_repo: IPromotionTargetRepository,
         dismissal_repo: IPromotionDismissalRepository,
         eligibility_checker: PromotionEligibilityChecker,
+        event_repo=None,
     ) -> None:
         self._promotion_repo = promotion_repo
         self._display_repo = display_repo
         self._target_repo = target_repo
         self._dismissal_repo = dismissal_repo
         self._checker = eligibility_checker
+        self._event_repo = event_repo
 
     async def resolve_active_for_visitor(
         self,
@@ -131,7 +133,26 @@ class PromotionResolver:
             displays = displays_by_promo.get(promo.id, [])
             targets = targets_by_promo.get(promo.id, [])
 
-            verdict = self._checker.is_eligible(promo, targets, ctx, now=moment)
+            total_count = 0
+            customer_count = 0
+            if self._event_repo is not None and promo.usage_limit_total is not None:
+                total_count = (
+                    await self._event_repo.counts_for_promotion(promo.id)
+                ).conversions
+            if (
+                self._event_repo is not None
+                and promo.usage_limit_per_customer is not None
+                and ctx.customer_id is not None
+            ):
+                customer_count = await self._event_repo.count_conversions_for_customer(
+                    promo.id, ctx.customer_id
+                )
+            scoped_ctx = replace(
+                ctx,
+                convert_count_total=total_count,
+                convert_count_per_customer=customer_count,
+            )
+            verdict = self._checker.is_eligible(promo, targets, scoped_ctx, now=moment)
             if not verdict.eligible:
                 continue
 

@@ -29,6 +29,12 @@ class IPromotionRepository(ABC):
     ) -> Promotion | None: ...
 
     @abstractmethod
+    async def get_by_coupon_id(
+        self, store_id: UUID, coupon_id: UUID
+    ) -> Promotion | None:
+        """Find a linked promotion, including drafts and paused promotions."""
+
+    @abstractmethod
     async def list_for_store(
         self,
         store_id: UUID,

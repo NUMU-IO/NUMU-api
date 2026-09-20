@@ -41,6 +41,11 @@ class IPromotionEventRepository(ABC):
     ) -> PromotionEventCounts: ...
 
     @abstractmethod
+    async def count_conversions_for_customer(
+        self, promotion_id: UUID, customer_id: UUID
+    ) -> int: ...
+
+    @abstractmethod
     async def counts_for_store(
         self,
         store_id: UUID,

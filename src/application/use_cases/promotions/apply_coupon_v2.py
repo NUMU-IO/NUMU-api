@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict
 
 from src.application.dto.promotion_resolution import VisitorContextInput
 from src.core.entities.coupon import CouponType
-from src.core.entities.promotion_event import PromotionEvent
 from src.core.exceptions import EntityNotFoundError, ValidationError
 from src.core.interfaces.repositories.coupon_repository import ICouponRepository
 from src.core.interfaces.repositories.promotion_event_repository import (
@@ -27,6 +26,7 @@ from src.core.services.promotion_eligibility_checker import (
     EligibilityContext,
     PromotionEligibilityChecker,
 )
+from src.core.value_objects.discount_rule import DiscountContext
 
 
 class ApplyCouponV2Output(BaseModel):
@@ -72,67 +72,75 @@ class ApplyCouponV2UseCase:
         coupon = await self._coupon_repo.get_by_code(store_id, code)
         if coupon is None:
             raise EntityNotFoundError("Coupon", code, identifier_name="code")
-        if not coupon.is_usable:
+        linked = await self._promotion_repo.get_by_coupon_id(store_id, coupon.id)
+        usable = (
+            coupon.is_active and coupon.has_remaining_uses
+            if linked is not None
+            else coupon.is_usable
+        )
+        if not usable:
             raise ValidationError("This coupon cannot be applied")
-        if not coupon.meets_minimum_order(order_amount):
+        if linked is None and not coupon.meets_minimum_order(order_amount):
             raise ValidationError(
                 f"Order total must be at least {coupon.min_order_amount} "
                 f"to use this coupon"
             )
 
-        # Find a linked promotion if any. We don't have a `coupon → promotion`
-        # back-reference column in v1 — query promotions filtered to this store
-        # and pick the one whose `coupon_id` matches.
+        # Include inactive promotions so a draft or paused offer cannot fall
+        # through to the coupon's stored amount.
         linked_promo_id: UUID | None = None
-        if visitor is not None:
+        if linked is not None:
+            if visitor is None:
+                raise ValidationError("Visitor context is required for this offer")
             now = datetime.now(UTC)
-            active = await self._promotion_repo.list_active_for_storefront(
-                store_id, now
-            )
-            linked = next((p for p in active if p.coupon_id == coupon.id), None)
-            if linked is not None:
-                targets = await self._target_repo.list_for_promotion(linked.id)
-                ctx = EligibilityContext(
-                    customer_id=visitor.customer_id,
-                    customer_tags=visitor.customer_tags,
-                    cart_subtotal_cents=visitor.cart_subtotal_cents,
-                    cart_product_ids=visitor.cart_product_ids,
-                    cart_category_ids=visitor.cart_category_ids,
-                    country=visitor.country,
-                    city=visitor.city,
-                    device=visitor.device,
-                    is_first_visit=visitor.is_first_visit,
-                    is_logged_in=visitor.is_logged_in,
+            targets = await self._target_repo.list_for_promotion(linked.id)
+            total_count = 0
+            customer_count = 0
+            if linked.usage_limit_total is not None:
+                total_count = (
+                    await self._event_repo.counts_for_promotion(linked.id)
+                ).conversions
+            if (
+                linked.usage_limit_per_customer is not None
+                and visitor.customer_id is not None
+            ):
+                customer_count = await self._event_repo.count_conversions_for_customer(
+                    linked.id, visitor.customer_id
                 )
-                verdict = self._checker.is_eligible(linked, targets, ctx, now=now)
-                if not verdict.eligible:
-                    raise ValidationError(
-                        "This coupon's promotion is not available right now: "
-                        + (verdict.reasons[0] if verdict.reasons else "blocked")
-                    )
-                linked_promo_id = linked.id
+            ctx = EligibilityContext(
+                customer_id=visitor.customer_id,
+                customer_tags=visitor.customer_tags,
+                cart_subtotal_cents=visitor.cart_subtotal_cents,
+                cart_product_ids=visitor.cart_product_ids,
+                cart_category_ids=visitor.cart_category_ids,
+                country=visitor.country,
+                city=visitor.city,
+                device=visitor.device,
+                is_first_visit=visitor.is_first_visit,
+                is_logged_in=visitor.is_logged_in,
+                convert_count_total=total_count,
+                convert_count_per_customer=customer_count,
+            )
+            verdict = self._checker.is_eligible(linked, targets, ctx, now=now)
+            if not verdict.eligible:
+                raise ValidationError(
+                    "This coupon's promotion is not available right now: "
+                    + (verdict.reasons[0] if verdict.reasons else "blocked")
+                )
+            linked_promo_id = linked.id
 
         discount_amount = coupon.calculate_discount(order_amount)
         free_shipping = coupon.coupon_type == CouponType.FREE_SHIPPING
-
-        # Increment the coupon's usage atomically (legacy behavior).
-        await self._coupon_repo.increment_usage(coupon.id)
-
-        # Record the redemption event when there is a linked promotion.
-        if linked_promo_id is not None:
-            # piasters / cents — `discount_amount` is in EGP at this point.
-            cents = int((discount_amount * Decimal("100")).to_integral_value())
-            await self._event_repo.record(
-                PromotionEvent(
-                    tenant_id=tenant_id,
-                    store_id=store_id,
-                    promotion_id=linked_promo_id,
-                    event_type="redeem",
-                    discount_amount_cents=cents,
-                    customer_id=visitor.customer_id if visitor else None,
-                    session_id=visitor.visitor_token if visitor else None,
-                )
+        if linked is not None:
+            if linked.discount_rule is None:
+                raise ValidationError("This coupon's promotion has no discount rule")
+            result = linked.discount_rule.calculate(
+                DiscountContext(subtotal_cents=int(order_amount * 100), line_items=[])
             )
+            discount_amount = Decimal(result.discount_cents) / Decimal(100)
+            free_shipping = result.free_shipping
+            if discount_amount <= 0 and not free_shipping:
+                raise ValidationError("This coupon does not apply to this order")
 
         return ApplyCouponV2Output(
             coupon_id=coupon.id,

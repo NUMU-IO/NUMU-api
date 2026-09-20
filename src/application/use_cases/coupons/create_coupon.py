@@ -115,6 +115,7 @@ class CreateCouponUseCase:
             code=code,
             coupon_type=coupon_type,
             value=dto.value,
+            is_active=dto.is_active,
             min_order_amount=dto.min_order_amount,
             max_discount_amount=dto.max_discount_amount,
             usage_limit=dto.usage_limit,

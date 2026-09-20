@@ -117,6 +117,7 @@ class CartResponse(BaseModel):
     total_quantity: int = Field(description="Sum of all item quantities")
     subtotal: int = Field(description="Subtotal in cents")
     currency: str = "EGP"
+    discount_code: str | None = None
     automatic_discount_cents: int = Field(
         default=0,
         description=(

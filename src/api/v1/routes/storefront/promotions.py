@@ -120,6 +120,9 @@ async def get_active_promotions(
     ],
     coupon_repo: Annotated[Any, Depends(get_coupon_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    event_repo: Annotated[
+        PromotionEventRepository, Depends(get_promotion_event_repository)
+    ],
     is_preview: Annotated[bool, Depends(maybe_preview_for_store)],
     customer: Annotated[Customer | None, Depends(get_optional_customer)] = None,
     page: Annotated[str, str] = "/",
@@ -148,6 +151,7 @@ async def get_active_promotions(
 
     visitor = VisitorContextInput(
         customer_id=customer.id if customer else None,
+        customer_tags=customer.tags if customer else [],
         visitor_token=_visitor_token(request),
         is_logged_in=customer is not None,
         device=device,
@@ -164,6 +168,7 @@ async def get_active_promotions(
         target_repo=target_repo,
         dismissal_repo=dismissal_repo,
         eligibility_checker=PromotionEligibilityChecker(),
+        event_repo=event_repo,
     )
     use_case = ResolveActivePromotionsUseCase(
         resolver=resolver, coupon_repo=coupon_repo
@@ -513,6 +518,20 @@ async def calculate_cart_discounts(
             li.category_id for li in body.items if li.category_id is not None
         ],
     )
+    visitor = visitor.model_copy(
+        update={
+            "customer_id": customer.id if customer else None,
+            "customer_tags": customer.tags if customer else [],
+            "is_logged_in": customer is not None,
+            "cart_subtotal_cents": sum(
+                li.unit_price_cents * li.quantity for li in body.items
+            ),
+            "cart_product_ids": [li.product_id for li in body.items],
+            "cart_category_ids": [
+                li.category_id for li in body.items if li.category_id is not None
+            ],
+        }
+    )
 
     # Hydrate a Cart entity from the request payload. We don't persist
     # anything — the entity is just the shape the use case expects so
@@ -559,7 +578,7 @@ async def calculate_cart_discounts(
     # every cart change) so the summary reconciles with what checkout charges.
     # Only when the calculator didn't already attribute a code discount
     # (promotion-backed codes win and are handled above) and a code is applied.
-    if out.code_discount_cents == 0 and not out.free_shipping and body.applied_codes:
+    if out.code_discount_cents == 0 and body.applied_codes:
         subtotal_major = Decimal(
             sum(li.unit_price_cents * li.quantity for li in body.items)
         ) / Decimal("100")
@@ -575,6 +594,8 @@ async def calculate_cart_discounts(
             coupon = await coupon_repo.get_by_code(store_id, raw.strip().upper())
             if coupon is None or not coupon.is_usable:
                 continue
+            if await promo_repo.get_by_coupon_id(store_id, coupon.id) is not None:
+                continue
             if not coupon.meets_minimum_order(subtotal_major):
                 continue
             discount_major = coupon.calculate_discount(
@@ -583,7 +604,21 @@ async def calculate_cart_discounts(
             cents = int((discount_major * Decimal("100")).to_integral_value())
             updates: dict[str, Any] = {}
             if cents > 0:
-                updates["code_discount_cents"] = cents
+                code_cents = min(cents, int(subtotal_major * 100))
+                auto_cents = min(
+                    out.automatic_discount_cents, int(subtotal_major * 100) - code_cents
+                )
+                remaining = auto_cents
+                applied = []
+                for entry in out.applied_promotions:
+                    amount = min(int(entry.get("amount") or 0), remaining)
+                    applied.append({**entry, "amount": amount})
+                    remaining -= amount
+                updates.update(
+                    code_discount_cents=code_cents,
+                    automatic_discount_cents=auto_cents,
+                    applied_promotions=applied,
+                )
             if coupon.coupon_type == CouponType.FREE_SHIPPING:
                 updates["free_shipping"] = True
             if updates:

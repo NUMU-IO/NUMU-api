@@ -23,6 +23,7 @@ forwarded but only honored by routes that opt in.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -31,10 +32,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.dependencies.auth import get_optional_customer
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_funnel_event_repository,
     get_product_repository,
+    get_promotion_event_repository,
+    get_promotion_repository,
+    get_promotion_target_repository,
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
@@ -48,6 +53,7 @@ from src.api.v1.routes.storefront.cart import (
     emit_add_to_cart_event,
 )
 from src.api.v1.schemas.storefront.cart import CartResponse
+from src.core.entities.customer import Customer
 from src.core.entities.product import PURCHASABLE_STATUSES
 from src.core.value_objects.cart_item import CartItem
 from src.infrastructure.database.connection import get_admin_db_session
@@ -55,6 +61,13 @@ from src.infrastructure.repositories import ProductRepository
 from src.infrastructure.repositories.coupon_repository import CouponRepository
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
+)
+from src.infrastructure.repositories.promotion_event_repository import (
+    PromotionEventRepository,
+)
+from src.infrastructure.repositories.promotion_repository import (
+    PromotionRepository,
+    PromotionTargetRepository,
 )
 from src.infrastructure.repositories.store_repository import StoreRepository
 
@@ -458,6 +471,15 @@ async def sdk_apply_discount(
     owner: Annotated[CartOwner, Depends(get_cart_owner)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     coupon_repo: Annotated[CouponRepository, Depends(get_coupon_repository)],
+    promo_repo: Annotated[PromotionRepository, Depends(get_promotion_repository)],
+    target_repo: Annotated[
+        PromotionTargetRepository, Depends(get_promotion_target_repository)
+    ],
+    event_repo: Annotated[
+        PromotionEventRepository, Depends(get_promotion_event_repository)
+    ],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    current_customer: Annotated[Customer | None, Depends(get_optional_customer)] = None,
 ):
     """Validate a coupon code and pin it to the cart.
 
@@ -469,15 +491,68 @@ async def sdk_apply_discount(
     cart = await _get_cart_for(owner)
 
     coupon = await coupon_repo.get_by_code(owner.store_id, request.code.strip().upper())
-    if not coupon or not getattr(coupon, "is_active", False):
+    if not coupon:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or inactive coupon code",
         )
 
-    if hasattr(cart, "discount_code"):
-        cart.discount_code = coupon.code
-        await _cart_repo.save(cart)
+    linked = await promo_repo.get_by_coupon_id(owner.store_id, coupon.id)
+    usable = (
+        coupon.is_active and coupon.has_remaining_uses
+        if linked is not None
+        else coupon.is_usable
+    )
+    if not usable:
+        raise HTTPException(status_code=400, detail="Invalid or inactive coupon code")
+    if linked is None and not coupon.meets_minimum_order(
+        Decimal(cart.subtotal) / Decimal(100)
+    ):
+        raise HTTPException(status_code=400, detail="Cart does not meet coupon minimum")
+    if linked is not None:
+        from src.application.dto.promotion_resolution import VisitorContextInput
+        from src.application.use_cases.promotions.calculate_cart_discounts import (
+            CalculateCartDiscountsUseCase,
+        )
+        from src.core.services.discount_calculator import DiscountCalculator
+        from src.core.services.promotion_eligibility_checker import (
+            PromotionEligibilityChecker,
+        )
+
+        store = await store_repo.get_by_id(owner.store_id)
+        if store is None or store.tenant_id is None:
+            raise HTTPException(status_code=400, detail="Invalid store")
+        visitor = VisitorContextInput(
+            customer_id=owner.customer_id,
+            customer_tags=current_customer.tags if current_customer else [],
+            is_logged_in=not owner.is_guest,
+            cart_subtotal_cents=cart.subtotal,
+            cart_product_ids=[item.product_id for item in cart.items],
+            cart_category_ids=[
+                item.category_id for item in cart.items if item.category_id is not None
+            ],
+        )
+        result = await CalculateCartDiscountsUseCase(
+            promotion_repo=promo_repo,
+            target_repo=target_repo,
+            coupon_repo=coupon_repo,
+            eligibility_checker=PromotionEligibilityChecker(),
+            calculator=DiscountCalculator(),
+            event_repo=event_repo,
+        ).execute(
+            store_id=owner.store_id,
+            tenant_id=store.tenant_id,
+            cart=cart,
+            applied_coupon_codes=[coupon.code],
+            visitor=visitor,
+        )
+        if linked.id not in result.applied_promotion_ids:
+            raise HTTPException(
+                status_code=400, detail="This coupon does not apply to this cart"
+            )
+
+    cart.discount_code = coupon.code
+    await _cart_repo.save(cart)
     return await _build_cart_response(cart, product_repo)
 
 
@@ -492,7 +567,7 @@ async def sdk_remove_discount(
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
     cart = await _get_cart_for(owner)
-    if hasattr(cart, "discount_code") and cart.discount_code:
+    if cart.discount_code:
         cart.discount_code = None
         await _cart_repo.save(cart)
     return await _build_cart_response(cart, product_repo)

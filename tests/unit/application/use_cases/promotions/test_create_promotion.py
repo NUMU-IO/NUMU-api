@@ -102,6 +102,7 @@ async def test_create_discount_code_requires_existing_coupon(
     make_coupon,
 ):
     coupon = await make_coupon()
+    coupon.is_active = False
     uc = _build(
         promotion_repo=promotion_repo,
         display_repo=display_repo,
@@ -124,6 +125,7 @@ async def test_create_discount_code_requires_existing_coupon(
         payload=payload,
     )
     assert out.coupon_id == coupon.id
+    assert coupon.is_active is True
 
 
 @pytest.mark.asyncio

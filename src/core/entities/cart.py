@@ -30,6 +30,7 @@ class Cart(BaseEntity):
     items: list[CartItem] = Field(default_factory=list)
     currency: str = "USD"
     notes: str | None = None
+    discount_code: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     expires_at: datetime | None = None
 
@@ -189,6 +190,8 @@ class Cart(BaseEntity):
         """
         for item in other.items:
             self.add_item(item)
+        if other.discount_code and not self.discount_code:
+            self.discount_code = other.discount_code
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -201,6 +204,7 @@ class Cart(BaseEntity):
             "items": [item.to_dict() for item in self.items],
             "currency": self.currency,
             "notes": self.notes,
+            "discount_code": self.discount_code,
             "metadata": self.metadata,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
@@ -218,6 +222,7 @@ class Cart(BaseEntity):
             items=[CartItem.from_dict(item) for item in data.get("items", [])],
             currency=data.get("currency", "USD"),
             notes=data.get("notes"),
+            discount_code=data.get("discount_code"),
             metadata=data.get("metadata", {}),
             created_at=datetime.fromisoformat(data["created_at"])
             if data.get("created_at")

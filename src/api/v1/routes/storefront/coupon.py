@@ -77,8 +77,8 @@ async def apply_coupon(
 
     Use this endpoint to check a coupon before submitting checkout. If
     the coupon is wrapped in an active `discount_code` promotion, the
-    promotion's targeting + scheduling rules are also enforced and a
-    `redeem` event is recorded server-side for analytics.
+    promotion's targeting + scheduling rules are also enforced. This
+    preview does not consume a coupon use.
     """
     store = await store_repo.get_by_id(store_id)
     if store is None:

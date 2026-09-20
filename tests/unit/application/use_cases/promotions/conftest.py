@@ -41,6 +41,18 @@ class FakePromotionRepo:
             return promo
         return None
 
+    async def get_by_coupon_id(
+        self, store_id: UUID, coupon_id: UUID
+    ) -> Promotion | None:
+        return next(
+            (
+                p
+                for p in self.rows.values()
+                if p.store_id == store_id and p.coupon_id == coupon_id
+            ),
+            None,
+        )
+
     async def list_for_store(
         self,
         store_id: UUID,
@@ -193,6 +205,17 @@ class FakeEventRepo:
             redemptions=sum(1 for e in rows if e.event_type == "redeem"),
             conversions=sum(1 for e in rows if e.event_type == "convert"),
             revenue_cents=sum(e.discount_amount_cents or 0 for e in rows),
+        )
+
+    async def count_conversions_for_customer(
+        self, promotion_id: UUID, customer_id: UUID
+    ) -> int:
+        return sum(
+            1
+            for e in self.rows
+            if e.promotion_id == promotion_id
+            and e.customer_id == customer_id
+            and e.event_type == "convert"
         )
 
     async def counts_for_store(

@@ -89,6 +89,7 @@ async def create_coupon(
         code=request.code,
         coupon_type=request.coupon_type,
         value=request.value,
+        is_active=request.is_active,
         min_order_amount=request.min_order_amount,
         max_discount_amount=request.max_discount_amount,
         usage_limit=request.usage_limit,

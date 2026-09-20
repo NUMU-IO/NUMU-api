@@ -69,6 +69,16 @@ class PromotionRepository(IPromotionRepository):
         translations = await self._load_translations(promotion_id)
         return self.mapper.promotion_to_entity(model, translations=translations)
 
+    async def get_by_coupon_id(
+        self, store_id: UUID, coupon_id: UUID
+    ) -> Promotion | None:
+        stmt = select(PromotionModel).where(
+            PromotionModel.store_id == store_id,
+            PromotionModel.coupon_id == coupon_id,
+        )
+        model = (await self.session.execute(stmt)).scalars().first()
+        return self.mapper.promotion_to_entity(model) if model is not None else None
+
     async def list_for_store(
         self,
         store_id: UUID,
@@ -205,6 +215,8 @@ class PromotionRepository(IPromotionRepository):
                 priority=promotion.priority,
                 starts_at=promotion.starts_at,
                 ends_at=promotion.ends_at,
+                usage_limit_total=promotion.usage_limit_total,
+                usage_limit_per_customer=promotion.usage_limit_per_customer,
                 updated_by=promotion.updated_by,
                 version=promotion.version,
             )
