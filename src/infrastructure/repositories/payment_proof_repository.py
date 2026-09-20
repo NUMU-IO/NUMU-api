@@ -258,11 +258,28 @@ class PaymentProofRepository:
         return self._to_entity(model)
 
     async def image_hash_exists(self, store_id: UUID, image_hash: bytes) -> bool:
-        """Returns True if the same screenshot was already uploaded in this store."""
+        """Returns True if the same screenshot was already uploaded in this store.
+
+        Voided merchant-recorded payments are excluded, and must be: the
+        merchant mistyped an amount, voided it, and is re-recording from the
+        SAME receipt — there is only one receipt for that transfer, so
+        counting the voided row left them no way to correct the mistake.
+
+        Kept narrow on purpose. A customer whose proof was rejected is NOT
+        exempt, because resubmitting identical bytes after a rejection is
+        the screenshot-replay attack this check exists for.
+
+        Mirrors the partial unique index of the same name; the two must stay
+        in step, or a passing pre-check becomes a 500 at INSERT.
+        """
         query = select(PaymentProofModel.id).where(
             and_(
                 PaymentProofModel.store_id == store_id,
                 PaymentProofModel.proof_image_hash == image_hash,
+                ~(
+                    PaymentProofModel.recorded_method.is_not(None)
+                    & (PaymentProofModel.status == PaymentProofStatus.REJECTED)
+                ),
             )
         )
         result = await self.session.execute(query)

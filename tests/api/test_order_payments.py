@@ -102,8 +102,16 @@ class _FakeProofRepo:
         )
 
     async def image_hash_exists(self, store_id, image_hash) -> bool:
+        # Mirrors the real query, including the exemption for voided
+        # merchant-recorded rows. Getting this wrong would make the
+        # re-record test pass against a fake kinder than the database.
         return any(
-            p.store_id == store_id and p.proof_image_hash == image_hash
+            p.store_id == store_id
+            and p.proof_image_hash == image_hash
+            and not (
+                p.recorded_method is not None
+                and p.status is PaymentProofStatus.REJECTED
+            )
             for p in self.rows
         )
 
@@ -498,6 +506,62 @@ async def test_void_puts_the_amount_back_on_the_balance(wiring, paid_calls):
 
 
 @pytest.mark.asyncio
+async def test_the_same_receipt_can_be_re_recorded_after_a_void(wiring, paid_calls):
+    """Correcting a typo must not need a second photograph of the receipt.
+
+    There is one receipt per transfer. Void-then-re-record with the same
+    image was the documented correction path, and the blanket image-hash
+    uniqueness made it a dead end.
+    """
+    order = _order(total=35000)
+    receipt = _png((21, 21, 21))
+
+    await _record(order, amount=10000, image=receipt)
+    await _void(order, wiring.proofs.rows[0].id, proofs=wiring.proofs)
+
+    corrected = await _record(order, amount=12000, image=receipt)
+
+    assert corrected.data.amount_paid_cents == 12000
+    assert corrected.data.balance_due_cents == 23000
+    assert len(wiring.proofs.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_customer_proof_still_blocks_its_own_bytes(wiring, paid_calls):
+    """The exemption is for merchant rows only.
+
+    Resubmitting the identical screenshot after a rejection is the replay
+    the uniqueness exists to stop, so a customer proof gets no pass.
+    """
+    import hashlib
+
+    from src.core.entities.instapay import PaymentProof
+    from src.infrastructure.external_services.image.proof_sanitizer import (
+        sanitize_proof_image,
+    )
+
+    order = _order()
+    receipt = _png((22, 22, 22))
+    sanitized = sanitize_proof_image(receipt, content_type="image/png")
+    rejected = PaymentProof.new(
+        tenant_id=TENANT_ID,
+        store_id=STORE_ID,
+        order_id=order.id,
+        proof_image_key="k",
+        proof_image_hash=hashlib.sha256(sanitized.bytes).digest(),
+        transaction_ref="CUST-REJECTED",
+        declared_amount_cents=5000,
+    )
+    rejected.mark_rejected(uuid4(), "not a real receipt")
+    wiring.proofs.rows.append(rejected)
+
+    with pytest.raises(HTTPException) as exc:
+        await _record(order, amount=5000, image=receipt)
+
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_void_is_refused_on_a_paid_order(wiring, paid_calls):
     order = _order(total=10000)
     await _record(order, amount=10000)
@@ -621,3 +685,58 @@ async def test_repository_queries_against_a_real_session(test_session):
 
     assert await repo.amount_paid_cents(order_id) == 0
     assert await repo.has_recorded_payments(order_id) is False
+
+
+@pytest.mark.asyncio
+async def test_partial_unique_index_lets_a_voided_receipt_be_reused(test_session):
+    """The pre-check and the index must agree.
+
+    If only ``image_hash_exists`` were relaxed, the request would sail past
+    the 409 and then die on the unique constraint as a 500. This asserts
+    against the real schema-built index, not the in-memory fake.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from src.core.entities.instapay import PaymentProof
+    from src.infrastructure.repositories.payment_proof_repository import (
+        PaymentProofRepository,
+    )
+
+    repo = PaymentProofRepository(test_session)
+    order_id = uuid4()
+    shared_hash = b"identical-receipt-bytes"
+
+    def _proof(ref):
+        return PaymentProof.new(
+            tenant_id=TENANT_ID,
+            store_id=STORE_ID,
+            order_id=order_id,
+            proof_image_key=f"k-{ref}",
+            proof_image_hash=shared_hash,
+            transaction_ref=ref,
+            declared_amount_cents=10000,
+            recorded_method="vodafone_cash",
+        )
+
+    first = _proof("VOIDED")
+    first.mark_approved(USER_ID)
+    await repo.create(first)
+
+    # While it stands, the hash is taken.
+    assert await repo.image_hash_exists(STORE_ID, shared_hash) is True
+
+    first.mark_rejected(USER_ID, "typo")
+    await repo.update(first)
+
+    # Voided: the merchant may re-record from the same receipt.
+    assert await repo.image_hash_exists(STORE_ID, shared_hash) is False
+    second = _proof("CORRECTED")
+    second.mark_approved(USER_ID)
+    await repo.create(second)
+
+    # ...but only once. The live row holds the hash again.
+    assert await repo.image_hash_exists(STORE_ID, shared_hash) is True
+    third = _proof("REPLAY")
+    third.mark_approved(USER_ID)
+    with pytest.raises(IntegrityError):
+        await repo.create(third)

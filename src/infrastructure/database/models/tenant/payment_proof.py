@@ -20,6 +20,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -45,10 +46,25 @@ class PaymentProofModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
         # scans to a covering range. Hamming distance is computed in
         # Python on the small per-store window the index returns.
         Index("ix_payment_proofs_store_phash", "store_id", "perceptual_hash"),
-        UniqueConstraint(
+        # Screenshot replay guard, minus the one case where re-using the
+        # same bytes is legitimate: the merchant mistyped an amount, voided
+        # the payment, and is re-recording it from the SAME receipt — there
+        # is only one receipt for that transfer, so a blanket constraint
+        # left them with no way to correct the mistake. The exemption is
+        # narrowed to merchant-recorded rows, so a customer whose proof was
+        # rejected still cannot resubmit identical bytes.
+        #
+        # Must stay in step with ``PaymentProofRepository.image_hash_exists``:
+        # a pre-check that is kinder than the index turns a clean 409 into a
+        # 500 at INSERT.
+        Index(
+            "uq_payment_proofs_store_image_hash",
             "store_id",
             "proof_image_hash",
-            name="uq_payment_proofs_store_image_hash",
+            unique=True,
+            postgresql_where=text(
+                "NOT (recorded_method IS NOT NULL AND status = 'rejected')"
+            ),
         ),
         UniqueConstraint(
             "store_id",
