@@ -107,6 +107,11 @@ class PaymentProofModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Rail the merchant picked when recording an out-of-band payment by
+    # hand from the order page. NULL on every customer-submitted proof,
+    # so ``recorded_method IS NOT NULL`` is also the "merchant recorded
+    # this" predicate — no second provenance column needed.
+    recorded_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 64-bit pHash of the sanitized image. Nullable so older rows
     # predating Phase A continue to work; new uploads always populate.
     perceptual_hash: Mapped[int | None] = mapped_column(

@@ -111,6 +111,7 @@ async def _sweep(
         # ── Pass 1: pre-fetch expiry lists under bypass ─────────────
         await enable_rls_bypass(session)
         intent_repo = InstapayIntentRepository(session)
+        proof_repo = PaymentProofRepository(session)
 
         awaiting_expired = await intent_repo.list_expired_awaiting_payment()
         stuck_review = await intent_repo.list_stuck_proof_received(
@@ -133,6 +134,18 @@ async def _sweep(
                     logger.warning(
                         "instapay_expiry_order_missing",
                         intent_id=str(intent.id),
+                    )
+                elif await proof_repo.has_recorded_payments(intent.order_id):
+                    # The merchant already collected money against this order
+                    # out of band and recorded it from the order page. The
+                    # intent is expired above either way — the customer can no
+                    # longer pay through it — but cancelling the order here
+                    # would close (and restock) an order that has real money
+                    # on it. Leave the order alone; the merchant settles it.
+                    logger.info(
+                        "instapay_expiry_skipped_recorded_payment",
+                        intent_id=str(intent.id),
+                        order_id=str(intent.order_id),
                     )
                 elif order.can_be_cancelled:
                     reason = (
@@ -189,7 +202,6 @@ async def _sweep(
 
         # ── Pass 4: idempotency-key TTL (cross-tenant) ──────────────
         if idempotency_key_retention_days > 0:
-            proof_repo = PaymentProofRepository(session)
             stats["idempotency_cleared"] = await proof_repo.clear_old_idempotency_keys(
                 older_than=datetime.now(UTC)
                 - timedelta(days=idempotency_key_retention_days),
