@@ -752,6 +752,18 @@ async def record_order_payment(
                 "الطلب ده مقفول، مش ممكن تسجّل عليه دفعات.",
             ),
         )
+    if order.collectible_total <= 0:
+        # A full return at the door zeroes what the merchant should receive
+        # while the order stays open. Without this, any recorded amount
+        # computes balance 0 and the order below flips to PAID with an
+        # OrderPaidEvent — invoicing and commission on money nobody owed.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_bilingual(
+                "This order has nothing due. Payments cannot be recorded against it.",
+                "الطلب ده مفيش عليه مبلغ مستحق، مش ممكن تسجّل عليه دفعات.",
+            ),
+        )
 
     raw_bytes = await validate_image_upload(image)
     try:

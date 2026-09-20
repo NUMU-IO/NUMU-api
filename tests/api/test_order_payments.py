@@ -339,6 +339,22 @@ async def test_transaction_reference_cannot_be_reused(wiring, paid_calls):
 
 
 @pytest.mark.asyncio
+async def test_zero_due_order_cannot_flip_to_paid(wiring, paid_calls):
+    """A full door-return zeroes the collectible total while the order stays
+    open. Recording any amount against it computed balance 0 and fired the
+    settle path — PAID plus OrderPaidEvent on money nobody owed."""
+    order = _order(total=35000, collectible_total=0)
+
+    with pytest.raises(HTTPException) as exc:
+        await _record(order, amount=5000)
+
+    assert exc.value.status_code == 409
+    assert len(wiring.proofs.rows) == 0
+    assert paid_calls == []
+    assert order.payment_status is PaymentStatus.PENDING
+
+
+@pytest.mark.asyncio
 async def test_idempotent_replay_does_not_record_the_money_twice(wiring, paid_calls):
     order = _order()
 

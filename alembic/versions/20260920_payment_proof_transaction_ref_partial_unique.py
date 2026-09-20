@@ -1,7 +1,7 @@
 """Let a voided merchant payment release its transaction reference.
 
-Revision ID: proof_transaction_ref_partial_20260920
-Revises: proof_image_hash_partial_20260920
+Revision ID: proof_txn_ref_partial_20260920
+Revises: proof_image_hash_part_20260920
 Create Date: 2026-09-20
 
 ``uq_payment_proofs_store_transaction_ref`` was a plain unique constraint on
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "proof_transaction_ref_partial_20260920"
-down_revision: str | Sequence[str] | None = "proof_image_hash_partial_20260920"
+revision: str = "proof_txn_ref_partial_20260920"
+down_revision: str | Sequence[str] | None = "proof_image_hash_part_20260920"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

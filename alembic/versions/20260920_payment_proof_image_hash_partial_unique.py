@@ -1,6 +1,6 @@
 """Let a voided merchant payment release its receipt image hash.
 
-Revision ID: proof_image_hash_partial_20260920
+Revision ID: proof_image_hash_part_20260920
 Revises: proof_recorded_method_20260920
 Create Date: 2026-09-20
 
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "proof_image_hash_partial_20260920"
+revision: str = "proof_image_hash_part_20260920"
 down_revision: str | Sequence[str] | None = "proof_recorded_method_20260920"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
