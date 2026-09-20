@@ -340,6 +340,71 @@ async def test_idempotent_replay_does_not_record_the_money_twice(wiring, paid_ca
 
 
 @pytest.mark.asyncio
+async def test_idempotent_replay_still_works_after_the_order_settled(
+    wiring, paid_calls
+):
+    """The retry that arrives after the money landed must not 409.
+
+    The first request settles the order. If the idempotency check sat behind
+    the "already fully paid" guard, the retry a dropped connection provokes
+    would look like a failure — and the merchant would record the money a
+    second time by hand.
+    """
+    order = _order(total=10000)
+
+    first = await _record(
+        order, amount=10000, image=_png((9, 9, 9)), idempotency_key="settle-1"
+    )
+    assert order.payment_status is PaymentStatus.PAID
+
+    again = await _record(
+        order, amount=10000, image=_png((8, 8, 8)), idempotency_key="settle-1"
+    )
+
+    assert again.data.payment.id == first.data.payment.id
+    assert again.data.order_payment_status == PaymentStatus.PAID.value
+    assert len(wiring.proofs.rows) == 1
+    assert paid_calls == [order.id], "the order must not be settled twice"
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_from_another_order_is_refused(wiring, paid_calls):
+    """Keys are unique per store, not per order.
+
+    Answering with the other order's totals would be worse than refusing —
+    the caller asked about this order.
+    """
+    order_a = _order(total=35000)
+    order_b = _order(total=35000)
+
+    await _record(
+        order_a, amount=5000, image=_png((11, 11, 11)), idempotency_key="shared"
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await _record(
+            order_b, amount=5000, image=_png((12, 12, 12)), idempotency_key="shared"
+        )
+
+    assert exc.value.status_code == 409
+    assert len(wiring.proofs.rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_order_is_404_not_a_crash(wiring, paid_calls):
+    """``order_repo.get_by_id`` returns None for a deleted order and for one
+    outside the current tenant scope. Reaching the totals with that None was
+    an AttributeError surfacing as a 500."""
+    order = _order()
+    missing = _order()
+
+    with pytest.raises(HTTPException) as exc:
+        await _record(missing, amount=5000, order_repo=_FakeOrderRepo(order))
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_missing_reference_gets_a_generated_one(wiring, paid_calls):
     order = _order()
     result = await _record(order, amount=5000)

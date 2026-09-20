@@ -699,28 +699,43 @@ async def record_order_payment(
 
     proof_repo = PaymentProofRepository(db)
 
-    # Idempotency first — a retried request after a dropped connection must
-    # return the original payment, not record the money a second time.
-    if idempotency_key:
-        existing = await proof_repo.get_by_idempotency_key(store.id, idempotency_key)
-        if existing is not None:
-            prior_order = await order_repo.get_by_id(existing.order_id)
-            paid, balance = await _payment_totals(proof_repo, prior_order)
-            return SuccessResponse(
-                data=RecordedPaymentResult(
-                    payment=await _hydrate_proof(existing, storage_service),
-                    amount_paid_cents=paid,
-                    balance_due_cents=balance,
-                    order_payment_status=prior_order.payment_status.value,
-                ),
-                message="Payment already recorded",
-            )
-
     order = await order_repo.get_by_id(order_id)
     if order is None or order.store_id != store.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Order not found."
         )
+
+    # Idempotency is checked after the order is loaded but BEFORE the
+    # paid / closed guards below. A retry that arrives after the first
+    # request settled the order must return the original payment, not the
+    # "already fully paid" 409 — otherwise a dropped connection looks like
+    # a failure and the merchant records the money a second time.
+    #
+    # The key is unique per store, not per order, so a replay carrying a key
+    # that belongs to a different order is a client mistake: answering it
+    # with that other order's totals would be worse than refusing.
+    if idempotency_key:
+        existing = await proof_repo.get_by_idempotency_key(store.id, idempotency_key)
+        if existing is not None:
+            if existing.order_id != order.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=_bilingual(
+                        "This idempotency key was already used on another order.",
+                        "المفتاح ده اتستخدم قبل كده على طلب تاني.",
+                    ),
+                )
+            paid, balance = await _payment_totals(proof_repo, order)
+            return SuccessResponse(
+                data=RecordedPaymentResult(
+                    payment=await _hydrate_proof(existing, storage_service),
+                    amount_paid_cents=paid,
+                    balance_due_cents=balance,
+                    order_payment_status=order.payment_status.value,
+                ),
+                message="Payment already recorded",
+            )
+
     if order.payment_status == PaymentStatus.PAID:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
