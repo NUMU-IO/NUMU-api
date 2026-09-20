@@ -191,7 +191,9 @@ class PromotionMetricsBlock(BaseModel):
     dismissals: int = 0
     redemptions: int = 0
     conversions: int = 0
+    # Order value attributed to the promotion, and what it discounted.
     revenue_cents: int = 0
+    discount_total_cents: int = 0
 
 
 class PromotionOutput(BaseModel):
@@ -207,6 +209,12 @@ class PromotionOutput(BaseModel):
     status: PromotionStatus
 
     coupon_id: UUID | None = None
+    # The linked coupon's code and how many orders have used it. Both live
+    # on the coupon row, not the promotion — without them the merchant
+    # detail page cannot show the code it just minted, and the edit form
+    # cannot show which code it is editing.
+    code: str | None = None
+    usage_count: int = 0
     discount_rule: DiscountRule | None = None
     content: dict[str, Any]
     translations: dict[str, LocalizedPromotionContent] = Field(default_factory=dict)
