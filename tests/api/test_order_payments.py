@@ -355,6 +355,66 @@ async def test_zero_due_order_cannot_flip_to_paid(wiring, paid_calls):
 
 
 @pytest.mark.asyncio
+async def test_draft_order_is_rejected(wiring, paid_calls):
+    """A draft is not billable yet — recording against it would flip it to
+    PAID with an OrderPaidEvent for an order nobody confirmed."""
+    order = _order(status=OrderStatus.DRAFT)
+
+    with pytest.raises(HTTPException) as exc:
+        await _record(order, amount=1000)
+
+    assert exc.value.status_code == 409
+    assert wiring.proofs.rows == []
+    assert paid_calls == []
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_of_a_voided_payment_is_refused(wiring, paid_calls):
+    """A replay after a void is not a success: the money no longer counts,
+    so answering "already recorded" next to a rejected body would lie."""
+    order = _order(total=35000)
+
+    await _record(
+        order, amount=10000, image=_png((31, 31, 31)), idempotency_key="void-replay"
+    )
+    await _void(order, wiring.proofs.rows[0].id, proofs=wiring.proofs)
+
+    with pytest.raises(HTTPException) as exc:
+        await _record(
+            order,
+            amount=10000,
+            image=_png((32, 32, 32)),
+            idempotency_key="void-replay",
+        )
+
+    assert exc.value.status_code == 409
+    assert len(wiring.proofs.rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_r2_image_is_cleaned_up_when_post_create_steps_fail(wiring):
+    """The row rolls back but R2 does not: a timeline write failing after
+    the proof landed must not orphan the uploaded receipt."""
+
+    class _FailingActivityRepo(_FakeActivityRepo):
+        async def create(self, activity):
+            raise RuntimeError("timeline down")
+
+    storage = _FakeStorage()
+
+    with pytest.raises(RuntimeError, match="timeline down"):
+        await _record(
+            _order(),
+            amount=5000,
+            storage=storage,
+            activity_repo=_FailingActivityRepo(),
+        )
+
+    assert len(storage.uploaded) == 1
+    assert len(storage.deleted) == 1
+
+
+@pytest.mark.asyncio
 async def test_idempotent_replay_does_not_record_the_money_twice(wiring, paid_calls):
     order = _order()
 

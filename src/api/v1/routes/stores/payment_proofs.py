@@ -725,6 +725,17 @@ async def record_order_payment(
                         "المفتاح ده اتستخدم قبل كده على طلب تاني.",
                     ),
                 )
+            if existing.status is PaymentProofStatus.REJECTED:
+                # A replay after a void is not a success: the money is no
+                # longer counted, so "already recorded" would lie next to a
+                # rejected body. Refuse and let the merchant record it fresh.
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=_bilingual(
+                        "This payment was voided and no longer counts. Record the payment again.",
+                        "الدفعة دي اتلغت ومبقتش محسوبة. سجّل الدفعة من جديد.",
+                    ),
+                )
             paid, balance = await _payment_totals(proof_repo, order)
             return SuccessResponse(
                 data=RecordedPaymentResult(
@@ -750,6 +761,17 @@ async def record_order_payment(
             detail=_bilingual(
                 "This order is closed. Payments cannot be recorded against it.",
                 "الطلب ده مقفول، مش ممكن تسجّل عليه دفعات.",
+            ),
+        )
+    if order.status == OrderStatus.DRAFT:
+        # A draft is not billable yet. Without this, recording against it
+        # flips it to PAID with an OrderPaidEvent — invoicing, commission
+        # and customer notifications for an order nobody confirmed.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_bilingual(
+                "This order is still a draft. Confirm it before recording payments.",
+                "الطلب ده لسه مسودة، أكّده الأول قبل ما تسجّل عليه دفعات.",
             ),
         )
     if order.collectible_total <= 0:
@@ -830,53 +852,58 @@ async def record_order_payment(
 
     try:
         created = await proof_repo.create(proof)
+
+        paid, balance = await _payment_totals(proof_repo, order)
+
+        if balance == 0:
+            from src.api.v1.routes.stores.orders import apply_manual_payment
+
+            order = await apply_manual_payment(order, order_repo)
+            # A storefront order can still have a live manual-payment intent
+            # sitting in the merchant's review queue. The money is in, so close
+            # it rather than leaving it to expire.
+            intent_repo = ManualPaymentIntentRepository(db)
+            intent = await intent_repo.get_by_order_id(order.id)
+            if intent is not None and intent.status in (
+                ManualPaymentIntentStatus.AWAITING_PAYMENT,
+                ManualPaymentIntentStatus.PROOF_RECEIVED,
+            ):
+                await intent_repo.update_status(
+                    intent.id, ManualPaymentIntentStatus.PAID
+                )
+
+        await activity_repo.create(
+            OrderActivity(
+                order_id=order.id,
+                store_id=store.id,
+                tenant_id=order.tenant_id,
+                user_id=user_id,
+                kind=OrderActivityKind.SYSTEM_EVENT,
+                event_type="payment_recorded",
+                body=(
+                    f"Recorded {amount_cents / 100:,.2f} {order.currency} "
+                    f"via {RECORDED_PAYMENT_METHOD_NAMES[method]}"
+                ),
+                metadata={
+                    "amount_cents": amount_cents,
+                    "method": method,
+                    "transaction_ref": transaction_ref,
+                    "proof_id": str(created.id),
+                    "amount_paid_cents": paid,
+                    "balance_due_cents": balance,
+                },
+            )
+        )
     except Exception:
-        # Don't leave the object orphaned in R2 when the row didn't land.
+        # The row rolls back but the R2 object does not — same orphan the
+        # create-failure path already guards. _hydrate_proof below stays
+        # outside: it only mints a URL, and a signing failure must never
+        # delete a landed payment's image.
         try:
             await storage_service.delete_file(uploaded.key)
         except Exception:
             log.warning("recorded_payment_r2_cleanup_failed", key=uploaded.key)
         raise
-
-    paid, balance = await _payment_totals(proof_repo, order)
-
-    if balance == 0:
-        from src.api.v1.routes.stores.orders import apply_manual_payment
-
-        order = await apply_manual_payment(order, order_repo)
-        # A storefront order can still have a live manual-payment intent
-        # sitting in the merchant's review queue. The money is in, so close
-        # it rather than leaving it to expire.
-        intent_repo = ManualPaymentIntentRepository(db)
-        intent = await intent_repo.get_by_order_id(order.id)
-        if intent is not None and intent.status in (
-            ManualPaymentIntentStatus.AWAITING_PAYMENT,
-            ManualPaymentIntentStatus.PROOF_RECEIVED,
-        ):
-            await intent_repo.update_status(intent.id, ManualPaymentIntentStatus.PAID)
-
-    await activity_repo.create(
-        OrderActivity(
-            order_id=order.id,
-            store_id=store.id,
-            tenant_id=order.tenant_id,
-            user_id=user_id,
-            kind=OrderActivityKind.SYSTEM_EVENT,
-            event_type="payment_recorded",
-            body=(
-                f"Recorded {amount_cents / 100:,.2f} {order.currency} "
-                f"via {RECORDED_PAYMENT_METHOD_NAMES[method]}"
-            ),
-            metadata={
-                "amount_cents": amount_cents,
-                "method": method,
-                "transaction_ref": transaction_ref,
-                "proof_id": str(created.id),
-                "amount_paid_cents": paid,
-                "balance_due_cents": balance,
-            },
-        )
-    )
 
     return SuccessResponse(
         data=RecordedPaymentResult(
