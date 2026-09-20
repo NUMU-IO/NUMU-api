@@ -20,6 +20,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -45,15 +46,45 @@ class PaymentProofModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
         # scans to a covering range. Hamming distance is computed in
         # Python on the small per-store window the index returns.
         Index("ix_payment_proofs_store_phash", "store_id", "perceptual_hash"),
-        UniqueConstraint(
+        # Screenshot replay guard, minus the one case where re-using the
+        # same bytes is legitimate: the merchant mistyped an amount, voided
+        # the payment, and is re-recording it from the SAME receipt — there
+        # is only one receipt for that transfer, so a blanket constraint
+        # left them with no way to correct the mistake. The exemption is
+        # narrowed to merchant-recorded rows, so a customer whose proof was
+        # rejected still cannot resubmit identical bytes.
+        #
+        # Must stay in step with ``PaymentProofRepository.image_hash_exists``:
+        # a pre-check that is kinder than the index turns a clean 409 into a
+        # 500 at INSERT.
+        Index(
+            "uq_payment_proofs_store_image_hash",
             "store_id",
             "proof_image_hash",
-            name="uq_payment_proofs_store_image_hash",
+            unique=True,
+            postgresql_where=text(
+                "NOT (recorded_method IS NOT NULL AND status = 'rejected')"
+            ),
         ),
-        UniqueConstraint(
+        # Bank-reference replay guard, with the same voided-merchant-row
+        # exemption as the image-hash index above: the reference on the row
+        # being voided is the only one the merchant has, so void-then-
+        # re-record must be allowed to reuse it. Narrowed to
+        # merchant-recorded rows so a rejected customer proof still blocks
+        # its own reference.
+        #
+        # Must stay in step with
+        # ``PaymentProofRepository.transaction_ref_exists``: a pre-check
+        # that is kinder than the index turns a clean 409 into a 500
+        # at INSERT.
+        Index(
+            "uq_payment_proofs_store_transaction_ref",
             "store_id",
             "transaction_ref",
-            name="uq_payment_proofs_store_transaction_ref",
+            unique=True,
+            postgresql_where=text(
+                "NOT (recorded_method IS NOT NULL AND status = 'rejected')"
+            ),
         ),
         # Scoped to store so two different merchants can use the same
         # client-generated key without colliding. An old key on an
@@ -107,6 +138,11 @@ class PaymentProofModel(Base, UUIDMixin, TenantMixin, TimestampMixin):
     )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Rail the merchant picked when recording an out-of-band payment by
+    # hand from the order page. NULL on every customer-submitted proof,
+    # so ``recorded_method IS NOT NULL`` is also the "merchant recorded
+    # this" predicate — no second provenance column needed.
+    recorded_method: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 64-bit pHash of the sanitized image. Nullable so older rows
     # predating Phase A continue to work; new uploads always populate.
     perceptual_hash: Mapped[int | None] = mapped_column(

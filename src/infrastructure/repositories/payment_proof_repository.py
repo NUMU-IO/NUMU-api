@@ -66,6 +66,7 @@ class PaymentProofRepository:
             review_decision_at=model.review_decision_at,
             rejection_reason=model.rejection_reason,
             idempotency_key=model.idempotency_key,
+            recorded_method=model.recorded_method,
             perceptual_hash=_phash_from_db(model.perceptual_hash),
             ocr_status=model.ocr_status,
             ocr_extracted_amount_cents=model.ocr_extracted_amount_cents,
@@ -96,6 +97,7 @@ class PaymentProofRepository:
             review_decision_at=proof.review_decision_at,
             rejection_reason=proof.rejection_reason,
             idempotency_key=proof.idempotency_key,
+            recorded_method=proof.recorded_method,
             perceptual_hash=_phash_to_db(proof.perceptual_hash),
             ocr_status=proof.ocr_status,
             ocr_extracted_amount_cents=proof.ocr_extracted_amount_cents,
@@ -192,6 +194,45 @@ class PaymentProofRepository:
         result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(m) for m in result.scalars().all()]
 
+    async def amount_paid_cents(self, order_id: UUID) -> int:
+        """Sum of every settled proof's declared amount for one order.
+
+        This is the money actually collected against the order so far:
+        merchant-recorded part payments plus any customer proof that was
+        approved. ``declared_amount_cents`` is nullable on older customer
+        rows, so COALESCE keeps those as 0 rather than erroring — a row
+        with no declared amount contributes no balance movement.
+        """
+        query = select(
+            func.coalesce(func.sum(PaymentProofModel.declared_amount_cents), 0)
+        ).where(
+            PaymentProofModel.order_id == order_id,
+            PaymentProofModel.status.in_((
+                PaymentProofStatus.APPROVED,
+                PaymentProofStatus.AUTO_APPROVED,
+            )),
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return int(result.scalar() or 0)
+
+    async def has_recorded_payments(self, order_id: UUID) -> bool:
+        """True when the merchant has recorded money against this order.
+
+        Used by the manual-payment expiry sweeper to refuse to cancel and
+        restock an order that already has out-of-band money on it. The
+        sweeper runs cross-tenant under RLS bypass, so this deliberately
+        does NOT apply ``_tenant_filter`` — ``order_id`` is already an
+        exact key, and a tenant filter here would silently return False
+        under bypass and defeat the guard.
+        """
+        query = select(func.count(PaymentProofModel.id)).where(
+            PaymentProofModel.order_id == order_id,
+            PaymentProofModel.recorded_method.is_not(None),
+            PaymentProofModel.status == PaymentProofStatus.APPROVED,
+        )
+        result = await self.session.execute(query)
+        return bool(result.scalar() or 0)
+
     async def update(self, proof: PaymentProof) -> PaymentProof:
         query = select(PaymentProofModel).where(PaymentProofModel.id == proof.id)
         result = await self.session.execute(query)
@@ -217,11 +258,28 @@ class PaymentProofRepository:
         return self._to_entity(model)
 
     async def image_hash_exists(self, store_id: UUID, image_hash: bytes) -> bool:
-        """Returns True if the same screenshot was already uploaded in this store."""
+        """Returns True if the same screenshot was already uploaded in this store.
+
+        Voided merchant-recorded payments are excluded, and must be: the
+        merchant mistyped an amount, voided it, and is re-recording from the
+        SAME receipt — there is only one receipt for that transfer, so
+        counting the voided row left them no way to correct the mistake.
+
+        Kept narrow on purpose. A customer whose proof was rejected is NOT
+        exempt, because resubmitting identical bytes after a rejection is
+        the screenshot-replay attack this check exists for.
+
+        Mirrors the partial unique index of the same name; the two must stay
+        in step, or a passing pre-check becomes a 500 at INSERT.
+        """
         query = select(PaymentProofModel.id).where(
             and_(
                 PaymentProofModel.store_id == store_id,
                 PaymentProofModel.proof_image_hash == image_hash,
+                ~(
+                    PaymentProofModel.recorded_method.is_not(None)
+                    & (PaymentProofModel.status == PaymentProofStatus.REJECTED)
+                ),
             )
         )
         result = await self.session.execute(query)
@@ -230,11 +288,26 @@ class PaymentProofRepository:
     async def transaction_ref_exists(
         self, store_id: UUID, transaction_ref: str
     ) -> bool:
-        """Returns True if the same bank ref was already used in this store."""
+        """Returns True if the same bank ref was already used in this store.
+
+        Voided merchant-recorded payments are excluded, for the same reason
+        as ``image_hash_exists``: void-then-re-record with the same reference
+        is the documented typo-correction path, and the row being voided
+        holds the only reference the merchant has. Narrowed to
+        merchant-recorded rows so a rejected customer proof still blocks its
+        own reference.
+
+        Mirrors the partial unique index of the same name; the two must stay
+        in step, or a passing pre-check becomes a 500 at INSERT.
+        """
         query = select(PaymentProofModel.id).where(
             and_(
                 PaymentProofModel.store_id == store_id,
                 PaymentProofModel.transaction_ref == transaction_ref,
+                ~(
+                    PaymentProofModel.recorded_method.is_not(None)
+                    & (PaymentProofModel.status == PaymentProofStatus.REJECTED)
+                ),
             )
         )
         result = await self.session.execute(query)

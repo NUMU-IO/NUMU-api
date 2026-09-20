@@ -202,6 +202,12 @@ class PaymentProof:
     review_decision_at: datetime | None = None
     rejection_reason: str | None = None
     idempotency_key: str | None = None
+    # Rail the merchant chose when recording an out-of-band payment by
+    # hand from the order page (``vodafone_cash``, ``instapay``, ``cash``,
+    # ``bank_transfer``, ``other``). ``None`` on every customer-submitted
+    # proof, so a non-null value doubles as "this row was recorded by the
+    # merchant, not uploaded by the customer".
+    recorded_method: str | None = None
     # 64-bit pHash of the sanitized image. ``None`` for rows
     # predating the Phase-A migration; the dedup layer simply skips
     # them when scanning for near-duplicates.
@@ -243,6 +249,7 @@ class PaymentProof:
         transaction_ref: str,
         declared_amount_cents: int | None = None,
         idempotency_key: str | None = None,
+        recorded_method: str | None = None,
         perceptual_hash: int | None = None,
         ocr_status: str | None = None,
         ocr_extracted_amount_cents: int | None = None,
@@ -265,6 +272,7 @@ class PaymentProof:
             transaction_ref=transaction_ref,
             declared_amount_cents=declared_amount_cents,
             idempotency_key=idempotency_key,
+            recorded_method=recorded_method,
             perceptual_hash=perceptual_hash,
             ocr_status=ocr_status,
             ocr_extracted_amount_cents=ocr_extracted_amount_cents,

@@ -1089,6 +1089,46 @@ async def cancel_order(
     return None
 
 
+async def apply_manual_payment(order, order_repo: OrderRepository):
+    """Flip an order to PAID for money collected outside a gateway.
+
+    Shared by the "Mark as paid" button and by the order-page payment
+    recorder (``stores/payment_proofs.py``) when a recorded part payment
+    closes the remaining balance. Keeping it in one place means the
+    ``OrderPaidEvent`` publish — which fans out to the invoice, the
+    customer email and the commission ledger — cannot drift between the
+    two callers.
+
+    Payment plane only: the order's fulfilment ``status`` is untouched,
+    matching the behaviour the Mark-as-paid button has always had.
+    Returns the persisted order.
+    """
+    from src.core.entities.order import PaymentStatus
+
+    order.payment_status = PaymentStatus.PAID
+    order.paid_at = datetime.now(UTC)
+    order.touch()
+    updated = await order_repo.update(order)
+
+    try:
+        from src.core.events.order_events import OrderPaidEvent
+
+        get_event_bus().publish(
+            OrderPaidEvent(
+                order_id=updated.id,
+                order_number=updated.order_number,
+                store_id=updated.store_id,
+                customer_id=updated.customer_id,
+                payment_method=updated.payment_method,
+                total=float(updated.total),
+            )
+        )
+    except Exception:
+        pass
+
+    return updated
+
+
 @router.post(
     "/{order_id}/mark-paid",
     response_model=SuccessResponse[OrderResponse],
@@ -1116,26 +1156,7 @@ async def mark_order_paid(
             message="Order is already marked as paid",
         )
 
-    order.payment_status = PaymentStatus.PAID
-    order.paid_at = datetime.now(UTC)
-    order.touch()
-    updated = await order_repo.update(order)
-
-    try:
-        from src.core.events.order_events import OrderPaidEvent
-
-        get_event_bus().publish(
-            OrderPaidEvent(
-                order_id=updated.id,
-                order_number=updated.order_number,
-                store_id=updated.store_id,
-                customer_id=updated.customer_id,
-                payment_method=updated.payment_method,
-                total=float(updated.total),
-            )
-        )
-    except Exception:
-        pass
+    updated = await apply_manual_payment(order, order_repo)
 
     return SuccessResponse(
         data=_order_to_response(OrderDTO.from_entity(updated)),
