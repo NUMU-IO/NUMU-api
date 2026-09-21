@@ -105,6 +105,7 @@ def generate_initial_v3_customization(
     error_template_url: str | None = None,
     loading_template_url: str | None = None,
     checksum: str | None = None,
+    server_checksum: str | None = None,
 ) -> ThemeSettingsV3:
     """Generate a V3 customization payload from theme presets.
 
@@ -199,6 +200,7 @@ def generate_initial_v3_customization(
             # is served from a live Vite server whose bytes change on every
             # save, so pinning a digest there would blank the store mid-edit.
             checksum=checksum if mode != "development" else None,
+            server_checksum=server_checksum if mode != "development" else None,
         )
 
     return ThemeSettingsV3(

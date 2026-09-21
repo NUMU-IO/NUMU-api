@@ -118,6 +118,8 @@ class MarketplaceThemeVersion(BaseEntity):
     build_log: str | None = None
     size_bytes: int | None = None
     checksum: str | None = None
+    # SHA-256 of the SSR bundle; see MarketplaceThemeVersionModel.
+    server_checksum: str | None = None
     source_zip_path: str | None = None
     review_notes: str | None = None
     reviewed_by: UUID | None = None

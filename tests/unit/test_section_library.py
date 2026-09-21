@@ -132,6 +132,9 @@ def _store_theme_model(manifest):
             bundle_url="https://cdn.numueg.app/genova-v3/1.1.0/theme.js",
             css_url=None,
             manifest=manifest,
+            # Integrity pins the repository denormalizes onto the entity.
+            checksum="a" * 64,
+            server_checksum="b" * 64,
         ),
     )
 

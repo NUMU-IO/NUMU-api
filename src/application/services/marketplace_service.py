@@ -1114,6 +1114,9 @@ class MarketplaceService:
                 # checksum against a new bundle fails closed and blanks the
                 # store, so the two always move together.
                 "checksum": version.checksum,
+                # Same rule, for the SSR bundle the storefront's render worker
+                # imports. Refusing there costs a pre-render, not the page.
+                "server_checksum": version.server_checksum,
             }
             logger.info(
                 "marketplace_activate_restored_customization",
@@ -1146,6 +1149,7 @@ class MarketplaceService:
                     else "development"
                 ),
                 checksum=version.checksum,
+                server_checksum=version.server_checksum,
             )
             seed = v3.model_dump()
 

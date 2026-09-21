@@ -118,6 +118,11 @@ class StoreTheme(BaseEntity):
     theme_version: str | None = None
     bundle_url: str | None = None
     css_url: str | None = None
+    # Integrity pins for the active version's artifacts, denormalized from
+    # theme_versions. `bundle_checksum` was read by the theme payload via
+    # getattr() long before anything set it, so it was always null there.
+    bundle_checksum: str | None = None
+    server_checksum: str | None = None
     settings_schema: list[Any] | dict[str, Any] | None = None
     section_schemas: dict[str, Any] | None = None
     # Active version's manifest presets ({"templates": {...}, "section_groups": {...}}).

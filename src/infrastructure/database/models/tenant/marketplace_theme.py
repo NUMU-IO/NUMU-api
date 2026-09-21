@@ -156,6 +156,11 @@ class MarketplaceThemeVersionModel(Base, UUIDMixin):
     build_log: Mapped[str | None] = mapped_column(Text, nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # SHA-256 of `theme.server.js` (the SSR bundle). Held here, away from the
+    # CDN that serves the artifact, so the storefront's SSR worker has a pin
+    # the artifact's own manifest.json cannot forge. See the
+    # server_checksum_20260920 migration.
+    server_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source_zip_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_by: Mapped[PyUUID | None] = mapped_column(

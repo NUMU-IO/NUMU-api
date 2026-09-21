@@ -139,24 +139,37 @@ def resolve_uploaded_zip(path_str: str) -> Path:
 AST_SCANNER_JS = r"""
 const fs = require('fs');
 const path = require('path');
-const acornPath = require.resolve('acorn');
-const acorn = require(acornPath);
+const { createRequire } = require('module');
 
-const src = fs.readFileSync(process.argv[2], 'utf8');
-const violations = [];
-
-let ast;
-try {
-  ast = acorn.parse(src, {
-    ecmaVersion: 2023,
-    sourceType: 'module',
-    allowImportExportEverywhere: true,
-    allowHashBang: true,
-  });
-} catch (e) {
-  violations.push({ kind: 'parse_error', message: e.message });
-  console.log(JSON.stringify({ violations }));
+// acorn lives wherever the caller put it: globally in the builder image
+// (NODE_PATH), or in a node_modules the caller names. Resolving from THIS
+// file's directory fails whenever the scanner is written to a temp dir —
+// which is what made every scan fall back to regex before this.
+let acorn = null;
+for (const root of [__dirname, ...(process.env.NUMU_ACORN_ROOTS || '').split(path.delimiter)]) {
+  if (!root) continue;
+  try {
+    acorn = createRequire(path.join(root, 'noop.js'))('acorn');
+    break;
+  } catch (e) { /* try the next root */ }
+}
+if (!acorn) {
+  try { acorn = require('acorn'); } catch (e) { /* fall through */ }
+}
+if (!acorn) {
+  console.log(JSON.stringify({ error: 'acorn could not be resolved' }));
   process.exit(0);
+}
+
+const violations = [];
+const files = process.argv.slice(2);
+if (files.length === 0) {
+  console.log(JSON.stringify({ error: 'no files given to scan' }));
+  process.exit(0);
+}
+
+function report(file, kind, message) {
+  violations.push({ kind, message: `${path.basename(file)}: ${message}` });
 }
 
 const BANNED_NODE_MODULES = new Set([
@@ -164,17 +177,17 @@ const BANNED_NODE_MODULES = new Set([
   'dns', 'cluster', 'os', 'tls', 'v8', 'vm'
 ]);
 
-function walk(node, parent) {
+function walk(file, node) {
   if (!node || typeof node !== 'object') return;
 
   // eval / Function constructor
   if (node.type === 'CallExpression' && node.callee) {
     if (node.callee.type === 'Identifier') {
       if (node.callee.name === 'eval') {
-        violations.push({ kind: 'eval', message: 'eval() is not allowed' });
+        report(file, 'eval', 'eval() is not allowed');
       }
       if (node.callee.name === 'Function') {
-        violations.push({ kind: 'function_ctor', message: 'Function constructor not allowed' });
+        report(file, 'function_ctor', 'Function constructor not allowed');
       }
     }
   }
@@ -182,7 +195,7 @@ function walk(node, parent) {
   // new Function(...)
   if (node.type === 'NewExpression' && node.callee && node.callee.type === 'Identifier') {
     if (node.callee.name === 'Function') {
-      violations.push({ kind: 'function_ctor', message: 'new Function() not allowed' });
+      report(file, 'function_ctor', 'new Function() not allowed');
     }
   }
 
@@ -193,10 +206,7 @@ function walk(node, parent) {
     if (obj && obj.type === 'Identifier' && obj.name === 'document' &&
         prop && prop.type === 'Identifier') {
       if (['cookie', 'write', 'writeln', 'domain'].includes(prop.name)) {
-        violations.push({
-          kind: 'document_access',
-          message: `document.${prop.name} is not allowed`,
-        });
+        report(file, 'document_access', `document.${prop.name} is not allowed`);
       }
     }
   }
@@ -206,10 +216,8 @@ function walk(node, parent) {
       node.left.type === 'MemberExpression' && node.left.property &&
       node.left.property.type === 'Identifier') {
     if (['innerHTML', 'outerHTML'].includes(node.left.property.name)) {
-      violations.push({
-        kind: 'innerhtml_assignment',
-        message: `${node.left.property.name} assignment is a security risk`,
-      });
+      report(file, 'innerhtml_assignment',
+        `${node.left.property.name} assignment is a security risk`);
     }
   }
 
@@ -217,7 +225,7 @@ function walk(node, parent) {
   if (node.type === 'ImportDeclaration' && node.source) {
     const src = node.source.value;
     if (typeof src === 'string' && BANNED_NODE_MODULES.has(src)) {
-      violations.push({ kind: 'banned_import', message: `Import of "${src}" not allowed` });
+      report(file, 'banned_import', `import of "${src}" not allowed`);
     }
   }
   if (node.type === 'CallExpression' && node.callee &&
@@ -225,7 +233,7 @@ function walk(node, parent) {
       node.arguments && node.arguments[0] && node.arguments[0].type === 'Literal') {
     const modName = node.arguments[0].value;
     if (BANNED_NODE_MODULES.has(modName)) {
-      violations.push({ kind: 'banned_require', message: `require("${modName}") not allowed` });
+      report(file, 'banned_require', `require("${modName}") not allowed`);
     }
   }
 
@@ -234,61 +242,116 @@ function walk(node, parent) {
     if (key === 'type' || key === 'loc' || key === 'start' || key === 'end') continue;
     const child = node[key];
     if (Array.isArray(child)) {
-      for (const c of child) walk(c, node);
+      for (const c of child) walk(file, c);
     } else if (child && typeof child === 'object') {
-      walk(child, node);
+      walk(file, child);
     }
   }
 }
 
-walk(ast, null);
+for (const file of files) {
+  let ast;
+  try {
+    ast = acorn.parse(fs.readFileSync(file, 'utf8'), {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      allowImportExportEverywhere: true,
+      allowHashBang: true,
+    });
+  } catch (e) {
+    report(file, 'parse_error', e.message);
+    continue;
+  }
+  walk(file, ast);
+}
 console.log(JSON.stringify({ violations }));
 """
 
 
-def _ast_security_scan(bundle_path: Path) -> list[str]:
-    """Run the AST security scanner against a built bundle.
+def _ast_security_scan(dist: Path, theme_dir: Path) -> list[str]:
+    """Scan every JavaScript artifact a build emitted, and fail closed.
 
-    Returns a list of human-readable violation messages. Empty list = safe.
-    If Node.js or acorn is not available, falls back to a basic regex scan
-    and logs a warning (better than no scan at all).
+    `dist` is scanned whole, not just the entry bundle: `theme.server.js` is
+    imported by the storefront's SSR worker, so unscanned server code is a
+    worse hole than unscanned client code, and a code-split build would hide
+    anything in a sibling chunk.
+
+    Returns human-readable violation messages; empty means clean. A scanner
+    that cannot run returns a violation instead of an empty list — the caller
+    fails the build. There is no regex fallback: it read as a passing scan
+    while checking five substrings, and because the scanner was written to a
+    temp directory `require('acorn')` never resolved, so that fallback was in
+    fact the only scan that ever ran.
     """
+    targets = sorted(
+        p for p in dist.rglob("*") if p.suffix in (".js", ".mjs") and p.is_file()
+    )
+    if not targets:
+        return ["scan_error: build emitted no JavaScript to scan"]
+
+    scan_dir = Path(tempfile.mkdtemp(prefix="numu-ast-scan-"))
+    scanner_path = scan_dir / "scan.js"
+    scanner_path.write_text(AST_SCANNER_JS, encoding="utf-8")
     try:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
-            f.write(AST_SCANNER_JS)
-            scanner_path = f.name
+        if USE_DOCKER:
+            # The builder image carries acorn (installed globally, hence
+            # NODE_PATH). Same isolation flags as the build itself.
+            cmd = [
+                "docker",
+                "run",
+                "--rm",
+                "--read-only",
+                "--network=none",
+                "--memory=512m",
+                "--cpus=1.0",
+                "--user=1000:1000",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges",
+                "-e",
+                "NODE_PATH=/usr/local/lib/node_modules",
+                "-v",
+                f"{scan_dir}:/scan:ro",
+                "-v",
+                f"{dist}:/theme-dist:ro",
+                "--entrypoint",
+                "node",
+                DOCKER_IMAGE,
+                "/scan/scan.js",
+                *[f"/theme-dist/{p.relative_to(dist).as_posix()}" for p in targets],
+            ]
+            env = None
+        else:
+            node = shutil.which("node")
+            if not node:
+                return ["scan_error: node is not on PATH, so nothing was scanned"]
+            cmd = [node, str(scanner_path), *[str(p) for p in targets]]
+            # Where acorn may live on a worker host: an operator-set path, or
+            # the theme's own node_modules after `npm install`.
+            env = {
+                **os.environ,
+                "NUMU_ACORN_ROOTS": os.pathsep.join([
+                    os.getenv("NUMU_ACORN_ROOT", ""),
+                    str(theme_dir),
+                    str(theme_dir / "node_modules" / "acorn"),
+                ]),
+            }
 
-        result = subprocess.run(
-            ["node", scanner_path, str(bundle_path)],
-            capture_output=True,
-            text=True,
-            timeout=30,
+        result = subprocess.run(  # nosec B603 — fixed argv, no shell
+            cmd, capture_output=True, text=True, timeout=120, env=env
         )
-        os.unlink(scanner_path)
-
         if result.returncode != 0:
-            logger.warning("AST scanner error: %s", result.stderr)
-            return _fallback_regex_scan(bundle_path)
-
+            return [
+                f"scan_error: scanner exited {result.returncode}: {result.stderr.strip()[:300]}"
+            ]
         data = json.loads(result.stdout)
-        violations = data.get("violations", [])
-        return [f"{v['kind']}: {v['message']}" for v in violations]
     except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError) as e:
-        logger.warning("AST scan failed (%s); falling back to regex scan", e)
-        return _fallback_regex_scan(bundle_path)
+        return [f"scan_error: scanner could not run ({e})"]
+    finally:
+        shutil.rmtree(scan_dir, ignore_errors=True)
 
-
-def _fallback_regex_scan(bundle_path: Path) -> list[str]:
-    """Basic regex-based security scan (last-resort fallback)."""
-    dangerous = [
-        ("eval(", "eval() is dangerous"),
-        ("new Function(", "Function constructor is dangerous"),
-        ("document.cookie", "document.cookie access not allowed"),
-        ("document.write(", "document.write() not allowed"),
-        (".innerHTML", "innerHTML assignment is a security risk"),
-    ]
-    content = bundle_path.read_text(encoding="utf-8", errors="replace")
-    return [msg for pattern, msg in dangerous if pattern in content]
+    if data.get("error"):
+        return [f"scan_error: {data['error']}"]
+    return [f"{v['kind']}: {v['message']}" for v in data.get("violations", [])]
 
 
 # ── Docker-based isolated build ───────────────────────────────────────────────
@@ -650,7 +713,7 @@ def _build_register_activate(
 
     # ── Security scan ─────────────────────────────────────────────────────────
     status(build_id, status="scanning")
-    violations = _ast_security_scan(bundle_path)
+    violations = _ast_security_scan(dist, theme_dir)
     if violations:
         raise ThemeBuildError(f"Security scan failed: {'; '.join(violations[:5])}")
 

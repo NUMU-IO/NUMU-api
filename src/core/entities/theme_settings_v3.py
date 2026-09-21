@@ -201,6 +201,13 @@ class ExternalThemeMetadata(BaseModel):
     # whose bytes change on every edit; absent means the allowlist is the
     # only gate, which is the pre-existing behaviour.
     checksum: str | None = None
+    # SHA-256 hex digest of the theme's SSR bundle (`theme.server.js`),
+    # copied from ``marketplace_theme_versions.server_checksum``. The bundle
+    # is imported inside the storefront's SSR child process, so this pin is
+    # what stops a CDN write from changing the code NUMU itself runs; the
+    # worker refuses to render when neither this nor the bundle's own
+    # manifest digest matches the bytes.
+    server_checksum: str | None = None
     # Shopify-style schema is a *list* of setting defs; legacy callers may
     # pass a wrapped dict. JSONB on the DB side accepts either.
     settings_schema: list[Any] | dict[str, Any] | None = None
