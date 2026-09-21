@@ -60,6 +60,7 @@ from src.application.use_cases.orders import (
     UpdateOrderUseCase,
 )
 from src.core.entities.store import Store
+from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.events.setup import get_event_bus
 from src.infrastructure.repositories import (
     CustomerRepository,
@@ -878,19 +879,39 @@ async def get_order_status_counts(
 
 
 @router.get(
-    "/{order_id}",
+    "/{order_ref}",
     response_model=SuccessResponse[OrderResponse],
-    summary="Get order by ID",
+    summary="Get order by ID or order number",
     operation_id="get_order",
 )
 async def get_order(
-    order_id: Annotated[UUID, Path(description="Order ID")],
+    order_ref: Annotated[
+        str,
+        Path(
+            description="Order ID (UUID) or order number (e.g. ORD-767567)",
+            max_length=64,
+        ),
+    ],
     store: Annotated[Store, Depends(verify_store_ownership)],
     order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
 ):
-    """Get order details by ID."""
+    """Get order details by ID or by the store's order number.
+
+    The merchant hub puts the order NUMBER in its URLs — it's what merchants
+    read and share — so a pasted or refreshed `/orders/ORD-767567` resolves
+    here. A UUID works exactly as before. Numbers are unique per store, and
+    the lookup is store-scoped, so one store can never reach another's order.
+    """
+    try:
+        order_id = UUID(order_ref)
+    except ValueError:
+        found = await order_repo.get_by_order_number(store.id, order_ref.strip())
+        if found is None:
+            raise EntityNotFoundError("Order", order_ref) from None
+        order_id = found.id
+
     use_case = GetOrderUseCase(
         order_repository=order_repo,
         store_repository=store_repo,
