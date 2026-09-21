@@ -80,6 +80,7 @@ class SellerInfo(BaseModel):
     building_number: str | None = None
     activity_code: str = "4649"  # Business activity code
     phone: str | None = None
+    email: str | None = None
 
 
 class BuyerInfo(BaseModel):

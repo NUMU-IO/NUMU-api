@@ -31,6 +31,7 @@ Usage:
 
 import json
 import logging
+import re
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,23 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 _BRAND_TOKENS_PATH = (
     Path(__file__).parent.parent.parent.parent.parent.parent / "brand" / "tokens.json"
 )
+
+
+_ARABIC_RE = re.compile(
+    "[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufefe]"
+)
+
+
+def _text_dir(value: object) -> str:
+    """ "rtl" if the text contains Arabic script, else "ltr".
+
+    The invoice page is RTL, so an English product name, a SKU or a phone
+    number dropped into it gets reordered by the bidi algorithm: "+2010…"
+    printed as "2010…+", "S-W-P" as "-S-W P", and a trailing comma jumped to
+    the front of "Sidetracked — Type: Paperback, Paper: White". Each such
+    value is rendered in its own `dir`-tagged, isolated span instead.
+    """
+    return "rtl" if _ARABIC_RE.search(str(value or "")) else "ltr"
 
 
 def _hex_to_rgb(hex_str: str) -> tuple[int, int, int]:
@@ -1122,6 +1140,7 @@ class InvoicePDFGenerator:
             loader=FileSystemLoader(str(TEMPLATE_DIR)),
             autoescape=True,
         )
+        env.filters["textdir"] = _text_dir
         template = env.get_template(self.template_name)
         context = self._build_context(invoice, payment=payment)
         return template.render(**context)
@@ -1191,12 +1210,14 @@ class InvoicePDFGenerator:
         # (e.g. "PAID" / "PaymentStatus.PAID" -> "paid").
         payment_status_key = None
         payment_method = None
+        payment_method_ar = None
         paid_at = None
         if payment:
             raw_status = payment.get("status")
             if raw_status:
                 payment_status_key = str(raw_status).split(".")[-1].lower()
             payment_method = payment.get("method")
+            payment_method_ar = payment.get("method_ar")
             paid_at = payment.get("paid_at")
 
         # What the document may truthfully claim to be. "Tax invoice" and the
@@ -1225,8 +1246,11 @@ class InvoicePDFGenerator:
             "text_align": "right" if is_rtl else "left",
             "text_align_opposite": "left" if is_rtl else "right",
             "language": self.language,
-            # Logo
-            "logo_url": self._resolve_logo_url(),
+            # The MERCHANT's logo, or none — the template then prints the
+            # store's name as a wordmark. This is the merchant's invoice to
+            # their customer; heading it with the NUMU mark (the old fallback)
+            # read as if the platform had issued it.
+            "logo_url": self.store_logo_url,
             # Formatted totals (cents -> display currency). Under the
             # VAT-inclusive model: ``subtotal`` already contains VAT;
             # ``vat_amount`` is the VAT extracted from it for the
@@ -1258,7 +1282,12 @@ class InvoicePDFGenerator:
             # Payment context (renders the colored stamp if non-null)
             "payment_status_key": payment_status_key,
             "payment_method": payment_method,
+            "payment_method_ar": payment_method_ar,
             "paid_at": paid_at,
+            # The per-line discount column is always 0.00 on an order-built
+            # invoice (the order's discount is one invoice-level row), and on
+            # A5 that dead column is what squeezed the table into wrapping.
+            "has_line_discounts": any(item.discount for item in invoice.line_items),
             # Bilingual labels (always pass both for the bilingual template)
             "labels_ar": _LABELS_AR,
             "labels_en": _LABELS_EN,

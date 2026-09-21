@@ -86,7 +86,11 @@ def seller_from_store(store: Store) -> SellerInfo:
         street=pick("street", "street", "address_line1"),
         building_number=pick("building_number", "building_number"),
         activity_code=pick("activity_code", default="4649"),
-        phone=settings.get("phone") or getattr(store, "phone", None),
+        # `Store` has no `phone` attribute — it is `contact_phone`. Reading
+        # the wrong name left every invoice without the seller's phone,
+        # which is how a customer holding the paper reaches the shop.
+        phone=settings.get("phone") or getattr(store, "contact_phone", None),
+        email=getattr(store, "contact_email", None),
     )
 
 

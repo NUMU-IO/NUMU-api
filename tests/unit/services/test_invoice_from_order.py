@@ -37,7 +37,8 @@ def _store(settings=None, address=None):
         name="Bon Younes",
         settings=settings or {},
         address=address or {"city": "Cairo", "street": "Tahrir St"},
-        phone="+201000000000",
+        contact_phone="+201000000000",
+        contact_email=None,
         logo_url=None,
     )
 
@@ -171,18 +172,18 @@ def test_unregistered_seller_gets_a_plain_invoice_with_no_vat_lines():
     html = _html(_store(), _order(lines=[_line("Abaya", 30_000)]))
     # Asserted on the title element itself — the stylesheet carries a
     # "Tax Invoice" comment that is never rendered.
-    assert '<div class="invoice-title-ar">فاتورة ضريبية</div>' not in html
-    assert '<div class="invoice-title-en">Invoice</div>' in html
-    assert "VAT 14% (Included)" not in html
+    assert '<span class="ar">فاتورة ضريبية</span>' not in html
+    assert '<span class="ar">فاتورة</span>' in html
+    assert "VAT 14% (included)" not in html
     assert "Prices include" not in html
     assert "VAT incl." not in html
 
 
 def test_registered_seller_gets_a_tax_invoice_with_vat():
     html = _html(_store(settings=REGISTERED), _order(lines=[_line("Abaya", 30_000)]))
-    assert '<div class="invoice-title-ar">فاتورة ضريبية</div>' in html
-    assert '<div class="invoice-title-en">Tax Invoice</div>' in html
-    assert "VAT 14% (Included)" in html
+    assert '<span class="ar">فاتورة ضريبية</span>' in html
+    assert '<span class="en">Tax Invoice</span>' in html
+    assert "VAT 14% (included)" in html
 
 
 def test_unpaid_order_shows_the_amount_the_courier_collects():
@@ -234,3 +235,53 @@ def test_issue_date_is_today_not_the_order_date():
         _store(), _order(lines=[_line("Abaya", 30_000)]), invoice_number="INV-X"
     )
     assert invoice.date_issued.date() == datetime.now(UTC).date()
+
+
+# -------- Paper + direction --------------------------------------------------
+
+
+def test_prints_on_a5():
+    # The invoice-book size, chosen for packing with a COD parcel.
+    html = _html(_store(), _order(lines=[_line("Abaya", 30_000)]))
+    assert "size: A5;" in html
+
+
+def test_phone_and_sku_keep_their_own_direction_on_the_rtl_page():
+    # Left to the page direction, "+201060082542" printed as "201060082542+"
+    # and "S-W-P" as "-S-W P".
+    order = _order(lines=[_line("Sidetracked", 18_000, sku="S-W-P")])
+    html = _html(_store(), order)
+    assert '<span class="ltr">+201112223334</span>' in html
+    assert '<span class="ltr">SKU S-W-P</span>' in html
+
+
+def test_english_product_name_is_isolated_as_ltr():
+    order = _order(
+        lines=[_line("Sidetracked", 18_000, variant="Type: Paperback, Paper: White")]
+    )
+    html = _html(_store(), order)
+    assert (
+        '<span dir="ltr" class="bidi">Sidetracked — Type: Paperback, Paper: White</span>'
+        in html
+    )
+
+
+def test_name_is_not_printed_twice_when_there_is_no_translation():
+    html = _html(_store(), _order(lines=[_line("Abaya", 30_000)]))
+    assert html.count("Sara Ali") == 1
+
+
+def test_seller_phone_comes_from_the_store_contact_phone():
+    store = _store()
+    store.contact_phone = "+20223456789"
+    store.contact_email = "hello@bonyounes.com"
+    seller = seller_from_store(store)
+    assert seller.phone == "+20223456789"
+    assert seller.email == "hello@bonyounes.com"
+
+
+def test_no_platform_logo_on_the_merchants_invoice():
+    # No store logo: the store's name heads the page, never the NUMU mark.
+    html = _html(_store(), _order(lines=[_line("Abaya", 30_000)]))
+    assert "numu_logo" not in html
+    assert 'class="wordmark"' in html
