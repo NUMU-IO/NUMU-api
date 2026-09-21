@@ -51,7 +51,11 @@ async def app_enabled(db: AsyncSession, store_id: UUID, slug: str) -> bool:
     """
     row = (
         await db.execute(
-            select(TenantModel.feature_flags, AppInstallationModel.is_enabled)
+            select(
+                TenantModel.feature_flags,
+                AppInstallationModel.is_enabled,
+                AppModel.id,
+            )
             .select_from(StoreModel)
             .join(TenantModel, TenantModel.id == StoreModel.tenant_id)
             .outerjoin(AppModel, AppModel.slug == slug)
@@ -67,8 +71,16 @@ async def app_enabled(db: AsyncSession, store_id: UUID, slug: str) -> bool:
     ).one_or_none()
     if row is None:
         return True
-    flags, enabled = row
+    flags, enabled, app_id = row
     if not (flags or {}).get(FLAG):
+        return True
+    if app_id is None:
+        # The flag is on but the catalog row is missing (a failed migration,
+        # a deleted row). Nobody can have uninstalled an app that doesn't
+        # exist, so behave as before it became an app, and say so loudly.
+        logger.warning(
+            "numu_app_catalog_row_missing", slug=slug, store_id=str(store_id)
+        )
         return True
     return bool(enabled)
 

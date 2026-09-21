@@ -60,6 +60,7 @@ from src.infrastructure.database.models.public.partner_account import (
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.tenant.store import StoreModel
 from src.infrastructure.database.models.tenant.webhook import WebhookSubscriptionModel
+from src.infrastructure.tenancy.rls import set_tenant_context
 
 logger = get_logger(__name__)
 
@@ -341,6 +342,12 @@ async def token(body: TokenRequest, db: Annotated[AsyncSession, Depends(get_db)]
     if code is None or installation is None or installation.app_id != client.app_id:
         raise _bad("invalid, expired or already used code")
     app = await db.get(AppModel, client.app_id)
+    if app is None:  # deleted between the client lookup and here
+        raise _bad("invalid client")
+    # An unauthenticated request carries no tenant; the rows written below
+    # (token, subscriptions) belong to the installation's. Needed once RLS
+    # is enforced for the API's role; a no-op while it bypasses RLS.
+    await set_tenant_context(db, installation.tenant_id)
 
     # One live token per installation; the old one overlaps for 24 hours.
     await db.execute(
