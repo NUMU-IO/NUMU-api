@@ -78,6 +78,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.numu_app_purge_task",
         # Partner Apps: store.redact 48h after an uninstall (countdown task).
         "src.infrastructure.messaging.tasks.app_redact_task",
+        # Paid apps: hourly renewal of subscriptions whose period ended.
+        "src.infrastructure.messaging.tasks.app_billing_task",
         # backend-030 / US6 — 90-day dead-letter purge (daily at 03:00 UTC).
         "src.infrastructure.messaging.tasks.whatsapp_dead_letter_purge",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
@@ -647,6 +649,11 @@ celery_app.conf.beat_schedule = {
     "expire-whatsapp-access": {
         "task": "tasks.expire_whatsapp_access",
         "schedule": crontab(minute=10),  # Hourly at :10
+    },
+    # Paid apps: charge the next period from the wallet, credit the partner.
+    "renew-app-subscriptions": {
+        "task": "tasks.renew_app_subscriptions",
+        "schedule": crontab(minute=25),  # Hourly at :25
     },
     # NUMU Apps: an uninstalled app's conversations are deleted after 30 days.
     "purge-uninstalled-numu-apps": {

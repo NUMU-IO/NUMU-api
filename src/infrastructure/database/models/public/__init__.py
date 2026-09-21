@@ -17,6 +17,10 @@ from src.infrastructure.database.models.public.app import (
     AppUninstallModel,
     AppVersionModel,
 )
+from src.infrastructure.database.models.public.app_billing import (
+    AppSubscriptionModel,
+    PartnerLedgerEntryModel,
+)
 from src.infrastructure.database.models.public.currency_rate import CurrencyRateModel
 from src.infrastructure.database.models.public.customizer_undo_entry import (
     CustomizerUndoEntryModel,
@@ -78,6 +82,8 @@ __all__ = [
     "AppOAuthClientModel",
     "AppOAuthCodeModel",
     "AppAccessTokenModel",
+    "AppSubscriptionModel",
+    "PartnerLedgerEntryModel",
     "PartnerAccountModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",
