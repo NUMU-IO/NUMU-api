@@ -325,8 +325,12 @@ class ReviewDecisionRequest(BaseModel):
     @field_validator("decision")
     @classmethod
     def _check_decision(cls, v: str) -> str:
-        if v not in ("approve", "reject"):
-            raise ValueError("decision must be 'approve' or 'reject'")
+        # request_changes: the admin review UI has always sent it, and got a
+        # 400 until this accepted it.
+        if v not in ("approve", "reject", "request_changes"):
+            raise ValueError(
+                "decision must be 'approve', 'reject' or 'request_changes'"
+            )
         return v
 
 

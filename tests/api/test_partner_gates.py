@@ -51,3 +51,21 @@ def test_admin_partner_decisions_need_2fa():
         assert "require_admin_2fa.<locals>._check" in _names(route.dependant), (
             route.path
         )
+
+
+def test_partner_app_routes_need_an_open_program_and_an_approved_partner():
+    for route in _routes("/api/v1/partners/me/apps"):
+        names = _names(route.dependant)
+        assert "require_partner_program" in names, route.path
+        assert "require_approved_partner" in names, route.path
+
+
+def test_admin_app_decisions_need_2fa():
+    """Review, suspension and the kill switch. Listing flags only curate the
+    catalog, so they are audited but not stepped up."""
+    for route in _routes("/api/v1/admin/apps"):
+        names = _names(route.dependant)
+        assert "require_admin" in names, route.path
+        needs_2fa = route.methods & {"POST", "PUT"}
+        if needs_2fa:
+            assert "require_admin_2fa.<locals>._check" in names, route.path

@@ -70,6 +70,13 @@ class AppModel(Base, UUIDMixin, TimestampMixin):
         nullable=False,
         default=dict,
     )
+    #: Admin curation: catalog_visible (a published Partner App is hidden until
+    #: set), featured, staff_pick. First-party apps (developer_id NULL) ignore
+    #: catalog_visible.
+    listing_flags: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    category: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
 class AppInstallationModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
@@ -133,4 +140,65 @@ class AppUninstallModel(Base, UUIDMixin, TimestampMixin):
     )
     purge_after: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+
+
+class AppVersionModel(Base, UUIDMixin, TimestampMixin):
+    """One uploaded version of a Partner App: a validated ``numu.app.json``.
+
+    ``draft → submitted → in_review → approved | changes_requested | rejected
+    → published → superseded``. Only a published version's listing reaches
+    ``apps.manifest``, which every existing reader uses.
+    """
+
+    __tablename__ = "app_versions"
+    __table_args__ = (
+        UniqueConstraint("app_id", "version", name="uq_app_versions_app_version"),
+        Index("ix_app_versions_status", "status"),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
+    manifest: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    #: {"ar": ..., "en": ...}
+    release_notes: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    review_notes: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    review_checklist: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    reviewed_by: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AppOAuthClientModel(Base, UUIDMixin, TimestampMixin):
+    """A Partner App's OAuth credentials. The secret is stored hashed and
+    shown to the partner once, at creation or rotation (Phase 4 uses it)."""
+
+    __tablename__ = "app_oauth_clients"
+    __table_args__ = {"schema": "public"}
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    client_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    client_secret_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    secret_rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
