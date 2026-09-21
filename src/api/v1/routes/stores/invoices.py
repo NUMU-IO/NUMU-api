@@ -12,7 +12,6 @@ Provides endpoints for:
 
 import asyncio
 import logging
-from decimal import Decimal
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -33,6 +32,11 @@ from src.api.v1.schemas.tenant.invoice import (
     SubmitInvoiceResponse,
     UpdateInvoiceRequest,
 )
+from src.application.services.invoice_from_order import (
+    apply_tax_authority_step,
+    invoice_from_order,
+    lock_order_invoicing,
+)
 from src.config import settings
 from src.core.entities.invoice import (
     BuyerInfo,
@@ -40,7 +44,7 @@ from src.core.entities.invoice import (
     InvoiceStatus,
     SellerInfo,
 )
-from src.core.entities.order import Order, PaymentStatus
+from src.core.entities.order import Order
 from src.core.entities.store import Store
 from src.infrastructure.external_services.eta import ETAInvoiceService
 from src.infrastructure.repositories.invoice_repository import InvoiceRepository
@@ -595,85 +599,21 @@ async def _build_invoice_from_order(
     order: Order,
     invoice_repo: InvoiceRepository,
 ) -> Invoice:
-    """Build + persist a VAT-inclusive invoice from a paid order.
+    """Issue + persist the invoice for an order, paid or not.
 
-    Mirrors the logic in ``invoice_on_paid_handler`` so a merchant can
-    download an invoice on demand for orders whose event-bus handler
-    never fired (legacy paid orders, dev-mode without the bus, or a
-    transient handler failure). Idempotent: callers should look up an
-    existing invoice first.
+    An invoice is a demand for payment, so issuing one before payment is
+    ordinary: a cash-on-delivery merchant prints it at dispatch and packs it
+    with the order, the PDF shows it as due on delivery, and the same invoice
+    flips to "paid" once the order is marked paid (the payment stamp is read
+    live from the order at render time). The on-paid handler finds this
+    invoice by order id and does not issue a second one.
+
+    Idempotent: callers look up an existing invoice first.
     """
-    store_address = dict(store.address) if store.address else {}
-    store_settings = dict(store.settings) if store.settings else {}
-    ship = order.shipping_address
-
-    seller = SellerInfo(
-        tax_id=store_settings.get("tax_id", ""),
-        name=store.name,
-        name_ar=store_settings.get("name_ar", store.name),
-        branch_id=store_settings.get("branch_id", "0"),
-        country=store_address.get("country", "EG"),
-        governorate=store_address.get("governorate", store_address.get("state", "")),
-        city=store_address.get("city", ""),
-        street=store_address.get("street", store_address.get("address_line1", "")),
-        building_number=store_address.get("building_number", ""),
-        activity_code=store_settings.get("activity_code", "4649"),
-        phone=store_settings.get("phone") or getattr(store, "phone", None),
-    )
-
-    buyer_name = f"{ship.first_name or ''} {ship.last_name or ''}".strip() or "Customer"
-    buyer = BuyerInfo(
-        buyer_type="P",
-        name=buyer_name,
-        name_ar=buyer_name,
-        city=ship.city or "",
-        street=ship.address_line1 or "",
-        phone=ship.phone or "",
-    )
-
     invoice_number = await invoice_repo.get_next_invoice_number(store.id)
-    invoice = Invoice(
-        id=uuid4(),
-        store_id=store.id,
-        tenant_id=store.tenant_id,
-        order_id=order.id,
-        customer_id=order.customer_id,
-        invoice_number=invoice_number,
-        internal_id=order.order_number,
-        status=InvoiceStatus.ACCEPTED,
-        seller=seller,
-        buyer=buyer,
-        currency=order.currency,
-        shipping_fee=order.shipping_cost or 0,
-        prices_include_vat=True,
-    )
+    invoice = invoice_from_order(store, order, invoice_number=invoice_number)
 
-    for li in order.line_items:
-        invoice.add_line_item(
-            description=li.product_name,
-            description_ar=li.product_name,
-            item_code=li.sku or "EG-0000-0000",
-            quantity=Decimal(str(li.quantity)),
-            unit_price=Decimal(str(li.unit_price)) / 100,
-            internal_code=li.sku,
-        )
-
-    # ETA: simulated identifiers when not enabled, real submission otherwise.
-    if settings.eta_enabled:
-        try:
-            invoice = await ETAInvoiceService().process_invoice_submission(invoice)
-        except Exception as exc:
-            logger.warning(
-                "eta_submission_failed_on_lazy_create",
-                extra={"order_id": str(order.id), "error": str(exc)},
-            )
-            invoice.status = InvoiceStatus.REJECTED
-            invoice.eta_status_message = str(exc)[:500]
-    else:
-        invoice.eta_uuid = f"simulated-{uuid4().hex[:12]}"
-        invoice.eta_long_id = f"simulated-long-{uuid4().hex[:20]}"
-        invoice.eta_status_code = "accepted"
-
+    invoice = await apply_tax_authority_step(invoice)
     return await invoice_repo.create(invoice)
 
 
@@ -691,9 +631,8 @@ async def get_invoice_for_order(
     create_if_missing: bool = Query(
         True,
         description=(
-            "When true (default), creates the invoice on-the-fly if the "
-            "order is paid but no invoice exists yet (handles the race "
-            "where mark-as-paid completes before the on-paid handler)."
+            "When true (default), issues the invoice on the spot if the "
+            "order has none yet — paid or not."
         ),
     ),
 ):
@@ -702,11 +641,12 @@ async def get_invoice_for_order(
     Flow:
         1. Look up the order; 404 if not found or not in this store.
         2. Look up an existing invoice via ``get_by_order_id``.
-        3. If missing AND ``create_if_missing`` AND the order is paid,
-           build + persist a fresh VAT-inclusive invoice.
-        4. If missing AND not paid, return 409 with a clear message
-           (rather than the previous "No invoice found" which left the
-           merchant guessing).
+        3. If missing AND ``create_if_missing``, issue + persist one.
+
+    This used to refuse unpaid orders with a 409. That left every
+    cash-on-delivery merchant without an invoice to pack with the parcel —
+    the one moment they need it — because a COD order is by definition
+    unpaid until the courier collects.
     """
     order = await order_repo.get_by_id(order_id)
     if not order or order.store_id != store.id:
@@ -718,15 +658,7 @@ async def get_invoice_for_order(
     invoice = await invoice_repo.get_by_order_id(order_id)
 
     if invoice is None and create_if_missing:
-        if order.payment_status != PaymentStatus.PAID:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Invoice is generated after the order is marked as paid. "
-                    "Mark the order as paid first."
-                ),
-            )
-        invoice = await _build_invoice_from_order(store, order, invoice_repo)
+        invoice = await _get_or_issue_invoice(store, order, invoice_repo)
         logger.info(
             "invoice_lazy_created",
             extra={
@@ -742,6 +674,88 @@ async def get_invoice_for_order(
         )
 
     return SuccessResponse(data=_build_invoice_response(invoice))
+
+
+async def _get_or_issue_invoice(
+    store: Store,
+    order: Order,
+    invoice_repo: InvoiceRepository,
+) -> Invoice:
+    """The order's invoice, issuing it exactly once.
+
+    Takes the per-order lock before re-checking, so a double click on
+    "Print" — or a print racing the on-paid handler — resolves to one
+    invoice rather than two consecutive numbers for the same parcel.
+    """
+    invoice = await invoice_repo.get_by_order_id(order.id)
+    if invoice is not None:
+        return invoice
+    await lock_order_invoicing(invoice_repo.session, order.id)
+    invoice = await invoice_repo.get_by_order_id(order.id)
+    if invoice is not None:
+        return invoice
+    return await _build_invoice_from_order(store, order, invoice_repo)
+
+
+@router.get(
+    "/by-order/{order_id}/pdf",
+    summary="Print the invoice for an order, paid or not",
+    responses={
+        200: {
+            "content": {"application/pdf": {}},
+            "description": "Invoice PDF, rendered fresh",
+        }
+    },
+    operation_id="print_invoice_for_order",
+)
+async def print_invoice_for_order(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    invoice_repo: Annotated[InvoiceRepository, Depends(get_invoice_repository)],
+    order_repo: Annotated[OrderRepository, Depends(get_order_repository)],
+    order_id: Annotated[UUID, Path(description="Order ID")],
+):
+    """Issue (if needed) and render the order's invoice for printing.
+
+    One call for the merchant's "Print invoice" button, whatever the order's
+    payment state: a cash-on-delivery order prints as due on delivery with
+    the amount the courier collects; a paid one prints as paid. Rendered
+    fresh every time — never from the R2 cache — because the payment stamp
+    changes when the order is paid and a stale "due" on a paid order is
+    exactly the wrong paper to hand a customer.
+
+    Served inline so the browser opens its PDF viewer, where printing is one
+    click; the store's own logo, not the platform's, heads the page.
+    """
+    order = await order_repo.get_by_id(order_id)
+    if not order or order.store_id != store.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    invoice = await _get_or_issue_invoice(store, order, invoice_repo)
+    payment_ctx = await _resolve_payment_context(invoice, order_repo)
+
+    from src.infrastructure.external_services.invoice import InvoicePDFGenerator
+
+    generator = InvoicePDFGenerator(
+        template_name="invoice_ar.html",
+        language="ar_en",
+        store_logo_url=getattr(store, "logo_url", None),
+    )
+    pdf_bytes = await asyncio.to_thread(generator.generate, invoice, payment_ctx)
+
+    safe_filename = invoice.invoice_number.replace("/", "-")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{safe_filename}.pdf"',
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 def _build_invoice_response(invoice: Invoice) -> InvoiceResponse:
