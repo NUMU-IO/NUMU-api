@@ -47,6 +47,8 @@ class StoreThemeRepository(IStoreThemeRepository):
         theme_version_str = None
         bundle_url = None
         css_url = None
+        bundle_checksum = None
+        server_checksum = None
 
         if model.theme is not None:
             theme_slug = model.theme.slug
@@ -64,6 +66,8 @@ class StoreThemeRepository(IStoreThemeRepository):
             theme_version_str = model.theme_version.version
             bundle_url = model.theme_version.bundle_url
             css_url = model.theme_version.css_url
+            bundle_checksum = model.theme_version.checksum
+            server_checksum = model.theme_version.server_checksum
             # Denormalize manifest presets so the V3 editor can derive a
             # renderable template when stored customization is empty/mismatched.
             _manifest = model.theme_version.manifest or {}
@@ -105,6 +109,8 @@ class StoreThemeRepository(IStoreThemeRepository):
             theme_version=theme_version_str,
             bundle_url=bundle_url,
             css_url=css_url,
+            bundle_checksum=bundle_checksum,
+            server_checksum=server_checksum,
         )
 
     def _to_model(self, entity: StoreTheme) -> StoreThemeModel:

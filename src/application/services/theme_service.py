@@ -509,6 +509,7 @@ class ThemeService:
                 "section_schemas": inst.section_schemas,
                 "installation_id": str(inst.id),
                 "bundle_checksum": getattr(inst, "bundle_checksum", None),
+                "server_checksum": getattr(inst, "server_checksum", None),
             }
 
         active = await self.store_theme_repo.get_active_for_store(store_id)
@@ -565,6 +566,7 @@ class ThemeService:
                 "section_schemas": active.section_schemas,
                 "installation_id": str(active.id),
                 "bundle_checksum": None,
+                "server_checksum": None,
                 "theme_suspended": True,
             }
 
@@ -585,6 +587,7 @@ class ThemeService:
             "section_schemas": active.section_schemas,
             "installation_id": str(active.id),
             "bundle_checksum": getattr(active, "bundle_checksum", None),
+            "server_checksum": getattr(active, "server_checksum", None),
         }
 
     async def _is_theme_suspended(self, active: Any) -> bool:

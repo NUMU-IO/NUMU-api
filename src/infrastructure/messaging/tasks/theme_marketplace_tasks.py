@@ -397,7 +397,7 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 f"{MAX_BUNDLE_SIZE // 1024 // 1024}MB)"
             )
 
-        violations = _ast_security_scan(bundle_path)
+        violations = _ast_security_scan(dist, theme_dir)
         if violations:
             raise ThemeBuildError(f"security scan failed: {'; '.join(violations[:5])}")
 
@@ -464,6 +464,16 @@ def build_marketplace_theme(self, version_id: str) -> dict:
         bundle_bytes = bundle_path.read_bytes()
         checksum = hashlib.sha256(bundle_bytes).hexdigest()
         version_hash = checksum[:8]
+        # The SSR bundle, hashed from the bytes we just built rather than read
+        # from the manifest the same build wrote — the storefront's render
+        # worker imports this file inside a Node process, and a digest that
+        # travels with the artifact proves nothing about it.
+        server_bundle = dist / "theme.server.js"
+        server_checksum = (
+            hashlib.sha256(server_bundle.read_bytes()).hexdigest()
+            if server_bundle.exists()
+            else None
+        )
 
         # Go through the factory so the local-filesystem fallback kicks
         # in when S3/R2 isn't configured (common for local dev — the
@@ -639,6 +649,7 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 loading_template_url=loading_template_url,
                 size_bytes=size,
                 checksum=checksum,
+                server_checksum=server_checksum,
                 settings_schema=settings_schema,
                 section_schemas=section_schemas,
                 presets=presets,

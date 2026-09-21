@@ -111,6 +111,11 @@ class ThemeVersionModel(Base, UUIDMixin, TimestampMixin):
     )
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    # SHA-256 of `theme.server.js`, the bundle the storefront's SSR worker
+    # imports. Kept beside `checksum` (the client bundle's) so the pin lives
+    # in the database rather than in a manifest served from the same CDN
+    # prefix as the artifact it vouches for.
+    server_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
     published_at: Mapped[str | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

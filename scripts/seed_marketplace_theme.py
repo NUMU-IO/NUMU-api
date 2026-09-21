@@ -108,6 +108,15 @@ async def seed() -> None:
         else hashlib.sha256(slug.encode()).hexdigest()
     )
 
+    # The SSR bundle's digest, pinned on the row so the storefront's render
+    # worker does not have to trust the manifest sitting next to the bytes.
+    theme_server_js = dist / "theme.server.js"
+    server_checksum = (
+        hashlib.sha256(theme_server_js.read_bytes()).hexdigest()
+        if theme_server_js.exists()
+        else None
+    )
+
     bundle_url = f"{BUNDLE_BASE}/{slug}/{version}/theme.js"
     css_url = f"{BUNDLE_BASE}/{slug}/{version}/theme.css"
     now = datetime.now(UTC)
@@ -180,6 +189,7 @@ async def seed() -> None:
             # PUBLISHED version, so this is what surfaces as an available update.
             "status": "published",
             "checksum": checksum,
+            "server_checksum": server_checksum,
         }
 
         if vrow:
