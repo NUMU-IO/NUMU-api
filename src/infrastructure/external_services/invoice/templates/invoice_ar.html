@@ -494,6 +494,15 @@
             font-weight: 700;
             letter-spacing: 2.5px;
         }
+        .totals tr.amount-due td {
+            padding-top: 10px;
+            border-top: 2px dashed #C2410C;
+            color: #C2410C;
+            font-weight: 800;
+        }
+        .totals tr.amount-due td.value {
+            font-size: 15px;
+        }
     </style>
 </head>
 <body>
@@ -504,14 +513,25 @@
             {% if logo_url %}<img src="{{ logo_url }}" alt="NUMU">{% endif %}
         </div>
         <div class="header-center">
+            {% if is_tax_registered %}
             <div class="invoice-title-ar">فاتورة ضريبية</div>
             <div class="invoice-title-en">Tax Invoice</div>
+            {% else %}
+            <div class="invoice-title-ar">فاتورة</div>
+            <div class="invoice-title-en">Invoice</div>
+            {% endif %}
         </div>
         <div class="header-meta">
             <div class="meta-row">
                 <span class="meta-label">Invoice</span>
                 <span class="meta-value">{{ invoice.invoice_number }}</span>
             </div>
+            {% if order_number %}
+            <div class="meta-row">
+                <span class="meta-label">Order</span>
+                <span class="meta-value">{{ order_number }}</span>
+            </div>
+            {% endif %}
             <div class="meta-row">
                 <span class="meta-label">Date</span>
                 <span class="meta-value">{{ invoice.date_issued.strftime('%Y-%m-%d') }}</span>
@@ -614,9 +634,11 @@
                 <td class="num">{{ item.number }}</td>
                 <td>
                     {% if item.description_ar %}<span>{{ item.description_ar }}</span>{% endif %}
-                    {% if item.description %}<span class="desc-en">{{ item.description }}</span>{% endif %}
+                    {# Only when it says something new — order lines carry one name,
+                       so printing it again as "English" doubled every row. #}
+                    {% if item.description and item.description != item.description_ar %}<span class="desc-en">{{ item.description }}</span>{% endif %}
                 </td>
-                <td>{{ item.item_code }}</td>
+                <td>{{ item.sku or '—' }}</td>
                 <td class="money">{{ item.quantity }}</td>
                 <td class="money">{{ item.unit_price }}</td>
                 <td class="money">{{ item.discount }}</td>
@@ -632,18 +654,25 @@
             <table>
                 <tr>
                     <td class="label">
+                        {% if is_tax_registered %}
                         إجمالي المنتجات (شامل الضريبة)
                         <span class="label-en">Products Total (VAT incl.)</span>
+                        {% else %}
+                        إجمالي المنتجات
+                        <span class="label-en">Products Total</span>
+                        {% endif %}
                     </td>
                     <td class="value">{{ subtotal }} {{ currency }}</td>
                 </tr>
+                {% if is_tax_registered %}
                 <tr class="vat-row">
                     <td class="label">
-                        ضريبة القيمة المضافة 14% (مضمنة)
-                        <span class="label-en">VAT 14% (Included)</span>
+                        ضريبة القيمة المضافة {{ vat_rate }}% (مضمنة)
+                        <span class="label-en">VAT {{ vat_rate }}% (Included)</span>
                     </td>
                     <td class="value">{{ vat_amount }} {{ currency }}</td>
                 </tr>
+                {% endif %}
                 {% if total_discount != '0.00' %}
                 <tr>
                     <td class="label">
@@ -651,6 +680,15 @@
                         <span class="label-en">Discount</span>
                     </td>
                     <td class="value">-{{ total_discount }} {{ currency }}</td>
+                </tr>
+                {% endif %}
+                {% if extra_discount != '0.00' %}
+                <tr>
+                    <td class="label">
+                        خصم الطلب
+                        <span class="label-en">Order discount</span>
+                    </td>
+                    <td class="value">-{{ extra_discount }} {{ currency }}</td>
                 </tr>
                 {% endif %}
                 <tr>
@@ -667,11 +705,22 @@
                     </td>
                     <td class="value">{{ grand_total }} {{ currency }}</td>
                 </tr>
+                {% if amount_due %}
+                <tr class="amount-due">
+                    <td class="label">
+                        المبلغ المطلوب عند الاستلام
+                        <span class="label-en">Amount due on delivery</span>
+                    </td>
+                    <td class="value">{{ amount_due }} {{ currency }}</td>
+                </tr>
+                {% endif %}
             </table>
+            {% if is_tax_registered %}
             <div class="vat-notice">
-                الأسعار شاملة ضريبة القيمة المضافة 14%
-                <span class="vat-notice-en">Prices include 14% VAT</span>
+                الأسعار شاملة ضريبة القيمة المضافة {{ vat_rate }}%
+                <span class="vat-notice-en">Prices include {{ vat_rate }}% VAT</span>
             </div>
+            {% endif %}
         </div>
     </div>
 
@@ -711,15 +760,21 @@
     {% if qr_data_uri %}
     <div class="qr-section">
         <img src="{{ qr_data_uri }}" alt="ETA QR Code">
+        {% if is_eta_certified %}
         <p>رمز التحقق الإلكتروني · ETA e-Invoice QR</p>
+        {% else %}
+        <p>رمز التحقق من الفاتورة · Invoice verification QR</p>
+        {% endif %}
     </div>
     {% endif %}
 
     <!-- ─── ETA footer ──────────────────────────────────────────── -->
+    {% if is_eta_certified %}
     <div class="eta-footer">
         <div class="eta-ar">فاتورة إلكترونية معتمدة من مصلحة الضرائب المصرية</div>
         <div class="eta-en">Egyptian Tax Authority compliant e-Invoice</div>
     </div>
+    {% endif %}
 
     <div class="powered-by">Powered by <strong>NUMU</strong></div>
 

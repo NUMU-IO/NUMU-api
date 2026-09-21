@@ -1169,6 +1169,10 @@ class InvoicePDFGenerator:
                 "description_ar": item.description_ar,
                 "description_en": item.description,
                 "item_code": item.item_code,
+                # What the paper shows in the Code column: the merchant's own
+                # SKU. `item_code` falls back to a placeholder EGS code that
+                # ETA needs on every line but that means nothing to a reader.
+                "sku": item.internal_code or "",
                 "quantity": f"{item.quantity:,.0f}",
                 "unit_price": f"{item.unit_price:,.2f}",
                 "discount": f"{item.discount:,.2f}",
@@ -1195,6 +1199,23 @@ class InvoicePDFGenerator:
             payment_method = payment.get("method")
             paid_at = payment.get("paid_at")
 
+        # What the document may truthfully claim to be. "Tax invoice" and the
+        # VAT lines need a seller tax registration number — printing them for
+        # a merchant who has none states a VAT registration they don't hold.
+        # "Certified by the Egyptian Tax Authority" needs an actual ETA
+        # acceptance; with ETA disabled the identifiers are `simulated-…`.
+        is_tax_registered = bool((invoice.seller.tax_id or "").strip())
+        is_eta_certified = bool(
+            invoice.eta_uuid and not str(invoice.eta_uuid).startswith("simulated")
+        )
+        # A cash-on-delivery invoice goes in the parcel before any money has
+        # moved; the customer and the courier both need the figure to collect.
+        amount_due = (
+            f"{invoice.grand_total / 100:,.2f}"
+            if payment_status_key in ("pending", "unpaid", "failed")
+            else None
+        )
+
         return {
             "invoice": invoice,
             "line_items": line_items,
@@ -1218,9 +1239,17 @@ class InvoicePDFGenerator:
             "net_amount_before_vat": f"{invoice.net_amount_before_vat / 100:,.2f}",
             "shipping_fee": f"{invoice.shipping_fee / 100:,.2f}",
             "total_discount": f"{invoice.total_discount / 100:,.2f}",
+            # The order's own discount (coupon + automatic offers), applied
+            # after the line totals — without this row the printed figures
+            # would not add up to the grand total.
+            "extra_discount": f"{invoice.extra_discount / 100:,.2f}",
             "total_taxes": f"{invoice.vat_amount / 100:,.2f}",
             "grand_total": f"{invoice.grand_total / 100:,.2f}",
             "currency": invoice.currency,
+            "order_number": invoice.internal_id,
+            "is_tax_registered": is_tax_registered,
+            "is_eta_certified": is_eta_certified,
+            "amount_due": amount_due,
             # QR code
             "qr_data_uri": qr_data_uri,
             # Party info
