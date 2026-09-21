@@ -35,6 +35,7 @@ from src.api.v1.routes.admin.merchant_hub_nav import (
     router as merchant_hub_nav_router,
 )
 from src.api.v1.routes.admin.orders import router as orders_router
+from src.api.v1.routes.admin.partners import router as partners_router
 from src.api.v1.routes.admin.plan_limits import router as plan_limits_router
 from src.api.v1.routes.admin.platform_capabilities import (
     router as platform_capabilities_router,
@@ -144,6 +145,7 @@ router.include_router(
 )
 # Router carries its own prefix="/whatsapp" → /api/v1/admin/whatsapp/...
 router.include_router(whatsapp_access_router)
+router.include_router(partners_router)
 # Credentials router already has prefix="/admin/credentials" built-in,
 # so we include it at root "" to avoid /admin/admin/credentials
 router.include_router(credentials_router)

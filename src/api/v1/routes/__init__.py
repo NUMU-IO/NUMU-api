@@ -77,6 +77,7 @@ from src.api.v1.routes.omnichannel import (
     templates_router,
     threads_router,
 )
+from src.api.v1.routes.partners import router as partners_router
 from src.api.v1.routes.permissions.routes import router as permissions_router
 from src.api.v1.routes.public import router as public_router
 
@@ -251,6 +252,9 @@ api_router.include_router(
     tenants_admin_router, prefix="/admin/tenants", tags=["Admin - Tenants"]
 )
 api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
+
+# Partner portal (apps plan Phase 2); 404 while the program is closed.
+api_router.include_router(partners_router)
 
 # Store management (for authenticated store owners)
 api_router.include_router(stores_router, prefix="/stores")

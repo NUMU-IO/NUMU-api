@@ -116,8 +116,15 @@ def _vc_service(**kw) -> ManualTransferPaymentService:
     return ManualTransferPaymentService(destination="01012345678", method=VC, **kw)
 
 
-def test_both_rails_are_registered_for_checkout_dispatch():
-    assert MANUAL_TRANSFER_METHODS == {"instapay", "vodafone_cash"}
+def test_every_manual_rail_is_registered_for_checkout_dispatch():
+    # WE Pay and Orange Cash joined on the Vodafone Cash rail (afc2379d);
+    # checkout dispatches on this derived set, so each must be in it.
+    assert MANUAL_TRANSFER_METHODS == {
+        "instapay",
+        "vodafone_cash",
+        "we_pay",
+        "orange_cash",
+    }
 
 
 def test_vodafone_cash_has_no_qr_and_never_emits_one():

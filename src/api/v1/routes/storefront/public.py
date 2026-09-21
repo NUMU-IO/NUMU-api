@@ -703,6 +703,10 @@ async def platform_indexing_block_reason(session, store) -> str | None:
         plan, has_active_product = row[0], row[1]
         if (plan or "").lower() == "demo":
             return "demo_tenant"
+        if (plan or "").lower() == "developer":
+            # A partner's test store: noindex, and the storefront shows the
+            # "development store" banner off this exact reason.
+            return "development_store"
         if not has_active_product:
             return "no_products"
         return None

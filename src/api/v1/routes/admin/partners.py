@@ -1,0 +1,259 @@
+"""Admin: the Partner program queue, decisions and the program switch.
+
+URL: /api/v1/admin/partners. Reading needs ``require_admin``. Every decision
+(approve, reject, suspend, reinstate, open/close the program) needs the 2FA
+step-up and is written to ``audit_logs``: approving a partner hands an
+outsider a path to merchant data (plan 05 § 1.1).
+
+Anything the partner reads (reject/suspend notes) is stored in ar + en.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Annotated, Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.api.dependencies.auth import require_admin, require_admin_2fa
+from src.api.dependencies.database import get_db
+from src.api.responses import SuccessResponse
+from src.api.v1.routes.partners import DEV_PLAN, PartnerAccountOut
+from src.application.services.audit_service import AuditService
+from src.application.services.partner_program import (
+    program_enabled,
+    set_program_enabled,
+)
+from src.infrastructure.database.models.public.partner_account import (
+    PartnerAccountModel,
+)
+from src.infrastructure.database.models.public.tenant import TenantModel
+from src.infrastructure.database.models.public.user import UserModel
+from src.infrastructure.database.models.tenant.marketplace_theme import (
+    MarketplaceThemeModel,
+)
+from src.infrastructure.database.models.tenant.store import StoreModel
+
+router = APIRouter(
+    prefix="/partners",
+    tags=["Admin - Partners"],
+    dependencies=[Depends(require_admin)],
+)
+
+_STEP_UP = [Depends(require_admin_2fa(max_age_seconds=300))]
+
+
+class AdminPartner(PartnerAccountOut):
+    user_id: UUID
+    user_email: str
+    email_verified: bool
+    dev_store_count: int
+    theme_count: int
+    reviewed_by: UUID | None
+
+
+class DecisionRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+    notes_ar: str | None = Field(default=None, max_length=2000)
+    notes_en: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _reject_needs_notes(self):
+        if self.decision == "reject" and not (self.notes_ar and self.notes_en):
+            raise ValueError("A rejection needs notes in Arabic and English.")
+        return self
+
+
+class SuspensionRequest(BaseModel):
+    suspend: bool
+    reason_ar: str | None = Field(default=None, max_length=2000)
+    reason_en: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _suspend_needs_reason(self):
+        if self.suspend and not (self.reason_ar and self.reason_en):
+            raise ValueError("A suspension needs a reason in Arabic and English.")
+        return self
+
+
+class ProgramState(BaseModel):
+    enabled: bool
+
+
+async def _load(db: AsyncSession, partner_id: UUID) -> PartnerAccountModel:
+    account = await db.get(PartnerAccountModel, partner_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    return account
+
+
+async def _admin_view(db: AsyncSession, a: PartnerAccountModel) -> AdminPartner:
+    user = await db.get(UserModel, a.user_id)
+    dev_stores = await db.scalar(
+        select(func.count(StoreModel.id))
+        .join(TenantModel, TenantModel.id == StoreModel.tenant_id)
+        .where(StoreModel.owner_id == a.user_id, TenantModel.plan == DEV_PLAN)
+    )
+    themes = await db.scalar(
+        select(func.count(MarketplaceThemeModel.id)).where(
+            MarketplaceThemeModel.developer_id == a.user_id
+        )
+    )
+    return AdminPartner(
+        **PartnerAccountOut.model_validate(a, from_attributes=True).model_dump(),
+        user_id=a.user_id,
+        user_email=user.email if user else "",
+        email_verified=bool(user and user.email_verified_at),
+        dev_store_count=dev_stores or 0,
+        theme_count=themes or 0,
+        reviewed_by=a.reviewed_by,
+    )
+
+
+async def _audit(
+    db: AsyncSession, admin_id: UUID, action: str, a: PartnerAccountModel, old: str
+) -> None:
+    await AuditService(db).log(
+        event_type="admin.partner_decision",
+        action=action,
+        resource_type="partner_account",
+        resource_id=str(a.id),
+        user_id=admin_id,
+        old_value={"status": old},
+        new_value={"status": a.status, "notes": a.review_notes},
+    )
+
+
+# ─── Program switch ───────────────────────────────────────────────
+
+
+@router.get("/program", response_model=SuccessResponse[ProgramState])
+async def get_program(db: Annotated[AsyncSession, Depends(get_db)]):
+    return SuccessResponse(data=ProgramState(enabled=await program_enabled(db)))
+
+
+@router.put(
+    "/program", response_model=SuccessResponse[ProgramState], dependencies=_STEP_UP
+)
+async def put_program(
+    body: ProgramState,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Open or close the program. Closing hides every partner route (404);
+    approved partners keep their accounts and dev stores."""
+    old = await program_enabled(db)
+    await set_program_enabled(db, body.enabled)
+    await AuditService(db).log(
+        event_type="admin.config_change",
+        action="partner_program_open" if body.enabled else "partner_program_close",
+        resource_type="platform_config",
+        resource_id="partner_program",
+        user_id=admin_id,
+        old_value={"enabled": old},
+        new_value={"enabled": body.enabled},
+    )
+    return SuccessResponse(data=body)
+
+
+# ─── Queue ────────────────────────────────────────────────────────
+
+
+@router.get("", response_model=SuccessResponse[list[AdminPartner]])
+async def list_partners(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    status_filter: Annotated[
+        Literal["pending", "approved", "rejected", "suspended"] | None,
+        Query(alias="status"),
+    ] = None,
+):
+    """Oldest application first, so the queue is worked in order."""
+    stmt = select(PartnerAccountModel).order_by(PartnerAccountModel.created_at)
+    if status_filter:
+        stmt = stmt.where(PartnerAccountModel.status == status_filter)
+    rows = (await db.execute(stmt)).scalars().all()
+    return SuccessResponse(data=[await _admin_view(db, a) for a in rows])
+
+
+@router.get("/{partner_id}", response_model=SuccessResponse[AdminPartner])
+async def get_partner(partner_id: UUID, db: Annotated[AsyncSession, Depends(get_db)]):
+    return SuccessResponse(data=await _admin_view(db, await _load(db, partner_id)))
+
+
+@router.post(
+    "/{partner_id}/decision",
+    response_model=SuccessResponse[AdminPartner],
+    dependencies=_STEP_UP,
+)
+async def decide(
+    partner_id: UUID,
+    body: DecisionRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Approve or reject a pending application."""
+    a = await _load(db, partner_id)
+    if a.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only a pending application can be decided ({a.status}).",
+        )
+    old = a.status
+    a.status = "approved" if body.decision == "approve" else "rejected"
+    a.review_notes = (
+        {"ar": body.notes_ar, "en": body.notes_en}
+        if body.notes_ar or body.notes_en
+        else None
+    )
+    a.reviewed_by = admin_id
+    a.reviewed_at = datetime.now(UTC)
+    await _audit(db, admin_id, f"partner_{a.status}", a, old)
+    await db.flush()
+    return SuccessResponse(data=await _admin_view(db, a))
+
+
+@router.post(
+    "/{partner_id}/suspension",
+    response_model=SuccessResponse[AdminPartner],
+    dependencies=_STEP_UP,
+)
+async def suspend(
+    partner_id: UUID,
+    body: SuspensionRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Suspend an approved partner, or reinstate a suspended one.
+
+    Suspension closes ``require_approved_partner``: no uploads, submissions or
+    new dev stores. Existing dev stores keep existing. Revoking installed app
+    tokens is a separate choice that arrives with app tokens (Phase 4).
+    """
+    a = await _load(db, partner_id)
+    wanted_from = "approved" if body.suspend else "suspended"
+    if a.status != wanted_from:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only an {wanted_from} partner can be "
+            f"{'suspended' if body.suspend else 'reinstated'} ({a.status}).",
+        )
+    old = a.status
+    a.status = "suspended" if body.suspend else "approved"
+    a.review_notes = (
+        {"ar": body.reason_ar, "en": body.reason_en} if body.suspend else None
+    )
+    a.reviewed_by = admin_id
+    a.reviewed_at = datetime.now(UTC)
+    await _audit(
+        db,
+        admin_id,
+        "partner_suspended" if body.suspend else "partner_reinstated",
+        a,
+        old,
+    )
+    await db.flush()
+    return SuccessResponse(data=await _admin_view(db, a))

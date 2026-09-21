@@ -53,6 +53,8 @@ async def get_all_plan_limits() -> SuccessResponse[dict]:
     """Return the feature matrix for all available plans."""
     matrix = {}
     for plan_name, features in PLAN_LIMITS.items():
+        if plan_name == "developer":
+            continue  # a partner's dev store, never a plan a merchant picks
         matrix[plan_name] = {
             "display_name": features.display_name,
             "max_products": features.max_products

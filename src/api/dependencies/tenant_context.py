@@ -57,8 +57,12 @@ async def resolve_owner_tenant(
         await db.execute(
             select(TenantModel)
             .where(TenantModel.owner_id == user_id)
-            # Most relevant first: real tenants over demos, newest first.
-            .order_by((TenantModel.plan == "demo").asc(), TenantModel.created_at.desc())
+            # Most relevant first: real tenants over demos and a partner's
+            # development stores, newest first.
+            .order_by(
+                TenantModel.plan.in_(("demo", "developer")).asc(),
+                TenantModel.created_at.desc(),
+            )
             .limit(1)
         )
     ).scalar_one_or_none()

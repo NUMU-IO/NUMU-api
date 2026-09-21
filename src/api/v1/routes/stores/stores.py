@@ -234,7 +234,13 @@ async def create_store(
         (
             await db.execute(
                 select(TenantModel)
-                .where(TenantModel.owner_id == user_id)
+                .where(
+                    TenantModel.owner_id == user_id,
+                    # A partner's development stores have their own cap
+                    # (partner routes) and never count toward, or set, the
+                    # merchant store limit.
+                    TenantModel.plan != "developer",
+                )
                 .order_by(
                     (TenantModel.lifecycle_state == "demo").asc(),
                     TenantModel.created_at.desc(),

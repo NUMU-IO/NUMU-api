@@ -31,6 +31,9 @@ from src.infrastructure.database.models.public.omnichannel import (
     WebhookEventModel,
 )
 from src.infrastructure.database.models.public.onboarding import StoreOnboardingModel
+from src.infrastructure.database.models.public.partner_account import (
+    PartnerAccountModel,
+)
 from src.infrastructure.database.models.public.personal_access_token import (
     PersonalAccessTokenModel,
 )
@@ -67,6 +70,7 @@ __all__ = [
     "AppModel",
     "AppInstallationModel",
     "AppUninstallModel",
+    "PartnerAccountModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",
     "FeedbackModel",

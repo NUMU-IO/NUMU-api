@@ -442,6 +442,29 @@ async def checkout(
     # and FAIL-OPEN — an infra error must never cost the merchant a sale.
     # The shopper-facing message deliberately does not reveal the
     # merchant's billing state.
+    # A partner's development store is for testing apps: never real orders.
+    # Checked before the wallet gate, which is off by default and cached.
+    if store.tenant_id is not None:
+        from sqlalchemy import select as _select
+
+        from src.infrastructure.database.models.public.tenant import TenantModel
+
+        _plan = await store_repo.session.scalar(
+            _select(TenantModel.plan).where(TenantModel.id == store.tenant_id)
+        )
+        if _plan == "developer":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "development_store",
+                    "message": (
+                        "This is a development store for testing apps. It does "
+                        "not take real orders. | "
+                        "ده متجر تجريبي للمطورين، ومش بيستقبل طلبات حقيقية."
+                    ),
+                },
+            )
+
     if store.tenant_id is not None:
         from src.application.services.wallet_service import WalletService
 
