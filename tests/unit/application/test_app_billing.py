@@ -545,3 +545,11 @@ async def test_an_adjustment_reverses_a_refunded_share(test_session):
             note="zero",
             actor_user_id=uuid4(),
         )
+
+
+@pytest.mark.asyncio
+async def test_ledger_rows_can_name_their_app(test_session):
+    _, app, _, _ = await _seed(test_session)
+    labels = await billing.app_labels(test_session, [app.id, None, app.id])
+    assert labels == {app.id: {"name": "Paid App", "slug": app.slug}}
+    assert await billing.app_labels(test_session, [None]) == {}

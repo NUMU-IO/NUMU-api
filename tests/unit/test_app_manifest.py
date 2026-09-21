@@ -295,7 +295,19 @@ def test_a_recurring_price_is_valid_and_reaches_the_listing():
         "EGP",
     )
     assert listing["locales"]["en"]["label"] == "EGP 99 / month"
-    assert listing["locales"]["ar"]["label"] == "99 ج.م في الشهر"
+    # DESIGN.md § 5: Arabic amounts use Arabic-Indic digits, like ar-EG.
+    assert listing["locales"]["ar"]["label"] == "٩٩ ج.م في الشهر"
+
+
+def test_the_arabic_price_uses_arabic_indic_digits_and_separators():
+    from src.application.services.app_manifest import price_label
+
+    label = price_label({
+        "model": "recurring",
+        "price_cents": 125_050,
+        "cycle": "annual",
+    })
+    assert label == {"ar": "١٬٢٥٠٫٥٠ ج.م في السنة", "en": "EGP 1,250.50 / year"}
 
 
 @pytest.mark.parametrize(

@@ -319,7 +319,8 @@ class PayoutRequest(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-def _entry_out(e) -> dict:
+def _entry_out(e, apps: dict | None = None) -> dict:
+    app = (apps or {}).get(e.app_id) or {}
     return {
         "id": str(e.id),
         "kind": e.kind,
@@ -328,6 +329,8 @@ def _entry_out(e) -> dict:
         "platform_fee_cents": e.platform_fee_cents,
         "currency": e.currency,
         "app_id": str(e.app_id) if e.app_id else None,
+        "app_name": app.get("name"),
+        "app_slug": app.get("slug"),
         "reference": e.reference,
         "note": e.note,
         "created_at": e.created_at,
@@ -343,6 +346,7 @@ async def ledger(
     """What NUMU owes this partner (the sum of every entry) and the latest
     entries: sales at the partner's 80% share, and payouts."""
     from src.application.services.app_billing import (
+        app_labels,
         partner_balance,
         partner_payable,
     )
@@ -363,12 +367,13 @@ async def ledger(
         .scalars()
         .all()
     )
+    apps = await app_labels(db, [e.app_id for e in rows])
     return SuccessResponse(
         data={
             "balance_cents": await partner_balance(db, partner_id),
             "payable_cents": await partner_payable(db, partner_id),
             "currency": "EGP",
-            "entries": [_entry_out(e) for e in rows],
+            "entries": [_entry_out(e, apps) for e in rows],
         }
     )
 

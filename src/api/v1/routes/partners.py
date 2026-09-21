@@ -398,6 +398,7 @@ async def earnings(
     """What NUMU owes you: your 80% of every paid-app charge, minus payouts
     already sent to your bank account. Payouts are manual bank transfers."""
     from src.application.services.app_billing import (
+        app_labels,
         partner_balance,
         partner_payable,
     )
@@ -427,6 +428,7 @@ async def earnings(
         .scalars()
         .all()
     )
+    apps = await app_labels(db, [e.app_id for e in rows])
     return SuccessResponse(
         data={
             "balance_cents": await partner_balance(db, account.id),
@@ -440,6 +442,8 @@ async def earnings(
                     "gross_cents": e.gross_cents,
                     "platform_fee_cents": e.platform_fee_cents,
                     "app_id": str(e.app_id) if e.app_id else None,
+                    "app_name": apps.get(e.app_id, {}).get("name"),
+                    "app_slug": apps.get(e.app_id, {}).get("slug"),
                     "reference": e.reference,
                     "created_at": e.created_at,
                 }
