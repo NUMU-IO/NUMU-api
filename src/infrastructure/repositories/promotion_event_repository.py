@@ -56,7 +56,9 @@ class PromotionEventRepository(IPromotionEventRepository):
             filters.append(PromotionEventModel.occurred_at <= until)
 
         # `revenue` is the order value a convert event carries, written by
-        # the convert handler into `metadata.order_total` (major units).
+        # the convert handler into `metadata.order_total` — IN CENTS: it is
+        # `OrderPaidEvent.total`, i.e. `order.total`. Reading it as major
+        # units and scaling by 100 reported a 1,254 EGP order as 125,400.
         # `discount` is what the offer took off, on whichever event type
         # recorded it. Summing them in the same GROUP BY keeps this one
         # query — the merchant detail page fires it on every page view.
@@ -70,7 +72,7 @@ class PromotionEventRepository(IPromotionEventRepository):
                 func.coalesce(
                     func.sum(PromotionEventModel.discount_amount_cents), 0
                 ).label("discount"),
-                func.coalesce(func.sum(order_total), 0).label("revenue_major"),
+                func.coalesce(func.sum(order_total), 0).label("revenue_cents"),
             )
             .where(*filters)
             .group_by(PromotionEventModel.event_type)
@@ -79,7 +81,7 @@ class PromotionEventRepository(IPromotionEventRepository):
 
         impressions = clicks = dismissals = redemptions = conversions = 0
         revenue = discount = 0
-        for event_type, cnt, disc, revenue_major in rows:
+        for event_type, cnt, disc, revenue_cents in rows:
             cnt_int = int(cnt or 0)
             if event_type == "impression":
                 impressions = cnt_int
@@ -91,7 +93,7 @@ class PromotionEventRepository(IPromotionEventRepository):
                 redemptions = cnt_int
             elif event_type == "convert":
                 conversions = cnt_int
-                revenue = int(Decimal(revenue_major or 0) * 100)
+                revenue = int(Decimal(revenue_cents or 0))
             # Discount is reported on redeem AND convert rows; sum both so a
             # promotion that only ever recorded converts still reports what
             # it gave away (it used to read 0 on every code offer).
