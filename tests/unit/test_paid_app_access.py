@@ -167,3 +167,31 @@ def test_the_billing_switch_is_off_until_turned_on():
             return None  # no platform_config row
 
     assert asyncio.run(partner_billing_enabled(_Db())) is False
+
+
+@pytest.mark.asyncio
+async def test_the_admin_catalog_shows_each_apps_price(test_session):
+    """The admin App catalog must show the current price (numu-admin #92's
+    pricing dialog prefills from it)."""
+    from src.api.v1.routes.admin.apps import catalog
+
+    priced = {
+        "plan": "recurring",
+        "price_cents": 9900,
+        "cycle": "monthly",
+        "currency": "EGP",
+        "locales": {"en": {"label": "EGP 99 / month"}},
+    }
+    app = AppModel(
+        slug=f"priced-{uuid4().hex[:6]}",
+        name="Priced",
+        developer_id=None,
+        status=AppStatus.PUBLISHED,
+        manifest={"pricing": priced},
+    )
+    test_session.add(app)
+    await test_session.commit()
+
+    rows = (await catalog(db=test_session)).data
+    row = next(r for r in rows if r.slug == app.slug)
+    assert row.pricing == priced

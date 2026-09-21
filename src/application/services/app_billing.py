@@ -501,8 +501,8 @@ async def record_payout(
     payable = await partner_payable(db, partner_id, now=now)
     if amount_cents > payable:
         raise ValueError(
-            f"{payable} is payable now (sales stay on hold for 30 days); "
-            "a payout can't exceed it."
+            f"EGP {payable / 100:,.2f} is payable now (sales stay on hold for "
+            "30 days); a payout can't exceed it."
         )
     entry = PartnerLedgerEntryModel(
         partner_id=partner_id,
