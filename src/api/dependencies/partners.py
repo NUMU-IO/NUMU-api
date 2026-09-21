@@ -52,6 +52,7 @@ async def require_approved_partner(
 
 async def require_agreed_partner(
     user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user: Annotated[tuple[UUID, str], Depends(get_current_user_role)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UUID:
     """An approved partner who accepted the CURRENT Partner Agreement.
@@ -61,7 +62,10 @@ async def require_agreed_partner(
     Apps and development stores is governed by the Partner Agreement, so they
     accept it first (``PATCH /partners/me``; the partner portal prompts on
     ``needs_agreement``). The same applies after AGREEMENT_VERSION is bumped.
+    Super admins pass, even with a stale partner account of their own.
     """
+    if str(user[1]).lower() == UserRole.SUPER_ADMIN.value:
+        return user_id
     account = await partner_for_user(db, user_id)
     if account is not None and account.agreement_version != AGREEMENT_VERSION:
         raise HTTPException(

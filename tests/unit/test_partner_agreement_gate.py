@@ -19,13 +19,15 @@ from src.api.dependencies import partners as deps
 from src.application.services.partner_program import AGREEMENT_VERSION
 
 
-def _gate(account, monkeypatch):
+def _gate(account, monkeypatch, role="merchant"):
     async def lookup(_db, _user_id):
         return account
 
     monkeypatch.setattr(deps, "partner_for_user", lookup)
     user_id = uuid4()
-    return user_id, asyncio.run(deps.require_agreed_partner(user_id, db=None))
+    return user_id, asyncio.run(
+        deps.require_agreed_partner(user_id, user=(user_id, role), db=None)
+    )
 
 
 def test_a_backfilled_theme_developer_must_accept_first(monkeypatch):
@@ -52,7 +54,17 @@ def test_a_partner_on_the_current_agreement_passes(monkeypatch):
 
 def test_a_super_admin_without_a_partner_account_passes(monkeypatch):
     # require_approved_partner lets super admins through with no account.
-    user_id, result = _gate(None, monkeypatch)
+    user_id, result = _gate(None, monkeypatch, role="super_admin")
+    assert result == user_id
+
+
+def test_a_super_admin_with_a_stale_partner_account_passes(monkeypatch):
+    """Sentry on api#646: a super admin who once built themes has a legacy
+    partner row, and must not be locked out by it."""
+    legacy = SimpleNamespace(
+        status="approved", agreement_version="legacy-theme-developer"
+    )
+    user_id, result = _gate(legacy, monkeypatch, role="SUPER_ADMIN")
     assert result == user_id
 
 
