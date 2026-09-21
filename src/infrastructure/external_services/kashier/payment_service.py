@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+from urllib.parse import quote
 
 import httpx
 
@@ -247,12 +248,18 @@ class KashierPaymentService(IPaymentService):
     ) -> dict | None:
         """Verify Kashier webhook signature using HMAC SHA256.
 
-        From Kashier docs:
-        1. Sort signatureKeys array alphabetically
-        2. Extract matching fields from data object
-        3. Create query string using those key-value pairs
-        4. Generate HMAC-SHA256 using Payment API key
-        5. Compare with x-kashier-signature header
+        Kashier's reference signer (developers.kashier.io/docs/webhooks) is
+        `queryString.stringify(_.pick(data, data.signatureKeys.sort()))` from
+        the npm `query-string` package, HMAC-SHA256'd with the Payment API
+        key. So: `signatureKeys` lives inside `data`; keys are sorted; values
+        are RFC 3986 percent-encoded (a space is %20); a listed key missing
+        from `data` is skipped and a null value is a bare key.
+
+        This used to read `signatureKeys` from the top level (never there)
+        and fall back to the *redirect* signature format, so no genuine
+        webhook ever verified. That fallback is gone on purpose: the shopper
+        sees redirect signatures in the browser, and a verifier that accepts
+        them lets a failed payment's redirect be replayed as a webhook.
         """
         if not self._api_key:
             logger.error("kashier_webhook_no_api_key")
@@ -264,29 +271,23 @@ class KashierPaymentService(IPaymentService):
             logger.warning("kashier_webhook_invalid_json")
             return None
 
-        data = raw.get("data") or raw
-        signature_keys = raw.get("signatureKeys") or []
+        data = (raw.get("data") or raw) if isinstance(raw, dict) else {}
+        signature_keys = data.get("signatureKeys") if isinstance(data, dict) else None
+        if not signature_keys or not isinstance(signature_keys, list):
+            logger.warning("kashier_webhook_no_signature_keys")
+            return None
 
-        if signature_keys:
-            # Use signatureKeys from payload (new format)
-            sorted_keys = sorted(signature_keys)
-            parts = [f"{key}={data.get(key, '')}" for key in sorted_keys]
-            final_string = "&".join(parts)
-        else:
-            # Fallback: legacy hardcoded field order
-            parts = [
-                f"paymentStatus={data.get('paymentStatus', '')}",
-                f"cardDataToken={data.get('cardDataToken', '')}",
-                f"maskedCard={data.get('maskedCard', '')}",
-                f"merchantOrderId={data.get('merchantOrderId', '')}",
-                f"orderId={data.get('orderId', '')}",
-                f"cardBrand={data.get('cardBrand', '')}",
-                f"orderReference={data.get('orderReference', '')}",
-                f"transactionId={data.get('transactionId', '')}",
-                f"amount={data.get('amount', '')}",
-                f"currency={data.get('currency', '')}",
-            ]
-            final_string = "&".join(parts)
+        def _pair(key: str) -> str:
+            value = data[key]
+            if value is None:
+                return quote(str(key), safe="")
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            return f"{quote(str(key), safe='')}={quote(str(value), safe='')}"
+
+        final_string = "&".join(
+            _pair(key) for key in sorted(signature_keys) if key in data
+        )
 
         calculated_sig = hmac.new(
             self._api_key.encode("utf-8"),
