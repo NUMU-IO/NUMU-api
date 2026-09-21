@@ -74,6 +74,17 @@ _PAYMENT_METHOD_LABELS = {
     "instapay": "InstaPay",
     "bank_transfer": "Bank Transfer",
 }
+# The invoice is Arabic-first; the method prints in both languages.
+_PAYMENT_METHOD_LABELS_AR = {
+    "cod": "الدفع عند الاستلام",
+    "cash_on_delivery": "الدفع عند الاستلام",
+    "paymob": "Paymob",
+    "paymob_card": "بطاقة بنكية",
+    "paymob_wallet": "محفظة إلكترونية",
+    "fawry": "فوري",
+    "instapay": "إنستاباي",
+    "bank_transfer": "تحويل بنكي",
+}
 
 
 async def _resolve_payment_context(
@@ -111,13 +122,16 @@ async def _resolve_payment_context(
         order, "deposit_gateway", None
     )
     method_label = None
+    method_label_ar = None
     if raw_method:
         key = str(raw_method).lower().strip()
         method_label = _PAYMENT_METHOD_LABELS.get(key, key.replace("_", " ").title())
+        method_label_ar = _PAYMENT_METHOD_LABELS_AR.get(key)
 
     return {
         "status": raw_status,  # generator normalizes to a CSS-class key
         "method": method_label,
+        "method_ar": method_label_ar,
         "paid_at": paid_at_str,
     }
 
@@ -549,6 +563,7 @@ async def download_invoice_pdf(
     generator = InvoicePDFGenerator(
         template_name="invoice_ar.html",
         language="ar_en",
+        store_logo_url=getattr(store, "logo_url", None),
     )
     pdf_bytes = await asyncio.to_thread(generator.generate, invoice, payment_ctx)
 
