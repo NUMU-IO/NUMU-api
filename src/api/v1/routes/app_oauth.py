@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
-from src.application.services.app_manifest import APP_LIFECYCLE_EVENTS
+from src.application.services.app_manifest import app_subscriptions
 from src.application.services.app_tokens import (
     APP_TOKEN_PREFIX,
     mint,
@@ -360,17 +360,16 @@ async def token(body: TokenRequest, db: Annotated[AsyncSession, Depends(get_db)]
     installation.status = "active"
     installation.granted_scopes = code.scopes
 
-    # The manifest's subscriptions, owned by this installation. Lifecycle
-    # events are delivered directly (app_webhooks) and need none.
+    # The manifest's subscriptions, owned by this installation, limited to
+    # the events whose read scope the merchant granted.
     await db.execute(
         WebhookSubscriptionModel.__table__.delete().where(
             WebhookSubscriptionModel.app_installation_id == installation.id
         )
     )
-    by_url: dict[str, list[str]] = {}
-    for hook in ((app.manifest or {}).get("app") or {}).get("webhooks") or []:
-        if hook["event"] not in APP_LIFECYCLE_EVENTS:
-            by_url.setdefault(hook["url"], []).append(hook["event"])
+    by_url = app_subscriptions(
+        ((app.manifest or {}).get("app") or {}).get("webhooks") or [], code.scopes
+    )
     for url, events in by_url.items():
         db.add(
             WebhookSubscriptionModel(

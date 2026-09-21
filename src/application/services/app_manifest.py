@@ -46,15 +46,58 @@ APP_WEBHOOK_EVENTS = frozenset(e.value for e in SUBSCRIBABLE_EVENT_TYPES) | {
 APP_LIFECYCLE_EVENTS = frozenset({"app.uninstalled", "store.redact"})
 
 #: Scopes an app may request (plan 03 § 5):
-#: - the PAT scope strings, minus ``*`` (a PAT convenience, never an app grant)
-#:   and ``themes:write`` (publishing changes a live storefront);
+#: - the PAT scope strings, minus ``*`` (a PAT convenience, never an app
+#:   grant), ``themes:write`` (publishing changes a live storefront),
+#:   ``risk:write`` (``risk`` is read-only for apps) and both ``settings``
+#:   scopes. ``settings`` is one domain for payment-gateway credentials,
+#:   payment proofs, billing, invoices, storefront publishing and the store's
+#:   other app installations, which plan 03 § 5 makes never grantable. Add a
+#:   narrower scope (e.g. shipping zones) when an app needs one;
 #: - plus ``messages``, which alone reaches customer conversations (threads,
 #:   messages, channels, WhatsApp) for app tokens. A PAT reaches those with
 #:   ``marketing``, unchanged.
-APP_SCOPES = (frozenset(VALID_SCOPES) - {"*", "themes:write"}) | {
-    "messages:read",
-    "messages:write",
+APP_SCOPES = (
+    frozenset(VALID_SCOPES)
+    - {"*", "themes:write", "risk:write", "settings:read", "settings:write"}
+) | {"messages:read", "messages:write"}
+
+#: The read scope an app needs to receive each event: an order event carries
+#: the shopper's name, phone and address. Built from every subscribable event,
+#: so a new event domain fails here at import instead of reaching apps unscoped.
+_EVENT_DOMAIN_SCOPES = {"order": "orders:read", "product": "catalog:read"}
+EVENT_SCOPES = {
+    e.value: _EVENT_DOMAIN_SCOPES[e.value.split(".", 1)[0]]
+    for e in SUBSCRIBABLE_EVENT_TYPES
 }
+
+#: Scopes that reach personal data about identifiable shoppers, so the app
+#: must publish a privacy policy (every ``:write`` scope needs one too).
+PERSONAL_DATA_SCOPES = frozenset({
+    "customers:read",
+    "orders:read",
+    "risk:read",
+    "messages:read",
+})
+
+
+def app_subscriptions(
+    webhooks: list[dict[str, str]], granted: list[str] | None
+) -> dict[str, list[str]]:
+    """The subscriptions an installation gets: ``{url: sorted events}``.
+
+    Lifecycle events are delivered directly (app_webhooks) and need none. An
+    event is subscribed only when its read scope was granted: an app the
+    merchant didn't let read orders must not receive them as webhooks either.
+    """
+    by_url: dict[str, set[str]] = {}
+    for hook in webhooks:
+        event = hook["event"]
+        if event not in APP_LIFECYCLE_EVENTS and EVENT_SCOPES.get(event) in (
+            granted or []
+        ):
+            by_url.setdefault(hook["url"], set()).add(event)
+    return {url: sorted(events) for url, events in by_url.items()}
+
 
 CATEGORIES = (
     "shipping",
@@ -284,12 +327,20 @@ class ManifestV1(_Strict):
         if not any(w.event == "app.uninstalled" for w in self.webhooks):
             raise ValueError("webhooks must include app.uninstalled")
         requested = set(self.oauth.scopes) | set(self.oauth.optional_scopes)
+        unscoped = sorted({
+            f"{w.event} needs {EVENT_SCOPES[w.event]}"
+            for w in self.webhooks
+            if w.event in EVENT_SCOPES and EVENT_SCOPES[w.event] not in requested
+        })
+        if unscoped:
+            raise ValueError(f"webhook events need a scope: {'; '.join(unscoped)}")
         sensitive = any(s.endswith(":write") for s in requested) or bool(
-            requested & {"customers:read", "messages:read"}
+            requested & PERSONAL_DATA_SCOPES
         )
         if sensitive and not self.developer.privacy_policy_url:
             raise ValueError(
-                "developer.privacy_policy_url is required for any :write scope, customers:read or messages:read"
+                "developer.privacy_policy_url is required for any :write scope and for "
+                + ", ".join(sorted(PERSONAL_DATA_SCOPES))
             )
         if self.pricing.model == "external" and not self.pricing.label:
             raise ValueError("pricing.label is required for an external price")

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from src.api.v1.routes.stores.apps import _listing
 from src.application.services.app_manifest import (
     ManifestV1,
+    app_subscriptions,
     change_type,
     semver_key,
     to_listing_manifest,
@@ -106,6 +107,10 @@ def test_the_example_manifest_is_valid():
         ({"app_url": "https://shop.localhost/numu"}, "public host"),
         ({"oauth__scopes": ["orders:read", "*"]}, "unknown scopes"),
         ({"oauth__scopes": ["orders:delete"]}, "unknown scopes"),
+        ({"oauth__scopes": ["orders:read", "settings:read"]}, "unknown scopes"),
+        ({"oauth__scopes": ["orders:read", "settings:write"]}, "unknown scopes"),
+        ({"oauth__scopes": ["orders:read", "risk:write"]}, "unknown scopes"),
+        ({"oauth__scopes": ["catalog:read"]}, "order.paid needs orders:read"),
         (
             {"webhooks": [{"event": "order.paid", "url": "https://a.example.com"}]},
             "app.uninstalled",
@@ -163,9 +168,16 @@ def test_each_rule_rejects(changes, message):
     assert message in str(exc.value)
 
 
-def test_customers_read_alone_needs_a_privacy_policy():
+UNINSTALL_ONLY = [{"event": "app.uninstalled", "url": "https://app.example.com/h"}]
+
+
+@pytest.mark.parametrize(
+    "scope", ["customers:read", "orders:read", "risk:read", "messages:read"]
+)
+def test_personal_data_read_scopes_need_a_privacy_policy(scope):
     m = bad(**{
-        "oauth__scopes": ["customers:read"],
+        "oauth__scopes": [scope],
+        "webhooks": UNINSTALL_ONLY,
         "developer__privacy_policy_url": DELETE,
     })
     with pytest.raises(ValidationError, match="privacy_policy_url"):
@@ -176,7 +188,21 @@ def test_a_read_only_app_needs_no_privacy_policy():
     ManifestV1.model_validate(
         bad(**{
             "oauth__scopes": ["catalog:read"],
+            "webhooks": [
+                {"event": "product.updated", "url": "https://app.example.com/h"},
+                *UNINSTALL_ONLY,
+            ],
             "developer__privacy_policy_url": DELETE,
+        })
+    )
+
+
+def test_an_event_scope_may_be_optional():
+    """The subscription is only made if the merchant grants it (token exchange)."""
+    ManifestV1.model_validate(
+        bad(**{
+            "oauth__scopes": ["catalog:read"],
+            "oauth__optional_scopes": ["orders:read"],
         })
     )
 
@@ -224,3 +250,24 @@ def test_settings_validation():
     assert set(errors) == {"auto_sync", "mode", "extra"}
     # First-party apps keep their legacy keys.
     assert validate_settings({"legacy": 1}, schema, strict_keys=False) == {}
+
+
+def test_an_install_only_subscribes_to_events_it_was_granted():
+    """Webhooks are data too: without orders:read, no order events."""
+    hooks = [
+        {"event": "order.paid", "url": "https://a.example.com/h"},
+        {"event": "order.created", "url": "https://a.example.com/h"},
+        {"event": "product.updated", "url": "https://b.example.com/h"},
+        {"event": "app.uninstalled", "url": "https://a.example.com/h"},
+        {"event": "store.redact", "url": "https://a.example.com/h"},
+    ]
+    assert app_subscriptions(hooks, ["catalog:read"]) == {
+        "https://b.example.com/h": ["product.updated"]
+    }
+    assert app_subscriptions(hooks, ["orders:read", "catalog:read"]) == {
+        "https://a.example.com/h": ["order.created", "order.paid"],
+        "https://b.example.com/h": ["product.updated"],
+    }
+    # orders:write alone doesn't read orders, so it doesn't receive them.
+    assert app_subscriptions(hooks, ["orders:write"]) == {}
+    assert app_subscriptions(hooks, None) == {}
