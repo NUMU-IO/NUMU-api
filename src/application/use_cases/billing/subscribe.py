@@ -66,6 +66,10 @@ class SubscribeUseCase:
         tenant = await self.tenant_repo.get_by_id(tenant_id)
         if not tenant:
             raise ValueError("Tenant not found")
+        if tenant.plan == "developer":
+            # A partner's development store is never live; any plan, payg
+            # included, would switch it on.
+            raise ValueError("A development store cannot subscribe to a plan.")
 
         if tenant.lifecycle_state == TenantLifecycleState.ACTIVE and plan != "payg":
             logger.info(

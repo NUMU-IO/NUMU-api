@@ -123,6 +123,27 @@ PLAN_LIMITS: dict[str, PlanFeatures] = {
         monthly_price_piasters=49_900,  # ج.م 499
         annual_price_piasters=499_000,  # ج.م 4,990 (10 months for the price of 12)
     ),
+    # ─── Development store: a partner's test store (apps plan, Phase 2) ───
+    # Pro features so a partner can test everything an app might touch, API
+    # access included (#622). Free, and never live: checkout refuses real
+    # orders and the storefront is noindex. max_stores=0 so a partner's dev
+    # store never raises their merchant store limit; dev stores have their
+    # own cap in the partner routes.
+    "developer": PlanFeatures(
+        display_name="Development store",
+        max_products=-1,
+        max_orders_per_month=-1,
+        max_stores=0,
+        max_staff_members=3,
+        max_customers=-1,
+        webhooks_enabled=True,
+        custom_domain_enabled=False,
+        api_access_enabled=True,
+        analytics_enabled=True,
+        discount_codes_enabled=True,
+        monthly_price_piasters=0,
+        annual_price_piasters=0,
+    ),
     "enterprise": PlanFeatures(
         display_name="Enterprise",
         max_products=-1,

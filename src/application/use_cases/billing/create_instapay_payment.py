@@ -83,6 +83,13 @@ class CreateSubscriptionPaymentIntentUseCase:
             build_qr_payload,
         )
 
+        if tenant.plan == "developer":
+            # A partner's development store is never live; paying for a plan
+            # would switch it on.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A development store cannot subscribe to a plan.",
+            )
         if plan not in INSTAPAY_PAYABLE_PLANS:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from src.api.dependencies import get_current_user_id
+from src.api.dependencies.partners import require_approved_partner
 from src.api.dependencies.repositories import get_marketplace_repository
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.marketplace import (
@@ -31,9 +32,10 @@ from src.infrastructure.repositories.marketplace_repository import (
 router = APIRouter(
     prefix="/marketplace/developer",
     tags=["Marketplace Developer"],
-    # Every route below requires an authenticated caller. The service
+    # Every route below requires an approved partner (or a super admin);
+    # existing theme developers were backfilled as approved. The service
     # layer additionally enforces ownership of the referenced theme.
-    dependencies=[Depends(get_current_user_id)],
+    dependencies=[Depends(require_approved_partner)],
 )
 
 

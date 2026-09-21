@@ -38,6 +38,8 @@ _PLAN_RANK: dict[str, int] = {
     "payg": 1,
     "starter": 1,
     "pro": 2,
+    # A partner's dev store tests what Pro merchants get.
+    "developer": 2,
     "enterprise": 3,
 }
 

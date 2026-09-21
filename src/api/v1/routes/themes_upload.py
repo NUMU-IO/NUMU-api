@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from pydantic import BaseModel
 
 from src.api.dependencies.auth import get_current_user_id
+from src.api.dependencies.partners import require_approved_partner
 from src.api.responses import SuccessResponse
 from src.infrastructure.cache import RedisCacheService
 from src.infrastructure.cache.theme_build_store import get_theme_build_store
@@ -102,7 +103,10 @@ async def upload_theme_zip(
             "its own marketplace build pipeline."
         ),
     ),
-    current_user_id: UUID = Depends(get_current_user_id),
+    # Approved partners (and super admins) only: this accepted any logged-in
+    # user before, which let anyone queue a Docker build. Existing theme
+    # developers were backfilled as approved partners.
+    current_user_id: UUID = Depends(require_approved_partner),
 ) -> SuccessResponse[ThemeUploadResponse]:
     """Accept a theme ZIP, optionally queue a build, return paths for polling.
 
