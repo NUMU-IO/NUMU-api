@@ -90,3 +90,45 @@ def test_a_failed_top_up_releases_its_nonce_for_the_retry(cache):
         )
     assert cache.taken == ["kashier:platform:processed:tx-9"]
     assert cache.released == ["kashier:platform:processed:tx-9"]
+
+
+def test_a_failed_release_never_masks_the_original_error(cache, monkeypatch):
+    """Sentry on #653: Redis may refuse the delete. The original error must
+    still propagate (so Kashier retries), and the failure is logged."""
+    logged = []
+
+    async def refuse(_key):
+        return False
+
+    class _Log:
+        def bind(self, **_kw):
+            return self
+
+        def info(self, *_a, **_kw):
+            pass
+
+        def warning(self, *_a, **_kw):
+            pass
+
+        def error(self, event, **kw):
+            logged.append((event, kw))
+
+    monkeypatch.setattr(hook._cache_service, "delete", refuse)
+    monkeypatch.setattr(hook, "logger", _Log())
+    raw, sig = _signed({
+        "merchantOrderId": "WTOP-1",
+        "transactionId": "tx-9",
+        "status": "SUCCESS",
+    })
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            hook.kashier_platform_callback(
+                _Request(raw), db=_BrokenDb(), x_kashier_signature=sig
+            )
+        )
+    assert logged == [
+        (
+            "kashier_nonce_release_failed",
+            {"nonce_key": "kashier:platform:processed:tx-9"},
+        )
+    ]
