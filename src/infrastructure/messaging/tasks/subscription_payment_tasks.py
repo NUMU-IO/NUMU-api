@@ -143,6 +143,7 @@ async def _collect_warning_targets(session, cfg, now):  # noqa: ANN001
     no_token_ids = [t.id for t in renewal_rows if not t.paymob_card_token_encrypted]
     instapay_payers: set = set()
     if no_token_ids:
+        from src.core.entities.subscription_payment import PLAN_PURPOSES
         from src.infrastructure.database.models.public.subscription_payment import (
             SubscriptionPaymentIntentModel,
         )
@@ -153,6 +154,9 @@ async def _collect_warning_targets(session, cfg, now):  # noqa: ANN001
                 .where(
                     SubscriptionPaymentIntentModel.tenant_id.in_(no_token_ids),
                     SubscriptionPaymentIntentModel.status == "succeeded",
+                    # A WhatsApp add-on payment is not a plan payment: the
+                    # renewal sweep would skip this tenant, so don't email it.
+                    SubscriptionPaymentIntentModel.purpose.in_(PLAN_PURPOSES),
                 )
                 .distinct()
             )
