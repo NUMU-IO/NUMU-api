@@ -121,6 +121,9 @@ class CatalogRow(BaseModel):
     listing_flags: dict[str, Any]
     installs_active: int
     installs_total: int
+    #: The listing's price block (``plan``, localized label, and for
+    #: ``recurring`` ``price_cents`` / ``cycle`` / ``currency``).
+    pricing: dict[str, Any] | None = None
 
 
 class ListingFlags(BaseModel):
@@ -314,6 +317,7 @@ async def catalog(db: Annotated[AsyncSession, Depends(get_db)]):
                 listing_flags=a.listing_flags or {},
                 installs_active=active,
                 installs_total=total,
+                pricing=(a.manifest or {}).get("pricing"),
             )
         )
     return SuccessResponse(data=rows)

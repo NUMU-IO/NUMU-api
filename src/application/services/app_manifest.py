@@ -264,6 +264,11 @@ class Pricing(_Strict):
         return self
 
 
+#: DESIGN.md § 5: Arabic amounts use Arabic-Indic digits and separators,
+#: exactly as ``(1250).toLocaleString("ar-EG")`` writes them (``١٬٢٥٠``).
+_AR_DIGITS = str.maketrans("0123456789,.", "٠١٢٣٤٥٦٧٨٩٬٫")
+
+
 def price_label(pricing: dict[str, Any]) -> dict[str, str] | None:
     """The listing's price text in both languages."""
     if pricing.get("label"):
@@ -274,7 +279,7 @@ def price_label(pricing: dict[str, Any]) -> dict[str, str] | None:
         amount = f"{pricing['price_cents'] / 100:,.2f}".removesuffix(".00")
         cycle = CYCLE_LABELS[pricing["cycle"]]
         return {
-            "ar": f"{amount} ج.م {cycle['ar']}",
+            "ar": f"{amount.translate(_AR_DIGITS)} ج.م {cycle['ar']}",
             "en": f"EGP {amount} {cycle['en']}",
         }
     return None

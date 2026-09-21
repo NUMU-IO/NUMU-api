@@ -393,6 +393,19 @@ async def _credit_partner(
     return entry
 
 
+async def app_labels(
+    db: AsyncSession, app_ids: list[UUID | None]
+) -> dict[UUID, dict[str, str]]:
+    """``{app_id: {"name", "slug"}}`` for ledger rows, which store only the id."""
+    ids = {i for i in app_ids if i}
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(AppModel.id, AppModel.name, AppModel.slug).where(AppModel.id.in_(ids))
+    )
+    return {r.id: {"name": r.name, "slug": r.slug} for r in rows}
+
+
 async def partner_balance(db: AsyncSession, partner_id: UUID) -> int:
     """What NUMU owes this partner right now, in piasters."""
     return int(
@@ -488,8 +501,8 @@ async def record_payout(
     payable = await partner_payable(db, partner_id, now=now)
     if amount_cents > payable:
         raise ValueError(
-            f"{payable} is payable now (sales stay on hold for 30 days); "
-            "a payout can't exceed it."
+            f"EGP {payable / 100:,.2f} is payable now (sales stay on hold for "
+            "30 days); a payout can't exceed it."
         )
     entry = PartnerLedgerEntryModel(
         partner_id=partner_id,
