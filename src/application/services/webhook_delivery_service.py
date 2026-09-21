@@ -163,10 +163,11 @@ async def signing_secret(session, sub) -> str | None:
 
     Also None, so the delivery is skipped, when the app may not receive
     merchant data right now: the app is suspended, its install is disabled or
-    mid-consent, or the Partner-apps kill switch is off. Its tokens already
-    stop at those moments (app_tokens.resolve_app_token). Without this its
-    webhooks kept delivering orders and customers to an app NUMU had just
-    suspended.
+    mid-consent, the Partner-apps kill switch is off, or it is a paid app the
+    store's subscription no longer covers. Its tokens already stop at those
+    moments (app_tokens.resolve_app_token; the subscription in auth). Without
+    this its webhooks kept delivering orders and customers to an app NUMU had
+    just suspended.
     """
     if not getattr(sub, "app_installation_id", None):
         return sub.secret
@@ -195,6 +196,10 @@ async def signing_secret(session, sub) -> str | None:
         return None
     if app.developer_id is not None and not await partner_apps_enabled(session):
         return None
+    from src.application.services.app_billing import is_entitled
+
+    if not await is_entitled(session, installation, app):
+        return None  # a paid app whose subscription has lapsed
     return await read_client_secret(session, installation.app_id)
 
 

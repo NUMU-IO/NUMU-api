@@ -381,3 +381,69 @@ async def seed_dev_store(
     store.settings = {**(store.settings or {}), "partner_seeded": True}
     await db.flush()
     return SuccessResponse(data=_dev_store(store), message="Sample data added")
+
+
+# ─── Earnings (paid apps, Phase 7) ────────────────────────────────
+
+
+@router.get(
+    "/me/earnings",
+    response_model=SuccessResponse[dict],
+    operation_id="get_partner_earnings",
+)
+async def earnings(
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """What NUMU owes you: your 80% of every paid-app charge, minus payouts
+    already sent to your bank account. Payouts are manual bank transfers."""
+    from src.application.services.app_billing import (
+        partner_balance,
+        partner_payable,
+    )
+    from src.infrastructure.database.models.public.app_billing import (
+        PartnerLedgerEntryModel,
+    )
+
+    account = await partner_for_user(db, user_id)
+    if account is None:  # a super admin without a partner account
+        return SuccessResponse(
+            data={
+                "balance_cents": 0,
+                "payable_cents": 0,
+                "currency": "EGP",
+                "entries": [],
+            }
+        )
+    rows = (
+        (
+            await db.execute(
+                select(PartnerLedgerEntryModel)
+                .where(PartnerLedgerEntryModel.partner_id == account.id)
+                .order_by(PartnerLedgerEntryModel.created_at.desc())
+                .limit(100)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return SuccessResponse(
+        data={
+            "balance_cents": await partner_balance(db, account.id),
+            #: Sales become payable 30 days after NUMU collects them.
+            "payable_cents": await partner_payable(db, account.id),
+            "currency": "EGP",
+            "entries": [
+                {
+                    "kind": e.kind,
+                    "amount_cents": e.amount_cents,
+                    "gross_cents": e.gross_cents,
+                    "platform_fee_cents": e.platform_fee_cents,
+                    "app_id": str(e.app_id) if e.app_id else None,
+                    "reference": e.reference,
+                    "created_at": e.created_at,
+                }
+                for e in rows
+            ],
+        }
+    )

@@ -46,7 +46,14 @@ def test_admin_partner_decisions_need_2fa():
         for r in _routes("/api/v1/admin/partners")
         if r.methods & {"POST", "PUT", "PATCH", "DELETE"}
     ]
-    assert len(writes) == 3  # program, decision, suspension
+    assert {r.name for r in writes} == {
+        "put_program",
+        "put_partner_billing",
+        "decide",
+        "suspend",
+        "payout",
+        "adjustment",
+    }
     for route in writes:
         assert "require_admin_2fa.<locals>._check" in _names(route.dependant), (
             route.path

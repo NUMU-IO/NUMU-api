@@ -221,6 +221,19 @@ def _validated(raw: dict[str, Any]) -> ManifestV1:
         )
 
 
+async def _check_pricing(db: AsyncSession, model: str) -> None:
+    """Partner Agreement § 11.1: until NUMU billing for Partner Apps is live, a
+    Partner App is ``free`` or ``external`` (partner_program.BILLING_KEY)."""
+    from src.application.services.partner_program import partner_billing_enabled
+
+    if model == "recurring" and not await partner_billing_enabled(db):
+        raise HTTPException(
+            status_code=422,
+            detail="pricing.model: recurring is not available yet, because NUMU "
+            "billing for Partner Apps is not live. Use free or external.",
+        )
+
+
 def _conflict(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
@@ -307,10 +320,12 @@ class ValidateRequest(BaseModel):
 async def validate_manifest(
     body: ValidateRequest,
     user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Dry run: the exact rules an upload applies, with nothing stored.
     ``numu app validate`` calls this, so the CLI never drifts from the API."""
     m = _validated(body.manifest)
+    await _check_pricing(db, m.pricing.model)
     return SuccessResponse(
         data={"valid": True, "slug": m.slug, "version": m.version},
         message="numu.app.json is valid",
@@ -369,6 +384,7 @@ async def upload_version(
     """Validate a ``numu.app.json`` and store it as a draft version."""
     app = await _own_app(db, user_id, app_id)
     manifest = _validated(body.manifest)
+    await _check_pricing(db, manifest.pricing.model)
     if manifest.slug != app.slug:
         raise HTTPException(
             status_code=422, detail=f"manifest slug must be {app.slug!r}"
@@ -484,6 +500,8 @@ async def publish_version(
     v = await _version(db, app, version_id)
     if v.status != "approved":
         raise _conflict("only an approved version can be published")
+    # Approved while billing was live, and it was switched off since.
+    await _check_pricing(db, (v.manifest.get("pricing") or {}).get("model", "free"))
     if app.status == AppStatus.PUBLISHED and semver_key(v.version) <= semver_key(
         app.version
     ):

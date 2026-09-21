@@ -451,6 +451,19 @@ async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
                 detail="Access token is not valid for this store",
             )
 
+        from src.application.services.app_billing import is_entitled
+
+        if not await is_entitled(session, installation, principal.app):
+            # A paid app the store's subscription no longer covers. Distinct
+            # from a dead token: the install is fine, the merchant must pay.
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "code": "subscription_inactive",
+                    "message": "The store's subscription to this app is not active.",
+                },
+            )
+
         path = request.url.path
         parts = [p for p in path.split("/") if p]
         if (

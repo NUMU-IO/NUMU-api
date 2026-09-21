@@ -230,11 +230,54 @@ class Webhook(_Strict):
         return _https(v)
 
 
+CYCLE_LABELS = {
+    "monthly": {"ar": "في الشهر", "en": "/ month"},
+    "annual": {"ar": "في السنة", "en": "/ year"},
+}
+
+
 class Pricing(_Strict):
-    #: recurring / one_time arrive with NUMU billing (Phase 7).
-    model: Literal["free", "external"]
+    """``free``; ``external`` (the partner bills the merchant themselves); or
+    ``recurring``: NUMU charges the merchant's wallet every cycle and pays the
+    partner 80% (app_billing). ``one_time`` is not offered."""
+
+    model: Literal["free", "external", "recurring"]
     #: For ``external``: what the merchant will be charged, shown on the listing.
+    #: For ``recurring`` it defaults to the price and cycle.
     label: Bilingual | None = None
+    #: ``recurring`` only, in piasters: EGP 5 to EGP 100,000 a cycle.
+    price_cents: int | None = Field(default=None, ge=500, le=10_000_000)
+    cycle: Literal["monthly", "annual"] | None = None
+    currency: Literal["EGP"] = "EGP"
+
+    @model_validator(mode="after")
+    def _recurring_has_a_price(self):
+        priced = self.price_cents is not None or self.cycle is not None
+        if self.model == "recurring" and (self.price_cents is None or not self.cycle):
+            raise ValueError(
+                "pricing.price_cents and pricing.cycle are required for recurring"
+            )
+        if self.model != "recurring" and priced:
+            raise ValueError(
+                "pricing.price_cents and pricing.cycle are for recurring only"
+            )
+        return self
+
+
+def price_label(pricing: dict[str, Any]) -> dict[str, str] | None:
+    """The listing's price text in both languages."""
+    if pricing.get("label"):
+        return pricing["label"]
+    if pricing["model"] == "free":
+        return {"ar": "مجاني", "en": "Free"}
+    if pricing["model"] == "recurring":
+        amount = f"{pricing['price_cents'] / 100:,.2f}".removesuffix(".00")
+        cycle = CYCLE_LABELS[pricing["cycle"]]
+        return {
+            "ar": f"{amount} ج.م {cycle['ar']}",
+            "en": f"EGP {amount} {cycle['en']}",
+        }
+    return None
 
 
 class ManifestV1(_Strict):
@@ -367,22 +410,23 @@ def _scopes(m: dict[str, Any]) -> set[str]:
 
 
 def change_type(new: dict[str, Any], published: dict[str, Any] | None) -> str:
-    """What a reviewer must look at hardest: new_app > new_scopes > urls > listing_only."""
+    """What a reviewer must look at hardest:
+    new_app > new_scopes > urls > pricing > listing_only."""
     if published is None:
         return "new_app"
     if _scopes(new) - _scopes(published):
         return "new_scopes"
     if _urls(new) != _urls(published):
         return "urls"
+    if (new.get("pricing") or {}) != (published.get("pricing") or {}):
+        return "pricing"
     return "listing_only"
 
 
 def to_listing_manifest(m: dict[str, Any], *, developer_name: str) -> dict[str, Any]:
     """A validated v1 manifest in the shape ``apps.manifest`` readers use."""
     pricing = m["pricing"]
-    price_label = pricing.get("label") or (
-        {"ar": "مجاني", "en": "Free"} if pricing["model"] == "free" else None
-    )
+    label = price_label(pricing)
     dev = m["developer"]
     return {
         "version": m["version"],
@@ -412,9 +456,15 @@ def to_listing_manifest(m: dict[str, Any], *, developer_name: str) -> dict[str, 
         "features": [],
         "pricing": {
             "plan": pricing["model"],
-            "locales": {lang: {"label": price_label[lang]} for lang in ("ar", "en")}
-            if price_label
+            "locales": {lang: {"label": label[lang]} for lang in ("ar", "en")}
+            if label
             else {},
+            # app_billing reads these for a recurring price.
+            **{
+                k: pricing[k]
+                for k in ("price_cents", "cycle", "currency")
+                if pricing["model"] == "recurring"
+            },
         },
         "languages": m.get("languages") or ["ar", "en"],
         "settings_schema": m.get("settings_schema") or [],
