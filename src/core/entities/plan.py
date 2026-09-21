@@ -53,6 +53,10 @@ class PlanFeatures:
     # Display
     display_name: str
 
+    # How many Partner Apps a store on this plan may install (-1 = no cap).
+    # NUMU Apps never count. Enforced at consent (app_oauth.approve).
+    max_partner_apps: int = -1
+
     # Per-paid-order commission in basis points (100 bps = 1%), debited
     # from the tenant's prepaid wallet. Only payg is nonzero; a per-tenant
     # negotiated rate lives in merchant_wallets.commission_bps_override.

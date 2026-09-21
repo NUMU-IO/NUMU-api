@@ -160,6 +160,47 @@ async def put_program(
     return SuccessResponse(data=body)
 
 
+# ─── NUMU billing for Partner Apps (Partner Agreement § 11.1) ─────
+
+
+@router.get("/billing", response_model=SuccessResponse[ProgramState])
+async def get_partner_billing(db: Annotated[AsyncSession, Depends(get_db)]):
+    from src.application.services.partner_program import partner_billing_enabled
+
+    return SuccessResponse(data=ProgramState(enabled=await partner_billing_enabled(db)))
+
+
+@router.put(
+    "/billing", response_model=SuccessResponse[ProgramState], dependencies=_STEP_UP
+)
+async def put_partner_billing(
+    body: ProgramState,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Allow ``recurring`` Partner Apps. Turn on only after counsel signs off
+    and NUMU announces in writing that NUMU billing is live (Partner
+    Agreement § 11.1). Off: partners may upload and publish only ``free`` or
+    ``external`` apps; existing subscriptions keep renewing."""
+    from src.application.services.partner_program import (
+        partner_billing_enabled,
+        set_partner_billing_enabled,
+    )
+
+    old = await partner_billing_enabled(db)
+    await set_partner_billing_enabled(db, body.enabled)
+    await AuditService(db).log(
+        event_type="admin.config_change",
+        action="partner_billing_on" if body.enabled else "partner_billing_off",
+        resource_type="platform_config",
+        resource_id="partner_billing",
+        user_id=admin_id,
+        old_value={"enabled": old},
+        new_value={"enabled": body.enabled},
+    )
+    return SuccessResponse(data=body)
+
+
 # ─── Queue ────────────────────────────────────────────────────────
 
 
@@ -257,3 +298,166 @@ async def suspend(
     )
     await db.flush()
     return SuccessResponse(data=await _admin_view(db, a))
+
+
+# ─── Earnings (paid apps, Phase 7) ────────────────────────────────
+
+
+class AdjustmentRequest(BaseModel):
+    #: Signed piasters: negative reverses a refunded charge's share.
+    amount_cents: int
+    #: Unique per adjustment, e.g. the refund's reference.
+    reference: str = Field(min_length=3, max_length=128)
+    note: str = Field(min_length=3, max_length=500)
+
+
+class PayoutRequest(BaseModel):
+    #: Piasters already transferred to the partner's bank account.
+    amount_cents: int = Field(gt=0)
+    #: The bank transfer reference, unique per payout.
+    reference: str = Field(min_length=3, max_length=128)
+    note: str | None = Field(default=None, max_length=500)
+
+
+def _entry_out(e) -> dict:
+    return {
+        "id": str(e.id),
+        "kind": e.kind,
+        "amount_cents": e.amount_cents,
+        "gross_cents": e.gross_cents,
+        "platform_fee_cents": e.platform_fee_cents,
+        "currency": e.currency,
+        "app_id": str(e.app_id) if e.app_id else None,
+        "reference": e.reference,
+        "note": e.note,
+        "created_at": e.created_at,
+    }
+
+
+@router.get("/{partner_id}/ledger", response_model=SuccessResponse[dict])
+async def ledger(
+    partner_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+):
+    """What NUMU owes this partner (the sum of every entry) and the latest
+    entries: sales at the partner's 80% share, and payouts."""
+    from src.application.services.app_billing import (
+        partner_balance,
+        partner_payable,
+    )
+    from src.infrastructure.database.models.public.app_billing import (
+        PartnerLedgerEntryModel,
+    )
+
+    await _load(db, partner_id)
+    rows = (
+        (
+            await db.execute(
+                select(PartnerLedgerEntryModel)
+                .where(PartnerLedgerEntryModel.partner_id == partner_id)
+                .order_by(PartnerLedgerEntryModel.created_at.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return SuccessResponse(
+        data={
+            "balance_cents": await partner_balance(db, partner_id),
+            "payable_cents": await partner_payable(db, partner_id),
+            "currency": "EGP",
+            "entries": [_entry_out(e) for e in rows],
+        }
+    )
+
+
+@router.post(
+    "/{partner_id}/payouts",
+    response_model=SuccessResponse[dict],
+    dependencies=_STEP_UP,
+)
+async def payout(
+    partner_id: UUID,
+    body: PayoutRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Record a bank transfer ALREADY SENT to the partner. NUMU moves no money
+    here; this keeps the balance true. Refuses more than is payable (sales
+    stay on hold for 30 days) and a transfer reference already recorded."""
+    from src.application.services.app_billing import partner_balance, record_payout
+
+    a = await _load(db, partner_id)
+    try:
+        entry = await record_payout(
+            db,
+            partner_id=a.id,
+            amount_cents=body.amount_cents,
+            reference=body.reference,
+            actor_user_id=admin_id,
+            note=body.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    await AuditService(db).log(
+        event_type="admin.partner_program",
+        action="partner_payout_recorded",
+        resource_type="partner_account",
+        resource_id=str(a.id),
+        user_id=admin_id,
+        new_value={"amount_cents": body.amount_cents, "reference": entry.reference},
+    )
+    await db.flush()
+    return SuccessResponse(
+        data={
+            "entry": _entry_out(entry),
+            "balance_cents": await partner_balance(db, a.id),
+        }
+    )
+
+
+@router.post(
+    "/{partner_id}/adjustments",
+    response_model=SuccessResponse[dict],
+    dependencies=_STEP_UP,
+)
+async def adjustment(
+    partner_id: UUID,
+    body: AdjustmentRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """A signed correction to what NUMU owes the partner, e.g. reversing the
+    partner's share of a charge refunded to a merchant (Partner Agreement
+    § 11.3). The merchant's refund itself is a wallet adjustment."""
+    from src.application.services.app_billing import partner_balance, record_adjustment
+
+    a = await _load(db, partner_id)
+    try:
+        entry = await record_adjustment(
+            db,
+            partner_id=a.id,
+            amount_cents=body.amount_cents,
+            reference=body.reference,
+            note=body.note,
+            actor_user_id=admin_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    await AuditService(db).log(
+        event_type="admin.partner_program",
+        action="partner_ledger_adjusted",
+        resource_type="partner_account",
+        resource_id=str(a.id),
+        user_id=admin_id,
+        new_value={"amount_cents": body.amount_cents, "reference": entry.reference},
+    )
+    await db.flush()
+    return SuccessResponse(
+        data={
+            "entry": _entry_out(entry),
+            "balance_cents": await partner_balance(db, a.id),
+        }
+    )

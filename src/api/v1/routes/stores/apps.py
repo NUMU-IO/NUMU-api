@@ -637,3 +637,106 @@ async def open_url(store_id: UUID, slug: str, locale: str = "ar"):
 
     sep = "&" if "?" in app_url else "?"
     return SuccessResponse(data={"url": f"{app_url}{sep}{urlencode(params)}"})
+
+
+# ─── Paid apps: the store's subscription (apps plan, Phase 7) ─────
+
+
+async def _install_for(session, store_id: UUID, slug: str):
+    row = (
+        await session.execute(
+            select(AppInstallationModel, AppModel)
+            .join(AppModel, AppModel.id == AppInstallationModel.app_id)
+            .where(AppInstallationModel.store_id == store_id, AppModel.slug == slug)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Install not found")
+    return row
+
+
+@router.get(
+    "/{slug}/subscription",
+    response_model=SuccessResponse[dict[str, Any]],
+    summary="The store's subscription to a paid app",
+    operation_id="get_app_subscription",
+)
+async def get_subscription(store_id: UUID, slug: str):
+    from src.application.services.app_billing import subscription_for, subscription_out
+
+    async with AsyncSessionLocal() as session:
+        install, app = await _install_for(session, store_id, slug)
+        sub = await subscription_for(session, install.id)
+        return SuccessResponse(data=subscription_out(sub, app))
+
+
+@router.post(
+    "/{slug}/subscription",
+    response_model=SuccessResponse[dict[str, Any]],
+    summary="Pay for a paid app from the store's wallet",
+    operation_id="subscribe_app",
+)
+async def subscribe_app(store_id: UUID, slug: str):
+    """Charges one period to the NUMU wallet, now. Already covered: nothing is
+    charged (and a pending cancellation is withdrawn). 402 when the wallet
+    can't cover it; top it up (InstaPay, Vodafone Cash or card) and retry."""
+    from src.application.services.app_billing import (
+        InsufficientFundsError,
+        NotPaidError,
+        WalletChargeSource,
+        subscribe,
+        subscription_out,
+    )
+    from src.application.services.wallet_service import WalletSuspendedError
+
+    async with AsyncSessionLocal() as session:
+        install, app = await _install_for(session, store_id, slug)
+        if not install.is_enabled or install.status != "active":
+            raise HTTPException(
+                status_code=409, detail="Finish installing or enable the app first."
+            )
+        if app.status != AppStatus.PUBLISHED:
+            raise HTTPException(status_code=409, detail="This app is not available.")
+        source = WalletChargeSource(session)
+        try:
+            sub, charged = await subscribe(
+                session, installation=install, app=app, source=source
+            )
+        except NotPaidError:
+            raise HTTPException(status_code=409, detail="This app is free.") from None
+        except InsufficientFundsError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "code": "insufficient_wallet_balance",
+                    "needed_cents": exc.needed_cents,
+                    "balance_cents": exc.balance_cents,
+                },
+            ) from None
+        except WalletSuspendedError:
+            raise HTTPException(
+                status_code=409, detail="The store's wallet is suspended."
+            ) from None
+        await session.commit()
+        await source.invalidate()
+        logger.info("app_subscribe", app=slug, store_id=str(store_id), charged=charged)
+        return SuccessResponse(
+            data=subscription_out(sub, app),
+            message="Subscribed" if charged else "Already active",
+        )
+
+
+@router.delete(
+    "/{slug}/subscription",
+    response_model=SuccessResponse[dict[str, Any]],
+    summary="Cancel a paid app at the end of the paid period",
+    operation_id="cancel_app_subscription",
+)
+async def cancel_subscription(store_id: UUID, slug: str):
+    from src.application.services.app_billing import cancel, subscription_out
+
+    async with AsyncSessionLocal() as session:
+        install, app = await _install_for(session, store_id, slug)
+        sub = await cancel(session, install.id)
+        await session.commit()
+        return SuccessResponse(data=subscription_out(sub, app))

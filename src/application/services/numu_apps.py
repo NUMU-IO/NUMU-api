@@ -48,6 +48,9 @@ async def app_enabled(db: AsyncSession, store_id: UUID, slug: str) -> bool:
     Always True when the store's tenant does not have ``ff_numu_apps``: the
     feature is then on, exactly as it was before it became an app. Also True
     for an unknown store, which is not this function's call to make.
+
+    A NUMU App with a recurring price (app_billing) is on only while the
+    store's subscription covers today.
     """
     row = (
         await db.execute(
@@ -55,6 +58,8 @@ async def app_enabled(db: AsyncSession, store_id: UUID, slug: str) -> bool:
                 TenantModel.feature_flags,
                 AppInstallationModel.is_enabled,
                 AppModel.id,
+                AppInstallationModel.id,
+                AppModel.manifest,
             )
             .select_from(StoreModel)
             .join(TenantModel, TenantModel.id == StoreModel.tenant_id)
@@ -71,7 +76,7 @@ async def app_enabled(db: AsyncSession, store_id: UUID, slug: str) -> bool:
     ).one_or_none()
     if row is None:
         return True
-    flags, enabled, app_id = row
+    flags, enabled, app_id, installation_id, manifest = row
     if not (flags or {}).get(FLAG):
         return True
     if app_id is None:
@@ -82,7 +87,13 @@ async def app_enabled(db: AsyncSession, store_id: UUID, slug: str) -> bool:
             "numu_app_catalog_row_missing", slug=slug, store_id=str(store_id)
         )
         return True
-    return bool(enabled)
+    if not enabled:
+        return False
+    if ((manifest or {}).get("pricing") or {}).get("plan") == "recurring":
+        from src.application.services.app_billing import covers, subscription_for
+
+        return covers(await subscription_for(db, installation_id), datetime.now(UTC))
+    return True
 
 
 async def schedule_purge(

@@ -242,6 +242,44 @@ async def authorize(
     )
 
 
+async def _check_app_cap(db: AsyncSession, store, app: AppModel) -> None:
+    """The store's plan may cap how many Partner Apps it installs (OD-7,
+    ``PlanFeatures.max_partner_apps``; -1 = no cap). A re-consent on an app
+    already installed never counts twice."""
+    from src.core.entities.plan import get_plan_features
+    from src.infrastructure.database.models.public.tenant import TenantModel
+
+    plan = await db.scalar(
+        select(TenantModel.plan).where(TenantModel.id == store.tenant_id)
+    )
+    cap = get_plan_features(plan or "trial").max_partner_apps
+    if cap < 0:
+        return
+    installed = (
+        (
+            await db.execute(
+                select(AppInstallationModel.app_id)
+                .join(AppModel, AppModel.id == AppInstallationModel.app_id)
+                .where(
+                    AppInstallationModel.store_id == store.id,
+                    AppModel.developer_id.isnot(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if app.id not in installed and len(installed) >= cap:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "plan_app_limit",
+                "message": f"This store's plan allows {cap} Partner Apps.",
+                "limit": cap,
+            },
+        )
+
+
 @router.post("/authorize/approve", response_model=SuccessResponse[dict])
 async def approve(
     body: ApproveRequest,
@@ -265,6 +303,7 @@ async def approve(
             status_code=409, detail="This app must rotate its client secret."
         )
 
+    await _check_app_cap(db, store, app)
     await db.execute(
         pg_insert(AppInstallationModel)
         .values(

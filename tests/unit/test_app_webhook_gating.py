@@ -65,6 +65,7 @@ def _app(**kw):
     return SimpleNamespace(
         status=kw.get("status", AppStatus.PUBLISHED),
         developer_id=kw.get("developer_id", uuid4()),
+        manifest={},  # free: no subscription needed
     )
 
 
@@ -102,3 +103,36 @@ def test_a_mid_consent_install_gets_no_webhook():
 def test_a_merchant_subscription_keeps_its_own_secret():
     sub = SimpleNamespace(app_installation_id=None, secret="merchant-secret")
     assert asyncio.run(wds.signing_secret(None, sub)) == "merchant-secret"
+
+
+def test_a_paid_app_the_store_has_not_paid_for_gets_no_webhook():
+    """Phase 7: webhooks follow the subscription like the token does."""
+    paid = _app()
+    paid.manifest = {
+        "pricing": {"plan": "recurring", "price_cents": 9900, "cycle": "monthly"}
+    }
+    install = _install()
+    install.id = uuid4()
+
+    class _NoSubscription:
+        def scalar_one_or_none(self):
+            return None
+
+    session = _session(install, paid)
+
+    async def execute(_stmt):
+        return _NoSubscription()
+
+    session.execute = execute
+
+    async def secret(_session, _app_id):
+        return "client-secret"
+
+    async def switch(_session):
+        return True
+
+    with (
+        patch("src.application.services.app_tokens.read_client_secret", secret),
+        patch("src.application.services.partner_program.partner_apps_enabled", switch),
+    ):
+        assert asyncio.run(wds.signing_secret(session, _sub())) is None
