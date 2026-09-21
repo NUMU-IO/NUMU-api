@@ -31,6 +31,19 @@ STORE = "/api/v1/stores/0b1e2c3d-0000-0000-0000-000000000000"
         (f"{STORE}/whatsapp/templates", "GET", "messages:read"),
         (f"{STORE}/coupons/", "GET", "marketing:read"),
         (f"{STORE}/access-tokens/", "GET", None),  # never, like a PAT
+        # plan 03 § 5 "never grantable": the whole settings domain, which holds
+        # payment-gateway credentials, payment proofs, billing, publishing and
+        # the store's other app installations; risk is read-only.
+        (f"{STORE}/settings/payment/kashier/credentials", "PUT", None),
+        (f"{STORE}/settings/payment/kashier/credentials", "GET", None),
+        (f"{STORE}/settings/customization/publish", "POST", None),
+        (f"{STORE}/payment-proofs/", "GET", None),
+        (f"{STORE}/billing/", "GET", None),
+        (f"{STORE}/apps/", "GET", None),
+        (f"{STORE}/apps/some-app/install", "POST", None),
+        (f"{STORE}/risk/", "GET", "risk:read"),
+        (f"{STORE}/risk/", "POST", None),
+        (f"{STORE}/themes/", "POST", None),
         ("/api/v1/auth/api-key/me", "GET", "__identity__"),
         ("/api/v1/admin/partners", "GET", None),
     ],
@@ -54,9 +67,18 @@ def test_a_pat_still_reaches_conversations_with_marketing():
 
 
 def test_what_an_app_may_never_be_granted():
-    assert "*" not in APP_SCOPES
-    assert "themes:write" not in APP_SCOPES
-    assert {"messages:read", "messages:write", "themes:read"} <= APP_SCOPES
+    never = {"*", "themes:write", "risk:write", "settings:read", "settings:write"}
+    assert not never & APP_SCOPES
+    assert {"messages:read", "messages:write", "themes:read", "risk:read"} <= APP_SCOPES
+
+
+def test_a_stored_grant_cannot_reopen_a_never_grantable_scope():
+    """Even a token whose stored scopes carry settings:write is refused:
+    the request needs a scope apps may not hold, so none satisfies it."""
+    required = required_app_scope(
+        f"{STORE}/settings/payment/kashier/credentials", "PUT"
+    )
+    assert required is None
 
 
 def test_signed_query_matches_the_documented_algorithm():

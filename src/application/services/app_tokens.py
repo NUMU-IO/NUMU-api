@@ -26,6 +26,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.app_manifest import APP_SCOPES
 from src.application.services.personal_access_token_service import (
     required_scope_for,
 )
@@ -58,15 +59,20 @@ def mint(prefix: str) -> tuple[str, str]:
 
 
 def required_app_scope(path: str, method: str) -> str | None:
-    """The scope an app token needs for this request (None = never allowed)."""
+    """The scope an app token needs for this request (None = never allowed).
+
+    A scope apps may not hold (``settings:*``, ``risk:write``,
+    ``themes:write``) is refused here even if an installation's grant
+    somehow carries it: the manifest check alone would trust stored grants.
+    """
     required = required_scope_for(path, method)
     if required is None or required == "__identity__":
         return required
     parts = path.strip("/").split("/")
     segment = parts[4] if len(parts) > 4 else ""
     if segment in MESSAGE_SEGMENTS:
-        return "messages:" + required.split(":", 1)[1]
-    return required
+        required = "messages:" + required.split(":", 1)[1]
+    return required if required in APP_SCOPES else None
 
 
 # ─── Client secret (readable, encrypted) ───────────────────────────
