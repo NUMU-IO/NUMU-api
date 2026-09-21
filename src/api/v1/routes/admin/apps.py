@@ -355,7 +355,9 @@ async def suspend_app(
 ):
     """Suspend: out of the catalog, off every storefront (``is_live`` false).
     Reinstate: back to published if it had a published version, else draft.
-    Revoking installed tokens arrives with app tokens (Phase 4)."""
+    While suspended, every installed token is refused at request time
+    (app_tokens.resolve_app_token) and no webhook is delivered to the app
+    (webhook_delivery_service.signing_secret); reinstating restores both."""
     app = await db.get(AppModel, app_id)
     if app is None:
         raise HTTPException(status_code=404, detail="App not found")
