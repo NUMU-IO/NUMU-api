@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.dependencies.partners import (
+    require_agreed_partner,
     require_approved_partner,
     require_partner_program,
 )
@@ -292,7 +293,7 @@ async def list_dev_stores(
 )
 async def create_dev_store(
     body: CreateDevStoreRequest,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """A free store on the ``developer`` plan: API access on, never live."""
@@ -354,7 +355,7 @@ async def create_dev_store(
 )
 async def seed_dev_store(
     store_id: UUID,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Arabic products, Egyptian customers, EGP prices, COD orders. Once."""
