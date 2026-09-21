@@ -337,10 +337,16 @@ def _get_client_ip(request: Request) -> str:
 
 
 def _pat_bucket(request: Request) -> str | None:
-    """A personal access token's own rate-limit bucket, or None."""
+    """A personal access or Partner App token's own rate-limit bucket, or None.
+
+    Both get the same per-token budget, so one app's traffic never eats
+    another's (or a merchant's own integration's) limit.
+    """
     auth = request.headers.get("authorization", "")
     token = auth[7:] if auth.lower().startswith("bearer ") else ""
-    return f"pat:{_stable_digest(token)}" if token.startswith(PAT_PREFIX) else None
+    if token.startswith((PAT_PREFIX, "numu_app_")):
+        return f"pat:{_stable_digest(token)}"
+    return None
 
 
 async def _check_rate_limit(ip: str, tier: str, limit: int) -> tuple[bool, int, int]:

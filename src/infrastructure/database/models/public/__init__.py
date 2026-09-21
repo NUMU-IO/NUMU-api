@@ -9,9 +9,11 @@ They include:
 """
 
 from src.infrastructure.database.models.public.app import (
+    AppAccessTokenModel,
     AppInstallationModel,
     AppModel,
     AppOAuthClientModel,
+    AppOAuthCodeModel,
     AppUninstallModel,
     AppVersionModel,
 )
@@ -74,6 +76,8 @@ __all__ = [
     "AppUninstallModel",
     "AppVersionModel",
     "AppOAuthClientModel",
+    "AppOAuthCodeModel",
+    "AppAccessTokenModel",
     "PartnerAccountModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",

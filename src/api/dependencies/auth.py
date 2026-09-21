@@ -1,11 +1,11 @@
 """Authentication dependencies — cookie-based (with Bearer fallback)."""
 
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
@@ -282,6 +282,8 @@ async def _resolve_principal(request: Request) -> TokenPayload:
 
     if looks_like_pat(token):
         return await _resolve_pat_principal(token, request)
+    if token.startswith("numu_app_"):
+        return await _resolve_app_principal(token, request)
 
     try:
         payload = token_service.verify_token(token)
@@ -410,6 +412,95 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
             token_type="access",
             iat=0,
             tenant_id=record.tenant_id,
+        )
+
+
+async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
+    """Validate a Partner App token (``numu_app_``) and act as the store owner.
+
+    Same contract as a PAT (store pin, scope map, 300/min bucket, the same
+    403 wording), with the two differences in app_tokens: conversations need
+    ``messages:*``, and the store's plan does not gate it (OD-7). A dead token
+    (uninstalled, disabled, app suspended, kill switch off) is a 401.
+    """
+    from src.application.services.app_tokens import (
+        required_app_scope,
+        resolve_app_token,
+    )
+    from src.application.services.personal_access_token_service import scope_allows
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.public.user import UserModel
+    from src.infrastructure.database.models.tenant.store import StoreModel
+
+    async with AsyncSessionLocal() as session:
+        principal = await resolve_app_token(session, token)
+        if principal is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or revoked app token",
+            )
+        installation = principal.installation
+        store_id = str(installation.store_id)
+
+        path = request.url.path
+        parts = [p for p in path.split("/") if p]
+        if (
+            len(parts) >= 4
+            and parts[:3] == ["api", "v1", "stores"]
+            and parts[3] != store_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access token is bound to a different store",
+            )
+
+        scopes = list(principal.token.scopes or [])
+        required = required_app_scope(path, request.method)
+        if required is None or not scope_allows(scopes, required):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Access token does not permit this operation"
+                    if required is None
+                    else f"Access token lacks the '{required}' scope"
+                ),
+            )
+
+        owner = (
+            await session.execute(
+                select(UserModel)
+                .join(StoreModel, StoreModel.owner_id == UserModel.id)
+                .where(StoreModel.id == installation.store_id)
+            )
+        ).scalar_one_or_none()
+        if owner is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or revoked app token",
+            )
+        principal.token.last_used_at = datetime.now(UTC)
+        await session.commit()
+
+        # The same shape /auth/api-key/me reads for PATs, plus the app.
+        request.state.pat = {
+            "token_id": str(principal.token.id),
+            "name": f"app:{principal.app.slug}",
+            "scopes": scopes,
+            "store_id": store_id,
+            "tenant_id": str(installation.tenant_id),
+            "app_slug": principal.app.slug,
+        }
+        role_value = (
+            owner.role.value if hasattr(owner.role, "value") else str(owner.role)
+        )
+        return TokenPayload(
+            user_id=owner.id,
+            email=owner.email,
+            role=role_value,
+            exp=0,
+            token_type="access",
+            iat=0,
+            tenant_id=installation.tenant_id,
         )
 
 

@@ -34,11 +34,14 @@ def app(status=AppStatus.PUBLISHED, **kw):
         version="1.0.0",
         status=status,
         manifest=kw.get("manifest", {}),
+        developer_id=kw.get("developer_id"),
     )
 
 
-def install(is_enabled=True, settings=None):
-    return SimpleNamespace(is_enabled=is_enabled, settings=settings or {})
+def install(is_enabled=True, settings=None, status="active"):
+    return SimpleNamespace(
+        is_enabled=is_enabled, settings=settings or {}, status=status, granted_scopes=[]
+    )
 
 
 class TestInstallationStatusHonesty:
@@ -62,6 +65,10 @@ class TestInstallationStatusHonesty:
 
     def test_a_disabled_install_is_not_live(self):
         assert _installation(app(), install(is_enabled=False)).is_live is False
+
+    def test_a_mid_consent_install_is_not_live(self):
+        # The storefront ignores pending_auth installs, so the hub must too.
+        assert _installation(app(), install(status="pending_auth")).is_live is False
 
     def test_a_plain_string_status_is_tolerated(self):
         # The column is a native Postgres ENUM; depending on how the row was

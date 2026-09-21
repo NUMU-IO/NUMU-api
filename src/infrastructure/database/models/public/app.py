@@ -23,8 +23,10 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    LargeBinary,
     String,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -110,6 +112,13 @@ class AppInstallationModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         JSONB,
         nullable=False,
         default=dict,
+    )
+    #: Partner Apps: ``pending_auth`` from consent until the app exchanges its
+    #: code, then ``active``. NUMU Apps are always ``active``.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    #: The scopes the merchant consented to (Partner Apps).
+    granted_scopes: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
     )
 
 
@@ -199,6 +208,65 @@ class AppOAuthClientModel(Base, UUIDMixin, TimestampMixin):
     )
     client_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     client_secret_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    #: Fernet (SecretsManager): the secret signs app webhooks and "Open app"
+    #: links, so it must be readable. NULL for apps created before Phase 4.
+    client_secret_encrypted: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True
+    )
+    secret_key_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     secret_rotated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class AppOAuthCodeModel(Base, UUIDMixin):
+    """A single-use OAuth authorization code: 10 minutes, stored hashed."""
+
+    __tablename__ = "app_oauth_codes"
+    __table_args__ = {"schema": "public"}
+
+    installation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_installations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    redirect_uri: Mapped[str] = mapped_column(String(2048), nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AppAccessTokenModel(Base, UUIDMixin):
+    """A ``numu_app_`` token: one store, the granted scopes, no expiry.
+
+    Revoked on uninstall; ``revoked_at`` in the future is a rotation overlap.
+    """
+
+    __tablename__ = "app_access_tokens"
+    __table_args__ = {"schema": "public"}
+
+    installation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_installations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    scopes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

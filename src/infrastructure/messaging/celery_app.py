@@ -76,6 +76,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.whatsapp_access_expiry_task",
         # NUMU Apps: delete conversations 30 days after an uninstall (daily).
         "src.infrastructure.messaging.tasks.numu_app_purge_task",
+        # Partner Apps: store.redact 48h after an uninstall (countdown task).
+        "src.infrastructure.messaging.tasks.app_redact_task",
         # backend-030 / US6 — 90-day dead-letter purge (daily at 03:00 UTC).
         "src.infrastructure.messaging.tasks.whatsapp_dead_letter_purge",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",

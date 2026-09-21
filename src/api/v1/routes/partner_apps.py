@@ -14,7 +14,6 @@ See docs/Plans/apps-developer-work/03-PLATFORM-DESIGN.md §§ 4, 7.
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -39,6 +38,7 @@ from src.application.services.app_manifest import (
     semver_key,
     to_listing_manifest,
 )
+from src.application.services.app_tokens import mint, store_client_secret
 from src.application.services.partner_program import partner_for_user
 from src.core.entities.app import AppStatus
 from src.core.logging import get_logger
@@ -212,11 +212,6 @@ def _validated(raw: dict[str, Any]) -> ManifestV1:
         )
 
 
-def _new_secret() -> tuple[str, str]:
-    secret = "numu_cs_" + secrets.token_urlsafe(32)
-    return secret, hashlib.sha256(secret.encode()).hexdigest()
-
-
 def _conflict(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
@@ -280,12 +275,11 @@ async def create_app(
     )
     db.add(app)
     await db.flush()
-    secret, secret_hash = _new_secret()
+    secret, _ = mint("numu_cs_")
     client = AppOAuthClientModel(
-        app_id=app.id,
-        client_id="numu_ci_" + secrets.token_hex(12),
-        client_secret_hash=secret_hash,
+        app_id=app.id, client_id="numu_ci_" + secrets.token_hex(12)
     )
+    await store_client_secret(client, secret)
     db.add(client)
     await db.flush()
     await db.refresh(app)
@@ -337,7 +331,10 @@ async def rotate_secret(
             select(AppOAuthClientModel).where(AppOAuthClientModel.app_id == app.id)
         )
     ).scalar_one()
-    secret, client.client_secret_hash = _new_secret()
+    # Installed tokens keep working; webhooks and "Open app" links are signed
+    # with the new secret from now on (they read it at send time).
+    secret, _ = mint("numu_cs_")
+    await store_client_secret(client, secret)
     client.secret_rotated_at = datetime.now(UTC)
     logger.info("partner_app_secret_rotated", app=app.slug)
     return SuccessResponse(

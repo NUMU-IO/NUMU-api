@@ -28,6 +28,7 @@ class WebhookSubscriptionRepository(IWebhookSubscriptionRepository):
             secret=model.secret,
             is_active=model.is_active,
             description=model.description,
+            app_installation_id=model.app_installation_id,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -46,7 +47,12 @@ class WebhookSubscriptionRepository(IWebhookSubscriptionRepository):
     async def get_by_store(self, store_id: UUID) -> list[WebhookSubscription]:
         query = (
             select(WebhookSubscriptionModel)
-            .where(WebhookSubscriptionModel.store_id == store_id)
+            .where(
+                WebhookSubscriptionModel.store_id == store_id,
+                # A Partner App's subscriptions are the app's, not the
+                # merchant's: managed by install/uninstall only.
+                WebhookSubscriptionModel.app_installation_id.is_(None),
+            )
             .order_by(WebhookSubscriptionModel.created_at.desc())
         )
         result = await self.session.execute(query)
@@ -70,6 +76,7 @@ class WebhookSubscriptionRepository(IWebhookSubscriptionRepository):
         query = select(WebhookSubscriptionModel).where(
             WebhookSubscriptionModel.id == subscription_id,
             WebhookSubscriptionModel.store_id == store_id,
+            WebhookSubscriptionModel.app_installation_id.is_(None),
         )
         result = await self.session.execute(query)
         model = result.scalar_one_or_none()

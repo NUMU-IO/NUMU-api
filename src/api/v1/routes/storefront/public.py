@@ -879,6 +879,8 @@ async def _read_installed_apps(session, *, store_id) -> list[dict]:
             .where(
                 AppInstallationModel.store_id == store_id,
                 AppInstallationModel.is_enabled.is_(True),
+                # A Partner App mid-consent has no token yet: not live.
+                AppInstallationModel.status == "active",
                 AppModel.status == AppStatus.PUBLISHED,
             )
         )

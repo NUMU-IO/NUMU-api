@@ -41,12 +41,16 @@ from src.application.services.numu_apps import (
 from src.application.services.partner_program import partner_apps_enabled
 from src.core.entities.app import AppStatus
 from src.core.entities.store import Store
+from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
     AppModel,
+    AppOAuthClientModel,
 )
 from src.infrastructure.repositories import StoreRepository
+
+logger = get_logger(__name__)
 
 router = APIRouter(
     prefix="/{store_id}/apps",
@@ -113,6 +117,9 @@ class AppCatalogEntry(BaseModel):
     version: str
     blocks: list[dict[str, Any]] = []
     listing: AppListing = AppListing()
+    #: Partner Apps install through consent: what the hub needs to open it
+    #: (``client_id``, the first registered ``redirect_uri``, the scopes).
+    connect: dict[str, Any] | None = None
 
 
 class AppInstallation(BaseModel):
@@ -138,6 +145,13 @@ class AppInstallation(BaseModel):
     # the form at all, and a schema the hub cannot read is an app the merchant
     # cannot configure.
     settings_schema: list[dict[str, Any]] = []
+    #: Partner Apps: what the merchant consented to, and whether the app has
+    #: finished connecting (``pending_auth`` until it exchanges its code).
+    granted_scopes: list[str] = []
+    install_status: str = "active"
+    #: Scopes the live version asks for that this install has not granted:
+    #: the hub shows a re-consent banner when non-empty.
+    missing_scopes: list[str] = []
     listing: AppListing = AppListing()
     app_status: str = AppStatus.PUBLISHED.value
     # False when the app is installed and enabled but the PLATFORM has
@@ -212,7 +226,25 @@ def _installation(app: AppModel, install: AppInstallationModel) -> AppInstallati
         settings_schema=(app.manifest or {}).get("settings_schema", []) or [],
         listing=_listing(app.manifest),
         app_status=status_value,
-        is_live=bool(install.is_enabled) and status_value == AppStatus.PUBLISHED.value,
+        is_live=bool(install.is_enabled)
+        and status_value == AppStatus.PUBLISHED.value
+        # Mid-consent installs are skipped by the storefront too.
+        and (install.status or "active") == "active",
+        granted_scopes=list(install.granted_scopes or []),
+        install_status=install.status or "active",
+        missing_scopes=sorted(
+            set(
+                (((app.manifest or {}).get("app") or {}).get("oauth") or {}).get(
+                    "scopes"
+                )
+                or []
+            )
+            - set(install.granted_scopes or [])
+        )
+        # Only a live install can be missing scopes; one mid-consent has
+        # granted nothing yet, and that is not a re-consent.
+        if app.developer_id is not None and install.status == "active"
+        else [],
     )
 
 
@@ -252,6 +284,24 @@ async def list_catalog(store_id: UUID):
             or_(AppModel.developer_id.is_(None), partner_listed),
         )
         rows = (await session.execute(stmt)).scalars().all()
+        client_ids = dict(
+            (
+                await session.execute(
+                    select(AppOAuthClientModel.app_id, AppOAuthClientModel.client_id)
+                )
+            ).all()
+        )
+
+    def connect(a: AppModel) -> dict[str, Any] | None:
+        oauth = ((a.manifest or {}).get("app") or {}).get("oauth") or {}
+        if a.developer_id is None or a.id not in client_ids or not oauth:
+            return None
+        return {
+            "client_id": client_ids[a.id],
+            "redirect_uri": (oauth.get("redirect_urls") or [None])[0],
+            "scopes": oauth.get("scopes") or [],
+        }
+
     return SuccessResponse(
         data=[
             AppCatalogEntry(
@@ -262,6 +312,7 @@ async def list_catalog(store_id: UUID):
                 version=a.version,
                 blocks=(a.manifest or {}).get("blocks", []) or [],
                 listing=_listing(a.manifest),
+                connect=connect(a),
             )
             for a in rows
         ],
@@ -330,6 +381,16 @@ async def install_app(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="App not found in catalog.",
+            )
+        if app.developer_id is not None:
+            # A Partner App installs through consent (OAuth), which is where
+            # the merchant sees and grants its scopes.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "consent_required",
+                    "message": "Install this app through its consent screen.",
+                },
             )
 
         # ON CONFLICT: re-enable the existing row, don't blow away
@@ -479,6 +540,27 @@ async def uninstall_app(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Install not found"
             )
+        app = await session.get(AppModel, row.app_id)
+        if app is not None and app.developer_id is not None:
+            # Partner App: its tokens and subscriptions go with the row
+            # (FK cascade); tell the app now, and ask it to delete the
+            # store's data in 48 hours unless the merchant reinstalls.
+            from src.application.services.app_webhooks import (
+                REDACT_DELAY_SECONDS,
+                deliver_app_event,
+            )
+
+            await deliver_app_event(session, app, store_id, "app.uninstalled", {})
+            try:
+                from src.infrastructure.messaging.tasks.app_redact_task import (
+                    app_store_redact_task,
+                )
+
+                app_store_redact_task.apply_async(
+                    args=[str(app.id), str(store_id)], countdown=REDACT_DELAY_SECONDS
+                )
+            except Exception:  # noqa: BLE001 — a broker outage must not block uninstall
+                logger.warning("app_store_redact_schedule_failed", app=app.slug)
         await session.delete(row)
         if slug in NUMU_APPS:
             # Their data lives outside the install row; keep it for the
@@ -516,3 +598,42 @@ async def _set_enabled(
     return SuccessResponse(
         data=result, message="App enabled" if enabled else "App disabled"
     )
+
+
+@router.get(
+    "/{slug}/open-url",
+    response_model=SuccessResponse[dict[str, str]],
+    summary="Signed link to a Partner App's own admin",
+    operation_id="app_open_url",
+)
+async def open_url(store_id: UUID, slug: str, locale: str = "ar"):
+    """``app_url?store_id&locale&timestamp&hmac``, signed with the app's
+    client secret (plan 03 § 6.3). It proves the merchant came from the hub;
+    it is not a login, and the app must reject a timestamp older than 5 min."""
+    from src.application.services.app_tokens import read_client_secret, signed_params
+
+    async with AsyncSessionLocal() as session:
+        app = (
+            await session.execute(
+                select(AppModel)
+                .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
+                .where(AppInstallationModel.store_id == store_id, AppModel.slug == slug)
+            )
+        ).scalar_one_or_none()
+        app_url = (
+            (((app.manifest or {}).get("app") or {}).get("app_url")) if app else None
+        )
+        if not app_url:
+            raise HTTPException(status_code=404, detail="Install not found")
+        secret = await read_client_secret(session, app.id)
+    if not secret:
+        raise HTTPException(
+            status_code=409, detail="This app must rotate its client secret."
+        )
+    params = signed_params(
+        {"store_id": str(store_id), "locale": "en" if locale == "en" else "ar"}, secret
+    )
+    from urllib.parse import urlencode
+
+    sep = "&" if "?" in app_url else "?"
+    return SuccessResponse(data={"url": f"{app_url}{sep}{urlencode(params)}"})

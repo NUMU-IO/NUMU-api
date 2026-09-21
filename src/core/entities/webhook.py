@@ -57,6 +57,9 @@ class WebhookSubscription(BaseEntity):
     secret: str
     is_active: bool = True
     description: str | None = None
+    #: Owned by a Partner App: signed with the app's client secret (``secret``
+    #: is empty), never shown in or editable from the merchant's own list.
+    app_installation_id: UUID | None = None
 
 
 class WebhookDeliveryLog(BaseEntity):
