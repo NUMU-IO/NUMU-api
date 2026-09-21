@@ -148,7 +148,11 @@ async def kashier_callback(
         return await _handle_callback(request, db, x_kashier_signature, nonces)
     except Exception:
         for key in nonces:
-            if not await _cache_service.delete(key):
+            try:
+                released = await _cache_service.delete(key)
+            except Exception:  # noqa: BLE001 - never mask the original error
+                released = False
+            if not released:
                 # Redis refused the delete, so the retry will read as a
                 # duplicate until the key expires. Say so loudly: an
                 # operator can delete the key by hand.

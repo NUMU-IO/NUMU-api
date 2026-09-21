@@ -92,12 +92,18 @@ def test_a_failed_top_up_releases_its_nonce_for_the_retry(cache):
     assert cache.released == ["kashier:platform:processed:tx-9"]
 
 
-def test_a_failed_release_never_masks_the_original_error(cache, monkeypatch):
-    """Sentry on #653: Redis may refuse the delete. The original error must
-    still propagate (so Kashier retries), and the failure is logged."""
+@pytest.mark.parametrize("delete_fails_by", ["returning False", "raising"])
+def test_a_failed_release_never_masks_the_original_error(
+    cache, monkeypatch, delete_fails_by
+):
+    """Sentry on #653: Redis may refuse the delete, or the delete may raise.
+    The original error must still propagate (so Kashier retries), and the
+    failed release is logged."""
     logged = []
 
     async def refuse(_key):
+        if delete_fails_by == "raising":
+            raise ConnectionError("redis went away")
         return False
 
     class _Log:
