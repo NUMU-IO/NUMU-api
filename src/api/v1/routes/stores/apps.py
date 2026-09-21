@@ -24,19 +24,21 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import false, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.feature_flags import _read_feature_flags, is_flag_enabled
 from src.api.dependencies.repositories import get_store_repository
 from src.api.responses import SuccessResponse
+from src.application.services.app_manifest import validate_settings
 from src.application.services.numu_apps import (
     FLAG,
     NUMU_APPS,
     cancel_purge,
     schedule_purge,
 )
+from src.application.services.partner_program import partner_apps_enabled
 from src.core.entities.app import AppStatus
 from src.core.entities.store import Store
 from src.infrastructure.database.connection import AsyncSessionLocal
@@ -236,9 +238,18 @@ async def _hidden_slugs(session, store_id: UUID) -> frozenset[str]:
 async def list_catalog(store_id: UUID):
     async with AsyncSessionLocal() as session:
         hidden = await _hidden_slugs(session, store_id)
+        # NUMU Apps (no developer) are always listed once published. A
+        # Partner App also needs an admin's catalog_visible, and the
+        # Partner-apps kill switch on.
+        partner_listed = (
+            AppModel.listing_flags["catalog_visible"].as_boolean().is_(True)
+        )
+        if not await partner_apps_enabled(session):
+            partner_listed = false()
         stmt = select(AppModel).where(
             AppModel.status == AppStatus.PUBLISHED,
             AppModel.slug.notin_(hidden),
+            or_(AppModel.developer_id.is_(None), partner_listed),
         )
         rows = (await session.execute(stmt)).scalars().all()
     return SuccessResponse(
@@ -396,9 +407,19 @@ async def update_settings(
             )
         app, install = row
         incoming = body.settings or {}
-        install.settings = (
-            incoming if body.replace else {**(install.settings or {}), **incoming}
+        merged = incoming if body.replace else {**(install.settings or {}), **incoming}
+        errors = validate_settings(
+            merged,
+            (app.manifest or {}).get("settings_schema") or [],
+            # Partner Apps get an exact contract; NUMU Apps keep legacy keys.
+            strict_keys=app.developer_id is not None,
         )
+        if errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "invalid_settings", "fields": errors},
+            )
+        install.settings = merged
         await session.commit()
         await session.refresh(install)
         result = _installation(app, install)

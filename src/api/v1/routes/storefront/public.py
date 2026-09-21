@@ -871,17 +871,21 @@ async def _read_installed_apps(session, *, store_id) -> list[dict]:
     )
 
     try:
-        rows = (
-            await session.execute(
-                _select(AppModel, AppInstallationModel)
-                .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
-                .where(
-                    AppInstallationModel.store_id == store_id,
-                    AppInstallationModel.is_enabled.is_(True),
-                    AppModel.status == AppStatus.PUBLISHED,
-                )
+        from src.application.services.partner_program import partner_apps_enabled
+
+        stmt = (
+            _select(AppModel, AppInstallationModel)
+            .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
+            .where(
+                AppInstallationModel.store_id == store_id,
+                AppInstallationModel.is_enabled.is_(True),
+                AppModel.status == AppStatus.PUBLISHED,
             )
-        ).all()
+        )
+        if not await partner_apps_enabled(session):
+            # The Partner-apps kill switch: only NUMU Apps stay on storefronts.
+            stmt = stmt.where(AppModel.developer_id.is_(None))
+        rows = (await session.execute(stmt)).all()
     except Exception:  # pragma: no cover - defensive; see docstring
         from src.core.logging import get_logger
 

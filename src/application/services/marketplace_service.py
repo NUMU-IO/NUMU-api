@@ -555,9 +555,18 @@ class MarketplaceService:
         notes: str | None = None,
         override_certification: bool = False,
     ) -> dict[str, Any]:
-        """Admin reviews a version (approve/reject)."""
-        if decision not in ("approve", "reject"):
-            raise ValueError("decision must be 'approve' or 'reject'")
+        """Admin reviews a version (approve / reject / request_changes).
+
+        ``request_changes`` closes this version (there is no "changes
+        requested" version state) but, unlike ``reject``, leaves the listing
+        in draft so the developer uploads a fixed version and resubmits.
+        """
+        if decision not in ("approve", "reject", "request_changes"):
+            raise ValueError(
+                "decision must be 'approve', 'reject' or 'request_changes'"
+            )
+        if decision == "request_changes":
+            notes = f"[changes requested] {notes or ''}".strip()
 
         version = await self._marketplace_repo.get_version_by_id(version_id)
         if not version:
@@ -625,6 +634,15 @@ class MarketplaceService:
             await self._marketplace_repo.update_theme(
                 theme.id,
                 {"status": MarketplaceThemeStatus.REJECTED.value},
+            )
+        elif (
+            decision == "request_changes"
+            and theme
+            and theme.status != MarketplaceThemeStatus.PUBLISHED
+        ):
+            await self._marketplace_repo.update_theme(
+                theme.id,
+                {"status": MarketplaceThemeStatus.DRAFT.value},
             )
 
         return {

@@ -11,7 +11,9 @@ They include:
 from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
     AppModel,
+    AppOAuthClientModel,
     AppUninstallModel,
+    AppVersionModel,
 )
 from src.infrastructure.database.models.public.currency_rate import CurrencyRateModel
 from src.infrastructure.database.models.public.customizer_undo_entry import (
@@ -70,6 +72,8 @@ __all__ = [
     "AppModel",
     "AppInstallationModel",
     "AppUninstallModel",
+    "AppVersionModel",
+    "AppOAuthClientModel",
     "PartnerAccountModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",

@@ -54,6 +54,20 @@ async def set_program_enabled(db: AsyncSession, enabled: bool) -> None:
     )
 
 
+#: The Partner-apps kill switch (platform_config), on unless turned off. Off:
+#: every Partner App leaves the catalog and every storefront; NUMU Apps stay.
+KILL_SWITCH_KEY = "partner_apps"
+
+
+async def partner_apps_enabled(db: AsyncSession) -> bool:
+    value = await db.scalar(
+        select(PlatformConfigModel.value).where(
+            PlatformConfigModel.key == KILL_SWITCH_KEY
+        )
+    )
+    return bool((value or {}).get("enabled", True))
+
+
 async def partner_for_user(
     db: AsyncSession, user_id: UUID
 ) -> PartnerAccountModel | None:
