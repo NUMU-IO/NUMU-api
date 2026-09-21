@@ -23,6 +23,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.numu_apps import app_enabled
 from src.application.services.wallet_settings import get_wallet_settings
 from src.core.entities.subscription_payment import (
     SubscriptionPaymentIntentStatus,
@@ -70,8 +71,9 @@ class Entitlement:
     #: None = uncapped.
     allowance: int | None = None
     used: int = 0
-    #: Why sending is off, for the UI: not_requested | pending | awaiting_payment
-    #: | rejected | disabled | expired | allowance_exhausted | None.
+    #: Why sending is off, for the UI: not_installed | not_requested | pending
+    #: | awaiting_payment | rejected | disabled | expired | allowance_exhausted
+    #: | None.
     reason: str | None = None
 
     @property
@@ -120,6 +122,10 @@ async def entitlement(
 ) -> Entitlement:
     """The store's live WhatsApp entitlement."""
     now = now or datetime.now(UTC)
+    # WhatsApp is a NUMU App: uninstalled or disabled means no sends, paid or
+    # not. A no-op unless the tenant has ff_numu_apps (see numu_apps).
+    if not await app_enabled(db, store_id, "whatsapp"):
+        return Entitlement(active=False, status="none", reason="not_installed")
     row = (
         await db.execute(
             select(WhatsAppAccessRequestModel).where(

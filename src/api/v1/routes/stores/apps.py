@@ -28,8 +28,15 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.api.dependencies import verify_store_ownership
+from src.api.dependencies.feature_flags import _read_feature_flags, is_flag_enabled
 from src.api.dependencies.repositories import get_store_repository
 from src.api.responses import SuccessResponse
+from src.application.services.numu_apps import (
+    FLAG,
+    NUMU_APPS,
+    cancel_purge,
+    schedule_purge,
+)
 from src.core.entities.app import AppStatus
 from src.core.entities.store import Store
 from src.infrastructure.database.connection import AsyncSessionLocal
@@ -207,6 +214,16 @@ def _installation(app: AppModel, install: AppInstallationModel) -> AppInstallati
     )
 
 
+async def _hidden_slugs(session, store_id: UUID) -> frozenset[str]:
+    """NUMU Apps stay out of every list until the tenant has ff_numu_apps.
+
+    The migration installed them on stores that already used WhatsApp or the
+    Inbox; without this, those stores would see them appear before the switch.
+    """
+    flags = await _read_feature_flags(session, store_id=store_id)
+    return frozenset() if is_flag_enabled(flags, FLAG) else NUMU_APPS
+
+
 # ─── Catalog ───────────────────────────────────────────────────────
 
 
@@ -216,9 +233,13 @@ def _installation(app: AppModel, install: AppInstallationModel) -> AppInstallati
     summary="List installable apps",
     operation_id="list_app_catalog",
 )
-async def list_catalog():
+async def list_catalog(store_id: UUID):
     async with AsyncSessionLocal() as session:
-        stmt = select(AppModel).where(AppModel.status == AppStatus.PUBLISHED)
+        hidden = await _hidden_slugs(session, store_id)
+        stmt = select(AppModel).where(
+            AppModel.status == AppStatus.PUBLISHED,
+            AppModel.slug.notin_(hidden),
+        )
         rows = (await session.execute(stmt)).scalars().all()
     return SuccessResponse(
         data=[
@@ -248,10 +269,14 @@ async def list_catalog():
 )
 async def list_installations(store_id: UUID):
     async with AsyncSessionLocal() as session:
+        hidden = await _hidden_slugs(session, store_id)
         stmt = (
             select(AppModel, AppInstallationModel)
             .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
-            .where(AppInstallationModel.store_id == store_id)
+            .where(
+                AppInstallationModel.store_id == store_id,
+                AppModel.slug.notin_(hidden),
+            )
         )
         rows = (await session.execute(stmt)).all()
     return SuccessResponse(
@@ -313,6 +338,8 @@ async def install_app(
             )
         )
         await session.execute(stmt)
+        # Back inside the retention window: the data stays.
+        await cancel_purge(session, store_id, app.id)
         await session.commit()
 
         install = (
@@ -323,20 +350,11 @@ async def install_app(
                 )
             )
         ).scalar_one()
+        result = _installation(app, install)
 
-    return SuccessResponse(
-        data=AppInstallation(
-            slug=app.slug,
-            name=app.name,
-            description=app.description,
-            icon_url=app.icon_url,
-            version=app.version,
-            is_enabled=install.is_enabled,
-            settings=install.settings or {},
-            blocks=(app.manifest or {}).get("blocks", []) or [],
-        ),
-        message="App installed",
-    )
+    # Installing changes what the store payload's installed_apps carries.
+    await _revalidate_app_settings(store)
+    return SuccessResponse(data=result, message="App installed")
 
 
 @router.put(
@@ -395,8 +413,12 @@ async def update_settings(
     summary="Disable app",
     operation_id="disable_app",
 )
-async def disable_app(store_id: UUID, slug: str):
-    return await _set_enabled(store_id, slug, enabled=False)
+async def disable_app(
+    store_id: UUID,
+    slug: str,
+    store: Annotated[Store, Depends(verify_store_ownership)] = None,  # type: ignore[assignment]
+):
+    return await _set_enabled(store, slug, enabled=False)
 
 
 @router.post(
@@ -405,8 +427,12 @@ async def disable_app(store_id: UUID, slug: str):
     summary="Enable app",
     operation_id="enable_app",
 )
-async def enable_app(store_id: UUID, slug: str):
-    return await _set_enabled(store_id, slug, enabled=True)
+async def enable_app(
+    store_id: UUID,
+    slug: str,
+    store: Annotated[Store, Depends(verify_store_ownership)] = None,  # type: ignore[assignment]
+):
+    return await _set_enabled(store, slug, enabled=True)
 
 
 @router.delete(
@@ -415,7 +441,11 @@ async def enable_app(store_id: UUID, slug: str):
     summary="Uninstall app",
     operation_id="uninstall_app",
 )
-async def uninstall_app(store_id: UUID, slug: str):
+async def uninstall_app(
+    store_id: UUID,
+    slug: str,
+    store: Annotated[Store, Depends(verify_store_ownership)] = None,  # type: ignore[assignment]
+):
     async with AsyncSessionLocal() as session:
         row = (
             await session.execute(
@@ -429,13 +459,19 @@ async def uninstall_app(store_id: UUID, slug: str):
                 status_code=status.HTTP_404_NOT_FOUND, detail="Install not found"
             )
         await session.delete(row)
+        if slug in NUMU_APPS:
+            # Their data lives outside the install row; keep it for the
+            # retention window so a reinstall brings it back.
+            await schedule_purge(session, store_id, row.app_id)
         await session.commit()
+    await _revalidate_app_settings(store)
     return SuccessResponse(data={"slug": slug}, message="App uninstalled")
 
 
 async def _set_enabled(
-    store_id: UUID, slug: str, *, enabled: bool
+    store: Store, slug: str, *, enabled: bool
 ) -> SuccessResponse[AppInstallation]:
+    store_id = store.id
     async with AsyncSessionLocal() as session:
         row = (
             await session.execute(
@@ -452,17 +488,10 @@ async def _set_enabled(
         install.is_enabled = enabled
         await session.commit()
         await session.refresh(install)
+        result = _installation(app, install)
 
+    # A disabled app drops out of the store payload's installed_apps.
+    await _revalidate_app_settings(store)
     return SuccessResponse(
-        data=AppInstallation(
-            slug=app.slug,
-            name=app.name,
-            description=app.description,
-            icon_url=app.icon_url,
-            version=app.version,
-            is_enabled=install.is_enabled,
-            settings=install.settings or {},
-            blocks=(app.manifest or {}).get("blocks", []) or [],
-        ),
-        message="App enabled" if enabled else "App disabled",
+        data=result, message="App enabled" if enabled else "App disabled"
     )

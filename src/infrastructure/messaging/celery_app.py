@@ -74,6 +74,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.whatsapp_template_poll_task",
         # Paid WhatsApp access — hourly expiry of lapsed periods.
         "src.infrastructure.messaging.tasks.whatsapp_access_expiry_task",
+        # NUMU Apps: delete conversations 30 days after an uninstall (daily).
+        "src.infrastructure.messaging.tasks.numu_app_purge_task",
         # backend-030 / US6 — 90-day dead-letter purge (daily at 03:00 UTC).
         "src.infrastructure.messaging.tasks.whatsapp_dead_letter_purge",
         "src.infrastructure.messaging.tasks.trust_network_maintenance",
@@ -643,6 +645,11 @@ celery_app.conf.beat_schedule = {
     "expire-whatsapp-access": {
         "task": "tasks.expire_whatsapp_access",
         "schedule": crontab(minute=10),  # Hourly at :10
+    },
+    # NUMU Apps: an uninstalled app's conversations are deleted after 30 days.
+    "purge-uninstalled-numu-apps": {
+        "task": "tasks.purge_uninstalled_numu_apps",
+        "schedule": crontab(hour=3, minute=20),  # Daily at 03:20 UTC
     },
     "poll-whatsapp-pending-templates": {
         "task": "numu_api.whatsapp.poll_pending_templates",

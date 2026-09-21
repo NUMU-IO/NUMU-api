@@ -14,10 +14,12 @@ Both live in the ``public`` schema:
   installs.
 """
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -101,4 +103,34 @@ class AppInstallationModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         JSONB,
         nullable=False,
         default=dict,
+    )
+
+
+class AppUninstallModel(Base, UUIDMixin, TimestampMixin):
+    """An app a store uninstalled, and when its data gets deleted.
+
+    Uninstalling a NUMU App keeps the store's data for 30 days so a reinstall
+    brings it back; reinstalling deletes this row. The daily purge task
+    deletes the data of every row past ``purge_after`` (numu_apps.purge_due).
+    """
+
+    __tablename__ = "app_uninstalls"
+    __table_args__ = (
+        UniqueConstraint("store_id", "app_id", name="uq_app_uninstall_store_app"),
+        Index("ix_app_uninstalls_purge_after", "purge_after"),
+        {"schema": "public"},
+    )
+
+    store_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    purge_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
     )
