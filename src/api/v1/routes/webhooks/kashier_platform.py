@@ -50,6 +50,24 @@ async def kashier_platform_callback(
     db: AsyncSession = Depends(get_admin_db_session),
     x_kashier_signature: str = Header(None, alias="x-kashier-signature"),
 ):
+    nonces: list[str] = []
+    # A nonce taken for a call that then fails would turn Kashier's retry
+    # into a "duplicate", and a paid top-up would never be recorded.
+    # Release it, and let the error answer 500 so Kashier retries.
+    try:
+        return await _handle_platform_callback(request, db, x_kashier_signature, nonces)
+    except Exception:
+        for key in nonces:
+            await _cache_service.delete(key)
+        raise
+
+
+async def _handle_platform_callback(
+    request: Request,
+    db: AsyncSession,
+    x_kashier_signature: str | None,
+    nonces: list[str],
+):
     payload = await request.body()
     log = logger.bind(webhook="kashier_platform")
 
@@ -90,14 +108,14 @@ async def kashier_platform_callback(
 
     # ── Replay protection ────────────────────────────────────────────
     if transaction_id and _cache_service:
+        nonce_key = f"kashier:platform:processed:{transaction_id}"
         was_set = await _cache_service.set_if_absent(
-            f"kashier:platform:processed:{transaction_id}",
-            "1",
-            expire=NONCE_TTL_SECONDS,
+            nonce_key, "1", expire=NONCE_TTL_SECONDS
         )
         if not was_set:
             log.warning("platform_webhook_duplicate_rejected")
             return {"status": "duplicate", "transaction_id": transaction_id}
+        nonces.append(nonce_key)
 
     # ── Resolve the top-up intent ────────────────────────────────────
     if not merchant_order_id.startswith(_TOPUP_PREFIX):

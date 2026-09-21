@@ -140,6 +140,24 @@ async def kashier_callback(
     x_kashier_signature: str = Header(None, alias="x-kashier-signature"),
 ):
     """Handle Kashier payment callback."""
+    nonces: list[str] = []
+    # A nonce taken for a call that then fails would turn Kashier's retry
+    # into a "duplicate", and a paid order would never be recorded.
+    # Release it, and let the error answer 500 so Kashier retries.
+    try:
+        return await _handle_callback(request, db, x_kashier_signature, nonces)
+    except Exception:
+        for key in nonces:
+            await _cache_service.delete(key)
+        raise
+
+
+async def _handle_callback(
+    request: Request,
+    db: AsyncSession,
+    x_kashier_signature: str | None,
+    nonces: list[str],
+):
     payload = await request.body()
     log = logger.bind(webhook="kashier")
 
@@ -228,6 +246,7 @@ async def kashier_callback(
         if not was_set:
             log.warning("webhook_duplicate_rejected")
             return {"status": "duplicate", "transaction_id": transaction_id}
+        nonces.append(nonce_key)
 
     # ── RLS narrowing ────────────────────────────────────────────
     await narrow_to_tenant(db, order.tenant_id)

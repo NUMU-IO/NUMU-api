@@ -95,11 +95,15 @@ def wired(monkeypatch):
         async def get_by_id(self, _id):
             return SimpleNamespace(settings={})
 
-    nonces = []
+    nonces = SimpleNamespace(taken=[], released=[])
 
     class _Cache:
         async def set_if_absent(self, key, *_a, **_k):
-            nonces.append(key)
+            nonces.taken.append(key)
+            return True
+
+        async def delete(self, key):
+            nonces.released.append(key)
             return True
 
     async def stop(*_a, **_k):
@@ -134,7 +138,7 @@ def test_a_forged_call_does_not_burn_the_replay_nonce(wired, monkeypatch):
     body, _ = _payload()
     with pytest.raises(HTTPException):
         _call(body, "0" * 64, [KEY], monkeypatch)
-    assert wired == [], "a forged call must not consume the genuine call's nonce"
+    assert wired.taken == [], "a forged call must not consume the genuine call's nonce"
 
 
 def test_no_known_key_means_no_processing(wired, monkeypatch):
@@ -149,7 +153,18 @@ def test_a_genuine_call_signed_with_any_known_key_is_processed(wired, monkeypatc
     # Signed with the environment fallback key (checkout's second choice).
     with pytest.raises(_Stop):
         _call(body, _sign(body, "env-key"), ["tenant-key", "env-key"], monkeypatch)
-    assert wired == ["kashier:processed:tx-123"]
+    assert wired.taken == ["kashier:processed:tx-123"]
+
+
+def test_a_failed_genuine_call_releases_its_nonce_for_the_retry(wired, monkeypatch):
+    """The nonce is taken before processing. If processing then fails, the
+    retry Kashier sends must not be rejected as a duplicate, or a paid order
+    is never recorded. (`narrow_to_tenant` raising stands in for any failure
+    after the nonce: a DB error, a commit that fails.)"""
+    body, _ = _payload()
+    with pytest.raises(_Stop):
+        _call(body, _sign(body, KEY), [KEY], monkeypatch)
+    assert wired.released == ["kashier:processed:tx-123"]
 
 
 def test_a_tampered_status_breaks_the_signature(wired, monkeypatch):
