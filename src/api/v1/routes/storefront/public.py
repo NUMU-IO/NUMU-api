@@ -871,6 +871,7 @@ async def _read_installed_apps(session, *, store_id) -> list[dict]:
     )
 
     try:
+        from src.application.services.numu_apps import NUMU_APPS
         from src.application.services.partner_program import partner_apps_enabled
 
         stmt = (
@@ -887,6 +888,10 @@ async def _read_installed_apps(session, *, store_id) -> list[dict]:
         if not await partner_apps_enabled(session):
             # The Partner-apps kill switch: only NUMU Apps stay on storefronts.
             stmt = stmt.where(AppModel.developer_id.is_(None))
+        # WhatsApp and the Inbox are hub-only NUMU Apps: nothing on a storefront
+        # renders them, and listing them here would tell every visitor which
+        # tools the merchant uses (and ignore the ff_numu_apps rollout flag).
+        stmt = stmt.where(AppModel.slug.notin_(NUMU_APPS))
         rows = (await session.execute(stmt)).all()
     except Exception:  # pragma: no cover - defensive; see docstring
         from src.core.logging import get_logger
