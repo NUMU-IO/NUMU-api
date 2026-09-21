@@ -95,6 +95,11 @@ def _referenced_schemas(node: Any, found: set[str]) -> None:
             _referenced_schemas(value, found)
 
 
+#: Partner App OAuth endpoints an app's SERVER calls with its client
+#: credentials (no bearer token): part of the public contract, so listed.
+_CLIENT_CREDENTIAL_PATHS = {"/api/v1/oauth/token", "/api/v1/oauth/revoke"}
+
+
 def build_public_schema(full: dict[str, Any]) -> dict[str, Any]:
     """Filter a full OpenAPI document down to the token-reachable surface."""
     paths: dict[str, Any] = {}
@@ -102,6 +107,9 @@ def build_public_schema(full: dict[str, Any]) -> dict[str, Any]:
         kept = {}
         for method, operation in operations.items():
             if method not in _METHODS:
+                continue
+            if path in _CLIENT_CREDENTIAL_PATHS:
+                kept[method] = {**operation, "x-numu-scope": "client_credentials"}
                 continue
             scope = required_scope_for(path, method)
             if scope is None:

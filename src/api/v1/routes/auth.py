@@ -1058,6 +1058,8 @@ class ApiKeyInfoResponse(BaseModel):
     currency: str | None
     default_language: str | None
     tenant_id: str
+    #: Set when the caller is a Partner App token (``numu_app_``).
+    app_slug: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1238,8 +1240,8 @@ async def get_api_key_info(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "This endpoint identifies personal access tokens; "
-                "authenticate with a numu_pat_… bearer token."
+                "This endpoint identifies access tokens; authenticate with a "
+                "numu_pat_… or numu_app_… bearer token."
             ),
         )
 
@@ -1267,6 +1269,7 @@ async def get_api_key_info(
             currency=currency,
             default_language=default_language,
             tenant_id=pat["tenant_id"],
+            app_slug=pat.get("app_slug"),
         ),
         message="API key identified",
     )

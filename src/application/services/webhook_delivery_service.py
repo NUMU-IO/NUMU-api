@@ -105,15 +105,19 @@ class WebhookDeliveryService:
             store_id, event_type
         )
         if subscriptions and not await self._store_may_receive(store_id):
+            # A Partner App's subscriptions are not gated by the store's plan
+            # (OD-7: the install is the grant); the merchant's own are.
+            skipped = [s for s in subscriptions if s.app_installation_id is None]
+            subscriptions = [s for s in subscriptions if s.app_installation_id]
             logger.info(
                 "webhook_dispatch_skipped_no_api_access",
                 store_id=str(store_id),
-                event=event_type.value,
-                subscriptions=len(subscriptions),
+                event_type=event_type.value,
+                subscriptions=len(skipped),
             )
-            return []
         if not subscriptions:
             return
+        session = getattr(self.subscription_repo, "session", None)
 
         payload = self._build_envelope(event_type, event_data)
 
@@ -131,8 +135,11 @@ class WebhookDeliveryService:
             created_log = await self.delivery_log_repo.create(log)
             await self.delivery_log_repo.update(created_log)
 
+            secret = await signing_secret(session, sub)
+            if not secret:
+                continue
             asyncio.create_task(
-                _attempt_delivery(created_log.id, sub.url, sub.secret, payload),
+                _attempt_delivery(created_log.id, sub.url, secret, payload),
                 name=f"webhook:{event_type}:{sub.id}",
             )
 
@@ -143,6 +150,28 @@ class WebhookDeliveryService:
             event_id=str(event_id),
             subscription_count=len(subscriptions),
         )
+
+
+async def signing_secret(session, sub) -> str | None:
+    """The key a delivery is signed with.
+
+    The merchant's own subscriptions: their per-subscription secret. A Partner
+    App's: the app's client secret (plan 06 D11), decrypted at send time so a
+    rotation takes effect at once and it is never copied into this table.
+    None when an app has no readable secret yet (created before Phase 4 and
+    never rotated): skip rather than sign with nothing.
+    """
+    if not getattr(sub, "app_installation_id", None):
+        return sub.secret
+    if session is None:
+        return None
+    from src.application.services.app_tokens import read_client_secret
+    from src.infrastructure.database.models.public.app import AppInstallationModel
+
+    installation = await session.get(AppInstallationModel, sub.app_installation_id)
+    if installation is None:
+        return None
+    return await read_client_secret(session, installation.app_id)
 
 
 async def _attempt_delivery(
@@ -419,8 +448,11 @@ async def retry_pending_deliveries() -> int:
                 continue
             sub = await sub_repo.get_by_id(log.subscription_id)
             if sub and sub.is_active:
+                secret = await signing_secret(session, sub)
+                if not secret:
+                    continue
                 asyncio.create_task(
-                    _attempt_delivery(log.id, sub.url, sub.secret, log.payload),
+                    _attempt_delivery(log.id, sub.url, secret, log.payload),
                     name=f"webhook_retry:{log.id}",
                 )
 

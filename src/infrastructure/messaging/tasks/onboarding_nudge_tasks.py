@@ -213,7 +213,9 @@ def send_trial_expiry_warnings(self):
                                 logger.warning(
                                     "trial_warning_email_failed",
                                     user_id=user_id,
-                                    event=event_key,
+                                    # Not ``event=``: structlog's first argument
+                                    # is ``event``, so that kwarg raised TypeError.
+                                    event_key=event_key,
                                 )
 
             logger.info("trial_warnings_complete", sent=sent_count)

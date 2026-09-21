@@ -94,7 +94,8 @@ async def handle_template_status_update(
             "template_status_webhook_no_local_row",
             waba_id=waba_id,
             meta_template_id=meta_template_id,
-            event=event,
+            # Not ``event=``: it collides with structlog's own first argument.
+            status_event=event,
         )
         return False
 

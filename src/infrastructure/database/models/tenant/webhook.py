@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID as PyUUID
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,13 @@ class WebhookSubscriptionModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     secret: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
+    )
+    #: Set when a Partner App owns this subscription (signed with the app's
+    #: client secret; deleted with the installation).
+    app_installation_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_installations.id", ondelete="CASCADE"),
+        nullable=True,
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 

@@ -36,15 +36,25 @@ SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{2,40}$")
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 #: Events an app may subscribe to: the public webhook events, plus the app
-#: lifecycle event every app must handle.
+#: lifecycle event every app must handle and ``store.redact`` (48 hours after
+#: uninstall: delete the store's data; PDPL 151/2020).
 APP_WEBHOOK_EVENTS = frozenset(e.value for e in SUBSCRIBABLE_EVENT_TYPES) | {
-    "app.uninstalled"
+    "app.uninstalled",
+    "store.redact",
 }
+#: Delivered directly by NUMU (app_webhooks), never through a subscription.
+APP_LIFECYCLE_EVENTS = frozenset({"app.uninstalled", "store.redact"})
 
 #: Scopes an app may request (plan 03 § 5):
 #: - the PAT scope strings, minus ``*`` (a PAT convenience, never an app grant)
-#:   and ``themes:write`` (publishing changes a live storefront).
-APP_SCOPES = frozenset(VALID_SCOPES) - {"*", "themes:write"}
+#:   and ``themes:write`` (publishing changes a live storefront);
+#: - plus ``messages``, which alone reaches customer conversations (threads,
+#:   messages, channels, WhatsApp) for app tokens. A PAT reaches those with
+#:   ``marketing``, unchanged.
+APP_SCOPES = (frozenset(VALID_SCOPES) - {"*", "themes:write"}) | {
+    "messages:read",
+    "messages:write",
+}
 
 CATEGORIES = (
     "shipping",
@@ -275,11 +285,11 @@ class ManifestV1(_Strict):
             raise ValueError("webhooks must include app.uninstalled")
         requested = set(self.oauth.scopes) | set(self.oauth.optional_scopes)
         sensitive = any(s.endswith(":write") for s in requested) or bool(
-            requested & {"customers:read"}
+            requested & {"customers:read", "messages:read"}
         )
         if sensitive and not self.developer.privacy_policy_url:
             raise ValueError(
-                "developer.privacy_policy_url is required for any :write scope or customers:read"
+                "developer.privacy_policy_url is required for any :write scope, customers:read or messages:read"
             )
         if self.pricing.model == "external" and not self.pricing.label:
             raise ValueError("pricing.label is required for an external price")
