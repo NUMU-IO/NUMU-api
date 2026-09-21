@@ -40,6 +40,20 @@ from src.infrastructure.external_services.whatsapp.messaging_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _whatsapp_installed(monkeypatch):
+    """These tests are about payment. The NUMU-App install check has its own
+    test below; here the app is on, as it is for every tenant without
+    ff_numu_apps."""
+
+    async def _on(_db, _store_id, _slug):
+        return True
+
+    monkeypatch.setattr(
+        "src.application.services.whatsapp_entitlement.app_enabled", _on
+    )
+
+
 def _content():
     return MessageContent(
         type=MessageType.ORDER_CONFIRMATION,
@@ -272,3 +286,21 @@ async def test_coming_back_to_pay_shows_the_same_reference():
 
     assert intent is open_bill
     assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_uninstalled_app_cannot_send_even_when_paid(monkeypatch):
+    """WhatsApp is a NUMU App: uninstalling it stops sends and the checkout
+    OTP, whatever was paid. The check runs before the access row is read."""
+
+    async def _off(_db, _store_id, _slug):
+        return False
+
+    monkeypatch.setattr(
+        "src.application.services.whatsapp_entitlement.app_enabled", _off
+    )
+    row = _row()
+    live = await entitlement(_FakeSession(row), row.store_id)
+
+    assert live.active is False
+    assert live.reason == "not_installed"

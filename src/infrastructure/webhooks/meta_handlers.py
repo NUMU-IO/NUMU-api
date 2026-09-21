@@ -69,6 +69,14 @@ async def handle_message_webhook(
         )
         return
 
+    from src.application.services.numu_apps import app_enabled
+
+    if not await app_enabled(db, connection.store_id, "inbox"):
+        # The Inbox is a NUMU App and this store uninstalled or disabled it.
+        # Threads already stored are kept; nothing new comes in.
+        logger.info("meta_webhook_inbox_not_installed store=%s", connection.store_id)
+        return
+
     async def _fetch_sender_profile() -> tuple[str | None, str | None]:
         """Resolve the sender's display name + avatar from the Graph API.
 

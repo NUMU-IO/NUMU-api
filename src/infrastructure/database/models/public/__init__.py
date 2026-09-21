@@ -11,6 +11,7 @@ They include:
 from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
     AppModel,
+    AppUninstallModel,
 )
 from src.infrastructure.database.models.public.currency_rate import CurrencyRateModel
 from src.infrastructure.database.models.public.customizer_undo_entry import (
@@ -65,6 +66,7 @@ from src.infrastructure.database.models.public.whatsapp_access import (
 __all__ = [
     "AppModel",
     "AppInstallationModel",
+    "AppUninstallModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",
     "FeedbackModel",
