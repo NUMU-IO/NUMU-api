@@ -160,16 +160,40 @@ async def signing_secret(session, sub) -> str | None:
     rotation takes effect at once and it is never copied into this table.
     None when an app has no readable secret yet (created before Phase 4 and
     never rotated): skip rather than sign with nothing.
+
+    Also None, so the delivery is skipped, when the app may not receive
+    merchant data right now: the app is suspended, its install is disabled or
+    mid-consent, or the Partner-apps kill switch is off. Its tokens already
+    stop at those moments (app_tokens.resolve_app_token). Without this its
+    webhooks kept delivering orders and customers to an app NUMU had just
+    suspended.
     """
     if not getattr(sub, "app_installation_id", None):
         return sub.secret
     if session is None:
         return None
     from src.application.services.app_tokens import read_client_secret
-    from src.infrastructure.database.models.public.app import AppInstallationModel
+    from src.application.services.partner_program import partner_apps_enabled
+    from src.core.entities.app import AppStatus
+    from src.infrastructure.database.models.public.app import (
+        AppInstallationModel,
+        AppModel,
+    )
 
     installation = await session.get(AppInstallationModel, sub.app_installation_id)
-    if installation is None:
+    if (
+        installation is None
+        or not installation.is_enabled
+        or (installation.status or "active") != "active"
+    ):
+        return None
+    app = await session.get(AppModel, installation.app_id)
+    if (
+        app is None
+        or getattr(app.status, "value", app.status) == AppStatus.SUSPENDED.value
+    ):
+        return None
+    if app.developer_id is not None and not await partner_apps_enabled(session):
         return None
     return await read_client_secret(session, installation.app_id)
 
