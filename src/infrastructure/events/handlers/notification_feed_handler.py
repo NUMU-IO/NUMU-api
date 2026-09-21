@@ -78,7 +78,9 @@ async def handle_order_created_notification(event: OrderCreatedEvent) -> None:
         kind="order.new",
         data={
             "order_number": event.order_number,
-            "total_cents": snap.get("total_cents", int(event.total * 100)),
+            "total_cents": snap.get(
+                "total_cents", int(event.total)
+            ),  # event.total is already cents
             "currency": snap.get("currency") or event.currency,
             "payment_method": snap.get("payment_method"),
             "customer_name": snap.get("customer_name"),
@@ -98,7 +100,9 @@ async def handle_order_paid_notification(event: OrderPaidEvent) -> None:
         kind="payment.received",
         data={
             "order_number": event.order_number,
-            "total_cents": snap.get("total_cents", int(event.total * 100)),
+            "total_cents": snap.get(
+                "total_cents", int(event.total)
+            ),  # event.total is already cents
             "currency": snap.get("currency") or "EGP",
             "payment_method": event.payment_method or snap.get("payment_method"),
             "customer_name": snap.get("customer_name"),
