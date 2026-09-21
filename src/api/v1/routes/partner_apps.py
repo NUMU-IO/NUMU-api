@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.api.dependencies.partners import (
-    require_approved_partner,
+    require_agreed_partner,
     require_partner_program,
 )
 from src.api.responses import SuccessResponse
@@ -230,7 +230,7 @@ def _conflict(detail: str) -> HTTPException:
 
 @router.get("", response_model=SuccessResponse[list[PartnerAppOut]])
 async def list_apps(
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     apps = (
@@ -254,7 +254,7 @@ async def list_apps(
 )
 async def create_app(
     body: CreateAppRequest,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """A draft app and its OAuth client. The secret is in this response only."""
@@ -306,7 +306,7 @@ class ValidateRequest(BaseModel):
 @router.post("/validate", response_model=SuccessResponse[dict])
 async def validate_manifest(
     body: ValidateRequest,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
 ):
     """Dry run: the exact rules an upload applies, with nothing stored.
     ``numu app validate`` calls this, so the CLI never drifts from the API."""
@@ -320,7 +320,7 @@ async def validate_manifest(
 @router.get("/{app_id}", response_model=SuccessResponse[PartnerAppDetail])
 async def get_app(
     app_id: UUID,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     app = await _own_app(db, user_id, app_id)
@@ -330,7 +330,7 @@ async def get_app(
 @router.post("/{app_id}/client-secret", response_model=SuccessResponse[dict])
 async def rotate_secret(
     app_id: UUID,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """A new secret; the old one stops working. Shown once."""
@@ -363,7 +363,7 @@ async def rotate_secret(
 async def upload_version(
     app_id: UUID,
     body: UploadVersionRequest,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Validate a ``numu.app.json`` and store it as a draft version."""
@@ -422,7 +422,7 @@ async def upload_version(
 async def submit_version(
     app_id: UUID,
     version_id: UUID,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Send a draft (or a version NUMU asked to change) for review."""
@@ -474,7 +474,7 @@ async def submit_version(
 async def publish_version(
     app_id: UUID,
     version_id: UUID,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Make an approved version the live one. The previous one is superseded."""
@@ -518,7 +518,7 @@ async def publish_version(
 async def dev_install(
     app_id: UUID,
     body: DevInstallRequest,
-    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Install the partner's own app, at any status, on one of their own
