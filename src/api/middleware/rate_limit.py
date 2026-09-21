@@ -52,6 +52,11 @@ AUTH_ENDPOINTS = {
     "/api/v1/auth/login",
     "/api/v1/auth/register",
     "/api/v1/admin/auth/login",
+    # A 6-digit code is credential-guessing too; the generic tier let a
+    # bot try far more codes per minute than any person types.
+    "/api/v1/auth/2fa/verify",
+    "/api/v1/auth/2fa/complete-login",
+    "/api/v1/admin/auth/2fa/verify",
 }
 
 # Token refresh is credential-EXCHANGE, not credential-GUESSING: it only

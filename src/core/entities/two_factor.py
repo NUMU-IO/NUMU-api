@@ -4,7 +4,7 @@ This module defines the TwoFactorAuth entity that stores 2FA configuration
 for users, including TOTP secrets and backup codes.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import UUID
 
@@ -76,7 +76,10 @@ class TwoFactorAuth(BaseEntity):
     def enable(self) -> None:
         """Mark 2FA as enabled after successful verification."""
         self.status = TwoFactorStatus.ENABLED
-        self.verified_at = datetime.utcnow()
+        # Timezone-aware: a naive utcnow() is stored in the DB session's
+        # timezone, so on a non-UTC server (the local DB is Africa/Cairo) the
+        # admin step-up read every fresh verification as hours old.
+        self.verified_at = datetime.now(UTC)
         self.touch()
 
     def disable(self) -> None:
@@ -119,7 +122,7 @@ class TwoFactorAuth(BaseEntity):
 
     def record_use(self) -> None:
         """Record that 2FA was used for authentication."""
-        self.last_used_at = datetime.utcnow()
+        self.last_used_at = datetime.now(UTC)
         self.touch()
 
     def regenerate_backup_codes(self, hashed_backup_codes: list[str]) -> None:

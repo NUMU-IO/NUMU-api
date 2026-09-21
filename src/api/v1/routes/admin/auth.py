@@ -22,10 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
-from src.api.dependencies.repositories import get_user_repository
+from src.api.dependencies.repositories import (
+    get_two_factor_repository,
+    get_user_repository,
+)
 from src.api.dependencies.services import (
     get_password_service,
     get_token_service,
+    get_totp_service,
 )
 from src.api.responses import SuccessResponse
 from src.api.utils.cookies import (
@@ -38,6 +42,12 @@ from src.api.v1.schemas.public.auth import (
     TokenResponse,
     UserResponse,
 )
+from src.api.v1.schemas.public.two_factor import (
+    Enable2FAResponse,
+    TwoFactorStatusResponse,
+    Verify2FARequest,
+    Verify2FAResponse,
+)
 from src.application.dto.auth import LoginDTO
 from src.application.services.lockout_service import (
     AccountLockoutService,
@@ -47,6 +57,8 @@ from src.core.entities.user import UserRole
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services.password_service import PasswordService
 from src.infrastructure.external_services.token_service import TokenService
+from src.infrastructure.external_services.totp_service import TOTPService
+from src.infrastructure.repositories.two_factor_repository import TwoFactorRepository
 from src.infrastructure.repositories.user_repository import UserRepository
 
 router = APIRouter()
@@ -190,4 +202,106 @@ async def admin_refresh(
             token_type="bearer",
         ),
         message="Admin session refreshed",
+    )
+
+
+# ─── Admin 2FA: enrol, and the step-up the gated admin actions require ──────
+#
+# `require_admin_2fa` (theme, app and partner decisions, capability
+# lifecycle, platform settings) accepts an admin only if a TOTP or backup code
+# was verified in the last few minutes. The merchant `/auth/2fa/*` routes
+# authenticate the MERCHANT session, so an admin working from the admin panel
+# had no way to enrol or to step up. With NUMU_FORCE_ADMIN_2FA on, every gated
+# action would have been a dead end. These routes are the same use cases
+# behind `require_admin` (the admin cookie). A successful verify records the
+# use, which is exactly the freshness the step-up checks.
+
+
+@router.get(
+    "/2fa/status",
+    response_model=SuccessResponse[TwoFactorStatusResponse],
+    summary="The signed-in admin's 2FA status",
+    operation_id="admin_2fa_status",
+)
+async def admin_2fa_status(
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
+):
+    from src.application.dto.two_factor import TwoFactorStatusDTO
+
+    s = TwoFactorStatusDTO.from_entity(await two_factor_repo.get_by_user_id(admin_id))
+    return SuccessResponse(
+        data=TwoFactorStatusResponse(
+            is_enabled=s.is_enabled,
+            method=s.method,
+            backup_codes_remaining=s.backup_codes_remaining,
+            enabled_at=str(s.enabled_at) if s.enabled_at else None,
+            last_used_at=str(s.last_used_at) if s.last_used_at else None,
+        )
+    )
+
+
+@router.post(
+    "/2fa/enable",
+    response_model=SuccessResponse[Enable2FAResponse],
+    summary="Start 2FA enrolment for the signed-in admin",
+    operation_id="admin_2fa_enable",
+)
+async def admin_2fa_enable(
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
+    totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
+):
+    """A TOTP secret, its QR URI and 10 backup codes. Enrolment completes on
+    the first successful /2fa/verify."""
+    from src.application.use_cases.auth.two_factor import Enable2FAUseCase
+
+    result = await Enable2FAUseCase(
+        user_repository=user_repo,
+        two_factor_repository=two_factor_repo,
+        totp_service=totp_svc,
+    ).execute(user_id=admin_id)
+    return SuccessResponse(
+        data=Enable2FAResponse(
+            secret=result.secret,
+            provisioning_uri=result.provisioning_uri,
+            qr_code_uri=result.qr_code_uri,
+            backup_codes=result.backup_codes,
+            method=result.method,
+        ),
+        message="Scan the QR code, then verify a code to finish.",
+    )
+
+
+@router.post(
+    "/2fa/verify",
+    response_model=SuccessResponse[Verify2FAResponse],
+    summary="Finish enrolment, or step up before a gated admin action",
+    operation_id="admin_2fa_verify",
+)
+async def admin_2fa_verify(
+    request: Verify2FARequest,
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
+    totp_svc: Annotated[TOTPService, Depends(get_totp_service)],
+):
+    """A TOTP code or a backup code. Both record the use, so this is the
+    step-up: gated actions accept the admin for the next few minutes."""
+    from src.application.use_cases.auth.two_factor import Verify2FAUseCase
+
+    current = await two_factor_repo.get_by_user_id(admin_id)
+    result = await Verify2FAUseCase(
+        two_factor_repository=two_factor_repo, totp_service=totp_svc
+    ).execute(
+        user_id=admin_id,
+        code=request.code,
+        is_initial_setup=bool(current and current.is_pending),
+    )
+    return SuccessResponse(
+        data=Verify2FAResponse(
+            verified=result.verified,
+            method_used=result.method_used,
+            backup_codes_remaining=result.backup_codes_remaining,
+        )
     )
