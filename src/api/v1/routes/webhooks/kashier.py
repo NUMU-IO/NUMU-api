@@ -140,6 +140,32 @@ async def kashier_callback(
     x_kashier_signature: str = Header(None, alias="x-kashier-signature"),
 ):
     """Handle Kashier payment callback."""
+    nonces: list[str] = []
+    # A nonce taken for a call that then fails would turn Kashier's retry
+    # into a "duplicate", and a paid order would never be recorded.
+    # Release it, and let the error answer 500 so Kashier retries.
+    try:
+        return await _handle_callback(request, db, x_kashier_signature, nonces)
+    except Exception:
+        for key in nonces:
+            try:
+                released = await _cache_service.delete(key)
+            except Exception:  # noqa: BLE001 - never mask the original error
+                released = False
+            if not released:
+                # Redis refused the delete, so the retry will read as a
+                # duplicate until the key expires. Say so loudly: an
+                # operator can delete the key by hand.
+                logger.error("kashier_nonce_release_failed", nonce_key=key)
+        raise
+
+
+async def _handle_callback(
+    request: Request,
+    db: AsyncSession,
+    x_kashier_signature: str | None,
+    nonces: list[str],
+):
     payload = await request.body()
     log = logger.bind(webhook="kashier")
 
@@ -228,6 +254,7 @@ async def kashier_callback(
         if not was_set:
             log.warning("webhook_duplicate_rejected")
             return {"status": "duplicate", "transaction_id": transaction_id}
+        nonces.append(nonce_key)
 
     # ── RLS narrowing ────────────────────────────────────────────
     await narrow_to_tenant(db, order.tenant_id)
