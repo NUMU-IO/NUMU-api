@@ -1211,6 +1211,8 @@ class InvoicePDFGenerator:
         payment_status_key = None
         payment_method = None
         payment_method_ar = None
+        payment_method_key = None
+        recorded_payments: list[dict[str, Any]] = []
         paid_at = None
         if payment:
             raw_status = payment.get("status")
@@ -1218,7 +1220,9 @@ class InvoicePDFGenerator:
                 payment_status_key = str(raw_status).split(".")[-1].lower()
             payment_method = payment.get("method")
             payment_method_ar = payment.get("method_ar")
+            payment_method_key = payment.get("method_key")
             paid_at = payment.get("paid_at")
+            recorded_payments = payment.get("payments") or []
 
         # What the document may truthfully claim to be. "Tax invoice" and the
         # VAT lines need a seller tax registration number — printing them for
@@ -1229,13 +1233,41 @@ class InvoicePDFGenerator:
         is_eta_certified = bool(
             invoice.eta_uuid and not str(invoice.eta_uuid).startswith("simulated")
         )
-        # A cash-on-delivery invoice goes in the parcel before any money has
-        # moved; the customer and the courier both need the figure to collect.
+        # Money already collected (merchant-recorded deposits, approved
+        # transfers) comes off what the customer still owes. A cash-on-delivery
+        # invoice goes in the parcel, so the courier and the customer both need
+        # the figure that is LEFT to collect — not the full total.
+        paid_cents = sum(int(p.get("amount_cents") or 0) for p in recorded_payments)
+        is_settled = payment_status_key in ("paid", "refunded", "partially_refunded")
+        balance_cents = 0 if is_settled else max(0, invoice.grand_total - paid_cents)
+        if not is_settled and paid_cents > 0 and balance_cents > 0:
+            # Display only: the order model has no part-paid state (it stays
+            # `pending`), but the paper should say what actually happened.
+            payment_status_key = "partially_paid"
         amount_due = (
-            f"{invoice.grand_total / 100:,.2f}"
-            if payment_status_key in ("pending", "unpaid", "failed")
+            f"{balance_cents / 100:,.2f}"
+            if balance_cents > 0
+            and payment_status_key in ("pending", "unpaid", "failed", "partially_paid")
             else None
         )
+        # Only a cash-on-delivery order is "due on delivery"; a pending bank
+        # transfer is just due.
+        is_cod = payment_method_key in ("cod", "cash_on_delivery")
+        if paid_cents > 0:
+            due_label_ar = "المتبقي عند الاستلام" if is_cod else "المبلغ المتبقي"
+            due_label_en = "Balance due on delivery" if is_cod else "Balance due"
+        else:
+            due_label_ar = "المبلغ المطلوب عند الاستلام" if is_cod else "المبلغ المستحق"
+            due_label_en = "Amount due on delivery" if is_cod else "Amount due"
+        payments_view = [
+            {
+                "amount": f"{int(p.get('amount_cents') or 0) / 100:,.2f}",
+                "method": p.get("method"),
+                "method_ar": p.get("method_ar"),
+                "date": p.get("date"),
+            }
+            for p in recorded_payments
+        ]
 
         return {
             "invoice": invoice,
@@ -1274,6 +1306,10 @@ class InvoicePDFGenerator:
             "is_tax_registered": is_tax_registered,
             "is_eta_certified": is_eta_certified,
             "amount_due": amount_due,
+            "due_label_ar": due_label_ar,
+            "due_label_en": due_label_en,
+            "payments": payments_view,
+            "paid_total": f"{paid_cents / 100:,.2f}",
             # QR code
             "qr_data_uri": qr_data_uri,
             # Party info
@@ -1324,6 +1360,7 @@ _LABELS_AR = {
         "paid": "مدفوعة",
         "pending": "في انتظار الدفع",
         "unpaid": "غير مدفوعة",
+        "partially_paid": "مدفوعة جزئياً",
         "authorized": "مصرّح بها",
         "partially_refunded": "مسترد جزئياً",
         "refunded": "تم الاسترداد",
@@ -1360,6 +1397,7 @@ _LABELS_EN = {
         "paid": "Paid",
         "pending": "Pending",
         "unpaid": "Unpaid",
+        "partially_paid": "Partially paid",
         "authorized": "Authorized",
         "partially_refunded": "Partially Refunded",
         "refunded": "Refunded",

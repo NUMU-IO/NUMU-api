@@ -73,6 +73,9 @@ _PAYMENT_METHOD_LABELS = {
     "tap": "Tap",
     "instapay": "InstaPay",
     "bank_transfer": "Bank Transfer",
+    "vodafone_cash": "Vodafone Cash",
+    "cash": "Cash",
+    "other": "Other",
 }
 # The invoice is Arabic-first; the method prints in both languages.
 _PAYMENT_METHOD_LABELS_AR = {
@@ -84,6 +87,9 @@ _PAYMENT_METHOD_LABELS_AR = {
     "fawry": "فوري",
     "instapay": "إنستاباي",
     "bank_transfer": "تحويل بنكي",
+    "vodafone_cash": "فودافون كاش",
+    "cash": "نقدي",
+    "other": "أخرى",
 }
 
 
@@ -132,8 +138,55 @@ async def _resolve_payment_context(
         "status": raw_status,  # generator normalizes to a CSS-class key
         "method": method_label,
         "method_ar": method_label_ar,
+        "method_key": str(raw_method or "").lower().strip() or None,
         "paid_at": paid_at_str,
+        "payments": await _settled_payments(order_repo, order.id),
     }
+
+
+async def _settled_payments(order_repo: OrderRepository, order_id: UUID) -> list[dict]:
+    """Money already collected against the order, oldest first.
+
+    A merchant who records a deposit ("سجل دفعة" — say 100 by InstaPay on a
+    300 cash-on-delivery order) needs the paper in the parcel to show it,
+    and to ask the customer for the 200 that is left, not the full 300.
+    Only settled proofs count — the same rule the order's balance uses —
+    so a voided or still-under-review upload never reduces what is due.
+
+    Best-effort: a failed read prints the invoice without the payments
+    rather than failing the print.
+    """
+    from src.core.entities.instapay import PaymentProofStatus
+    from src.infrastructure.repositories.payment_proof_repository import (
+        PaymentProofRepository,
+    )
+
+    try:
+        proofs = await PaymentProofRepository(order_repo.session).list_for_order(
+            order_id
+        )
+    except Exception:  # noqa: BLE001 — never block a print on this
+        logger.warning(
+            "invoice_payments_lookup_failed", extra={"order_id": str(order_id)}
+        )
+        return []
+
+    settled = {PaymentProofStatus.APPROVED, PaymentProofStatus.AUTO_APPROVED}
+    out: list[dict] = []
+    for proof in proofs:
+        if proof.status not in settled or not proof.declared_amount_cents:
+            continue
+        # Customer-uploaded proofs predate `recorded_method`; they come
+        # through the InstaPay rail.
+        key = (proof.recorded_method or "instapay").lower()
+        when = proof.review_decision_at or proof.created_at
+        out.append({
+            "amount_cents": int(proof.declared_amount_cents),
+            "method": _PAYMENT_METHOD_LABELS.get(key, key.replace("_", " ").title()),
+            "method_ar": _PAYMENT_METHOD_LABELS_AR.get(key),
+            "date": when.strftime("%Y-%m-%d") if when else None,
+        })
+    return out
 
 
 @router.post(
@@ -224,6 +277,33 @@ async def create_invoice(
     )
 
 
+async def _order_payment_statuses(
+    invoice_repo: InvoiceRepository,
+    store_id: UUID,
+    order_ids: list[UUID],
+) -> dict[UUID, str]:
+    """Payment status of each order on this page of invoices — one query.
+
+    Scoped to the store so a page can only ever read its own orders.
+    """
+    if not order_ids:
+        return {}
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models import OrderModel
+
+    rows = await invoice_repo.session.execute(
+        select(OrderModel.id, OrderModel.payment_status).where(
+            OrderModel.store_id == store_id,
+            OrderModel.id.in_(set(order_ids)),
+        )
+    )
+    return {
+        order_id: str(getattr(status, "value", status))
+        for order_id, status in rows.all()
+    }
+
+
 @router.get(
     "/",
     response_model=SuccessResponse[PaginatedListResponse[InvoiceListResponse]],
@@ -242,6 +322,9 @@ async def list_invoices(
         store.id, status_filter=status_filter, page=page, page_size=page_size
     )
 
+    payment_status_by_order = await _order_payment_statuses(
+        invoice_repo, store.id, [inv.order_id for inv in invoices if inv.order_id]
+    )
     items = [
         InvoiceListResponse(
             id=inv.id,
@@ -255,6 +338,9 @@ async def list_invoices(
             total_formatted=_format_currency(inv.total, inv.currency),
             eta_uuid=inv.eta_uuid,
             order_id=inv.order_id,
+            # Order-built invoices carry the order number as `internal_id`.
+            order_number=inv.internal_id if inv.order_id else None,
+            order_payment_status=payment_status_by_order.get(inv.order_id),
             created_at=inv.created_at,
         )
         for inv in invoices

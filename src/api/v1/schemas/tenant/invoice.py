@@ -355,6 +355,12 @@ class InvoiceListResponse(BaseModel):
     total_formatted: str | None = None
     eta_uuid: str | None
     order_id: UUID | None = None
+    # The order this invoice bills, as merchants know it (ORD-767567), and
+    # whether the customer has actually paid it. An invoice's own `status`
+    # is its tax-authority state — "accepted" on an unpaid cash-on-delivery
+    # invoice — so a list showing only that reads every such order as paid.
+    order_number: str | None = None
+    order_payment_status: str | None = None
     created_at: datetime
 
 

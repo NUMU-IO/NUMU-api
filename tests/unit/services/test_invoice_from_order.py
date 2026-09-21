@@ -155,13 +155,26 @@ def test_seller_falls_back_to_legacy_keys():
 # -------- What the printed document may claim --------------------------------
 
 
-def _html(store, order, *, payment_status="pending", eta_uuid="simulated-abc"):
+def _html(
+    store,
+    order,
+    *,
+    payment_status="pending",
+    eta_uuid="simulated-abc",
+    method_key="cod",
+    payments=None,
+):
     invoice = invoice_from_order(store, order, invoice_number="INV-2026-000009")
     invoice.eta_uuid = eta_uuid
     gen = InvoicePDFGenerator(template_name="invoice_ar.html", language="ar_en")
     return gen._render_template(
         invoice,
-        payment={"status": payment_status, "method": "Cash on Delivery"},
+        payment={
+            "status": payment_status,
+            "method": "Cash on Delivery",
+            "method_key": method_key,
+            "payments": payments or [],
+        },
     )
 
 
@@ -285,3 +298,113 @@ def test_no_platform_logo_on_the_merchants_invoice():
     html = _html(_store(), _order(lines=[_line("Abaya", 30_000)]))
     assert "numu_logo" not in html
     assert 'class="wordmark"' in html
+
+
+# -------- Recorded payments ("سجل دفعة") -------------------------------------
+
+DEPOSIT = [
+    {
+        "amount_cents": 10_000,
+        "method": "InstaPay",
+        "method_ar": "إنستاباي",
+        "date": "2026-09-21",
+    }
+]
+
+
+def test_recorded_deposit_is_listed_and_the_balance_is_what_is_left():
+    # 300 order, 100 deposit recorded by InstaPay: the parcel's paper must ask
+    # the customer for 200, not 300.
+    order = _order(lines=[_line("Abaya", 18_000)], shipping=12_000)
+    html = _html(_store(), order, payments=DEPOSIT)
+    assert "إنستاباي" in html and "-100.00 EGP" in html
+    assert "Balance due on delivery" in html
+    assert "200.00 EGP" in html
+    assert "Partially paid" in html
+
+
+def test_fully_paid_order_prints_no_balance_even_with_payments_listed():
+    order = _order(lines=[_line("Abaya", 18_000)], shipping=12_000)
+    html = _html(_store(), order, payment_status="paid", payments=DEPOSIT)
+    assert "Balance due" not in html
+    assert "Amount due" not in html
+
+
+def test_unpaid_non_cod_order_is_due_but_not_on_delivery():
+    order = _order(lines=[_line("Abaya", 30_000)])
+    html = _html(_store(), order, method_key="bank_transfer")
+    assert "Amount due" in html
+    assert "on delivery" not in html
+
+
+async def test_only_settled_payments_reduce_what_is_due(monkeypatch):
+    # A voided payment or an upload still under review must never lower the
+    # balance the courier collects.
+    from src.api.v1.routes.stores import invoices as invoices_module
+    from src.core.entities.instapay import PaymentProofStatus
+    from src.infrastructure.repositories import payment_proof_repository
+
+    def proof(status, cents, method="instapay"):
+        return SimpleNamespace(
+            status=status,
+            declared_amount_cents=cents,
+            recorded_method=method,
+            review_decision_at=datetime(2026, 9, 21, tzinfo=UTC),
+            created_at=datetime(2026, 9, 20, tzinfo=UTC),
+        )
+
+    async def list_for_order(self, order_id):
+        return [
+            proof(PaymentProofStatus.APPROVED, 10_000, "vodafone_cash"),
+            proof(PaymentProofStatus.AUTO_APPROVED, 5_000),
+            proof(PaymentProofStatus.REJECTED, 20_000),
+            proof(PaymentProofStatus.AWAITING_REVIEW, 30_000),
+        ]
+
+    monkeypatch.setattr(
+        payment_proof_repository.PaymentProofRepository,
+        "list_for_order",
+        list_for_order,
+    )
+    payments = await invoices_module._settled_payments(
+        SimpleNamespace(session=None), uuid4()
+    )
+    assert [p["amount_cents"] for p in payments] == [10_000, 5_000]
+    assert payments[0]["method_ar"] == "فودافون كاش"
+    assert payments[0]["date"] == "2026-09-21"
+
+
+# -------- Invoice list: the order's real payment status ----------------------
+
+
+async def test_list_reads_each_orders_payment_status_in_one_store_scoped_query():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.api.v1.routes.stores import invoices as invoices_module
+    from src.core.entities.order import PaymentStatus
+
+    paid_id, pending_id = uuid4(), uuid4()
+    result = MagicMock()
+    result.all.return_value = [(paid_id, PaymentStatus.PAID), (pending_id, "pending")]
+    session = SimpleNamespace(execute=AsyncMock(return_value=result))
+
+    statuses = await invoices_module._order_payment_statuses(
+        SimpleNamespace(session=session), uuid4(), [paid_id, pending_id, paid_id]
+    )
+    assert statuses == {paid_id: "paid", pending_id: "pending"}
+    session.execute.assert_awaited_once()
+
+
+async def test_list_skips_the_query_when_no_invoice_has_an_order():
+    from unittest.mock import AsyncMock
+
+    from src.api.v1.routes.stores import invoices as invoices_module
+
+    session = SimpleNamespace(execute=AsyncMock())
+    assert (
+        await invoices_module._order_payment_statuses(
+            SimpleNamespace(session=session), uuid4(), []
+        )
+        == {}
+    )
+    session.execute.assert_not_awaited()

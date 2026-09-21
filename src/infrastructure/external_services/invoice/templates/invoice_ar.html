@@ -224,6 +224,7 @@
             border-color: #B44218; color: #8E3312;
         }
         .pay--authorized { border-color: #1F4A7A; color: #1F4A7A; }
+        .pay--partially_paid { border-color: #1F4A7A; color: #1F4A7A; }
         .pay-label {
             font-size: 6pt;
             color: #6B7A8F;
@@ -284,6 +285,8 @@
             font-weight: 700;
         }
         .totals tr.due .value { font-size: 10pt; }
+        .totals tr.paid td { color: #3F5F3D; }
+        .totals tr.paid .label .en { color: #6E8A6C; }
         .vat-note {
             margin-top: 1.2mm;
             font-size: 6.3pt;
@@ -523,9 +526,18 @@
                     <td class="label">الإجمالي النهائي<span class="en">Grand total</span></td>
                     <td class="value">{{ grand_total }} {{ currency }}</td>
                 </tr>
+                {# Money already collected — a deposit the merchant recorded, an
+                   approved transfer — each on its own line, so the customer can
+                   see what they paid and how the balance is reached. #}
+                {% for p in payments %}
+                <tr class="paid">
+                    <td class="label">دفعة{% if p.method_ar %} · {{ p.method_ar }}{% endif %}{% if p.date %} · <span class="ltr">{{ p.date }}</span>{% endif %}<span class="en">Payment{% if p.method %} · {{ p.method }}{% endif %}</span></td>
+                    <td class="value">-{{ p.amount }} {{ currency }}</td>
+                </tr>
+                {% endfor %}
                 {% if amount_due %}
                 <tr class="due">
-                    <td class="label">المبلغ المطلوب عند الاستلام<span class="en">Amount due on delivery</span></td>
+                    <td class="label">{{ due_label_ar }}<span class="en">{{ due_label_en }}</span></td>
                     <td class="value">{{ amount_due }} {{ currency }}</td>
                 </tr>
                 {% endif %}
