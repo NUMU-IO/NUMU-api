@@ -323,11 +323,30 @@ def test_recorded_deposit_is_listed_and_the_balance_is_what_is_left():
     assert "Partially paid" in html
 
 
-def test_fully_paid_order_prints_no_balance_even_with_payments_listed():
+def test_paid_cod_order_shows_the_collected_rest_and_a_zero_balance():
+    # 300 order, 100 deposit recorded, then marked paid when the courier
+    # collected: the paper shows both payments and a 0 balance, while the
+    # GRAND TOTAL stays the invoice's value.
     order = _order(lines=[_line("Abaya", 18_000)], shipping=12_000)
     html = _html(_store(), order, payment_status="paid", payments=DEPOSIT)
-    assert "Balance due" not in html
+    assert "300.00 EGP" in html  # grand total unchanged
+    assert "-100.00 EGP" in html  # recorded deposit
+    assert "Collected on delivery" in html and "-200.00 EGP" in html
+    assert "0.00 EGP" in html and "Balance due" in html
     assert "Amount due" not in html
+
+
+def test_paid_order_with_no_recorded_payment_is_shown_paid_in_full():
+    order = _order(lines=[_line("Abaya", 30_000)])
+    html = _html(_store(), order, payment_status="paid", method_key="paymob")
+    assert "-300.00 EGP" in html
+    assert "Collected on delivery" not in html
+    assert "Balance due" in html
+
+
+def test_unpaid_invoice_never_shows_a_zero_balance_row():
+    html = _html(_store(), _order(lines=[_line("Abaya", 30_000)]))
+    assert 'class="settled"' not in html
 
 
 def test_unpaid_non_cod_order_is_due_but_not_on_delivery():

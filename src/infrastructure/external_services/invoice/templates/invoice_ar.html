@@ -286,6 +286,11 @@
         }
         .totals tr.due .value { font-size: 10pt; }
         .totals tr.paid td { color: #3F5F3D; }
+        .totals tr.settled td {
+            border-top: 0.9pt solid #5C7B5A;
+            color: #3F5F3D;
+            font-weight: 700;
+        }
         .totals tr.paid .label .en { color: #6E8A6C; }
         .vat-note {
             margin-top: 1.2mm;
@@ -531,10 +536,16 @@
                    see what they paid and how the balance is reached. #}
                 {% for p in payments %}
                 <tr class="paid">
-                    <td class="label">دفعة{% if p.method_ar %} · {{ p.method_ar }}{% endif %}{% if p.date %} · <span class="ltr">{{ p.date }}</span>{% endif %}<span class="en">Payment{% if p.method %} · {{ p.method }}{% endif %}</span></td>
+                    <td class="label">{{ p.label_ar or 'دفعة' }}{% if p.method_ar %} · {{ p.method_ar }}{% endif %}{% if p.date %} · <span class="ltr">{{ p.date }}</span>{% endif %}<span class="en">{{ p.label_en or 'Payment' }}{% if p.method %} · {{ p.method }}{% endif %}</span></td>
                     <td class="value">-{{ p.amount }} {{ currency }}</td>
                 </tr>
                 {% endfor %}
+                {% if paid_in_full %}
+                <tr class="settled">
+                    <td class="label">المتبقي<span class="en">Balance due</span></td>
+                    <td class="value">0.00 {{ currency }}</td>
+                </tr>
+                {% endif %}
                 {% if amount_due %}
                 <tr class="due">
                     <td class="label">{{ due_label_ar }}<span class="en">{{ due_label_en }}</span></td>

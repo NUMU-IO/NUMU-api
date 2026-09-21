@@ -1268,6 +1268,29 @@ class InvoicePDFGenerator:
             }
             for p in recorded_payments
         ]
+        # A paid invoice accounts for the whole total: what was recorded, plus
+        # whatever was settled without a recorded payment — the cash the
+        # courier collected on delivery, or a gateway / "mark as paid" payment.
+        # The GRAND TOTAL never changes (it is the invoice's value); the
+        # balance line then reads 0.
+        paid_in_full = payment_status_key == "paid"
+        unrecorded_cents = invoice.grand_total - paid_cents
+        if paid_in_full and unrecorded_cents > 0:
+            paid_date = paid_at[:10] if paid_at else None
+            if is_cod:
+                payments_view.append({
+                    "amount": f"{unrecorded_cents / 100:,.2f}",
+                    "label_ar": "تم التحصيل عند الاستلام",
+                    "label_en": "Collected on delivery",
+                    "date": paid_date,
+                })
+            else:
+                payments_view.append({
+                    "amount": f"{unrecorded_cents / 100:,.2f}",
+                    "method": payment_method,
+                    "method_ar": payment_method_ar,
+                    "date": paid_date,
+                })
 
         return {
             "invoice": invoice,
@@ -1309,6 +1332,7 @@ class InvoicePDFGenerator:
             "due_label_ar": due_label_ar,
             "due_label_en": due_label_en,
             "payments": payments_view,
+            "paid_in_full": paid_in_full,
             "paid_total": f"{paid_cents / 100:,.2f}",
             # QR code
             "qr_data_uri": qr_data_uri,
