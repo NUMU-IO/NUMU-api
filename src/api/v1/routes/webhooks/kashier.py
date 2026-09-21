@@ -152,6 +152,12 @@ async def kashier_callback(
             detail="Invalid JSON payload",
         )
 
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload",
+        )
+
     # Log raw payload for debugging
     log.info("webhook_raw_payload", payload_keys=list(data.keys()))
 

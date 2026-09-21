@@ -59,6 +59,15 @@ router = APIRouter(
     dependencies=[Depends(require_partner_program)],
 )
 
+
+async def _developer_name(db: AsyncSession, app: AppModel) -> str:
+    """The listing's developer: the app owner's partner name. A super admin
+    may act on an app without a partner account of their own, so this never
+    reads the caller's account."""
+    owner = await partner_for_user(db, app.developer_id) if app.developer_id else None
+    return owner.display_name if owner else "NUMU"
+
+
 #: A partner edits a version only while it is theirs to edit.
 EDITABLE = ("draft", "changes_requested")
 
@@ -392,8 +401,9 @@ async def upload_version(
     if app.status == AppStatus.DRAFT:
         # Never published: the app row mirrors the newest upload, so a
         # dev-install on the partner's own store shows the current listing.
-        partner = await partner_for_user(db, user_id)
-        app.manifest = to_listing_manifest(data, developer_name=partner.display_name)
+        app.manifest = to_listing_manifest(
+            data, developer_name=await _developer_name(db, app)
+        )
         app.name = manifest.name.en
         app.description = manifest.tagline.en
         app.icon_url = manifest.icon
@@ -483,11 +493,10 @@ async def publish_version(
         .where(AppVersionModel.app_id == app.id, AppVersionModel.status == "published")
         .values(status="superseded")
     )
-    partner = await partner_for_user(db, user_id)
     m = v.manifest
     v.status = "published"
     v.published_at = datetime.now(UTC)
-    app.manifest = to_listing_manifest(m, developer_name=partner.display_name)
+    app.manifest = to_listing_manifest(m, developer_name=await _developer_name(db, app))
     app.name = m["name"]["en"]
     app.description = m["tagline"]["en"]
     app.icon_url = m["icon"]

@@ -442,6 +442,15 @@ async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
         installation = principal.installation
         store_id = str(installation.store_id)
 
+        # Defense in depth, as for PATs: the token only acts on the tenant its
+        # installation belongs to, whatever host the request arrived on.
+        tenant = getattr(request.state, "tenant", None)
+        if tenant is not None and str(installation.tenant_id) != str(tenant.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access token is not valid for this store",
+            )
+
         path = request.url.path
         parts = [p for p in path.split("/") if p]
         if (

@@ -11,6 +11,8 @@ import pytest
 
 from src.application.services.numu_apps import FLAG, app_enabled, purge_due
 
+APP = uuid4()  # the catalog row exists
+
 
 class _Result:
     def __init__(self, row):
@@ -21,7 +23,7 @@ class _Result:
 
 
 class _Session:
-    """Answers the single query with (tenant feature_flags, install.is_enabled)."""
+    """Answers the single query with (feature_flags, install.is_enabled, app id)."""
 
     def __init__(self, row):
         self.row = row
@@ -34,12 +36,15 @@ class _Session:
 @pytest.mark.parametrize(
     ("row", "expected"),
     [
-        (({}, None), True),  # flag off, never installed: on, as before
-        ((None, None), True),  # tenant has no flags at all
-        (({FLAG: False}, False), True),  # flag explicitly off
-        (({FLAG: True}, True), True),  # installed and enabled
-        (({FLAG: True}, False), False),  # installed but disabled
-        (({FLAG: True}, None), False),  # not installed
+        (({}, None, APP), True),  # flag off, never installed: on, as before
+        ((None, None, APP), True),  # tenant has no flags at all
+        (({FLAG: False}, False, APP), True),  # flag explicitly off
+        (({FLAG: True}, True, APP), True),  # installed and enabled
+        (({FLAG: True}, False, APP), False),  # installed but disabled
+        (({FLAG: True}, None, APP), False),  # not installed
+        # Flag on but the catalog row is missing (Sentry, api#636): nobody can
+        # have uninstalled an app that doesn't exist, so it stays on.
+        (({FLAG: True}, None, None), True),
         (None, True),  # unknown store: not this function's call
     ],
 )

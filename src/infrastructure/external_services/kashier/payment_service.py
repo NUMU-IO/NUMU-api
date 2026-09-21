@@ -273,7 +273,13 @@ class KashierPaymentService(IPaymentService):
 
         data = (raw.get("data") or raw) if isinstance(raw, dict) else {}
         signature_keys = data.get("signatureKeys") if isinstance(data, dict) else None
-        if not signature_keys or not isinstance(signature_keys, list):
+        if (
+            not signature_keys
+            or not isinstance(signature_keys, list)
+            or not all(isinstance(k, str) for k in signature_keys)
+        ):
+            # Missing, or not a list of strings (a forged body: sorting mixed
+            # types would raise and turn a 401 into a 500).
             logger.warning("kashier_webhook_no_signature_keys")
             return None
 

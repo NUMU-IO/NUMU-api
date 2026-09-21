@@ -95,6 +95,11 @@ class ApplyRequest(_Profile):
     accept_agreement: bool
 
 
+#: Profile fields a partner can change but not clear (NOT NULL columns). An
+#: explicit null on any other field clears it (e.g. ``website_url``).
+_REQUIRED_PROFILE = frozenset({"display_name", "country", "support_email"})
+
+
 class UpdateProfileRequest(BaseModel):
     display_name: str | None = Field(default=None, min_length=2, max_length=100)
     legal_name: str | None = Field(default=None, max_length=255)
@@ -248,8 +253,9 @@ async def update_me(
         raise HTTPException(status_code=404, detail="No partner account")
     changes = body.model_dump(exclude_unset=True, exclude={"accept_agreement_version"})
     for key, value in changes.items():
-        if value is not None:
-            setattr(account, key, value.upper() if key == "country" else value)
+        if value is None and key in _REQUIRED_PROFILE:
+            continue  # a required field can't be cleared, only changed
+        setattr(account, key, value.upper() if key == "country" and value else value)
     if body.accept_agreement_version is not None:
         if body.accept_agreement_version != AGREEMENT_VERSION:
             raise HTTPException(
