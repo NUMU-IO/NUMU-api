@@ -32,7 +32,9 @@ URL Hierarchy:
     └── /fawry/                # Fawry payment notifications
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from src.api.dependencies.auth import verify_store_ownership
 
 # Store management routes (for store owners)
 from src.api.v1.agent.knowledge_routes import router as agent_knowledge_router
@@ -289,34 +291,44 @@ api_router.include_router(
 )
 
 # Omnichannel - inbox (channels, threads, messages under store scope)
+# Owner-only, like every other /stores/{store_id} route: these handlers never
+# load the caller, so without this anyone with a store id could read or send
+# the store's customer DMs.
+_OWNER_ONLY = [Depends(verify_store_ownership)]
 api_router.include_router(
     channels_router,
     prefix="/stores/{store_id}/channels",
+    dependencies=_OWNER_ONLY,
     tags=["Omnichannel - Channels"],
 )
 api_router.include_router(
     threads_router,
     prefix="/stores/{store_id}/threads",
+    dependencies=_OWNER_ONLY,
     tags=["Omnichannel - Threads"],
 )
 api_router.include_router(
     messages_router,
     prefix="/stores/{store_id}/threads/{thread_id}/messages",
+    dependencies=_OWNER_ONLY,
     tags=["Omnichannel - Messages"],
 )
 api_router.include_router(
     templates_router,
     prefix="/stores/{store_id}/whatsapp",
+    dependencies=_OWNER_ONLY,
     tags=["Omnichannel - Templates"],
 )
 api_router.include_router(
     catalog_router,
     prefix="/stores/{store_id}/catalog",
+    dependencies=_OWNER_ONLY,
     tags=["Omnichannel - Catalog"],
 )
 api_router.include_router(
     capi_router,
     prefix="/stores/{store_id}/capi",
+    dependencies=_OWNER_ONLY,
     tags=["Omnichannel - CAPI"],
 )
 
