@@ -166,13 +166,6 @@ APPS = [
     },
 ]
 
-# Which stores already use each app. Any status: a store mid-request or with a
-# lapsed connection is still a store that uses the feature.
-_USERS = {
-    "whatsapp": "SELECT store_id FROM public.whatsapp_access_requests",
-    "inbox": "SELECT store_id FROM public.channel_connections",
-}
-
 
 def upgrade() -> None:
     op.create_table(
@@ -237,24 +230,45 @@ def upgrade() -> None:
                 "manifest": json.dumps(app["manifest"], ensure_ascii=False),
             },
         )
-        bind.execute(
-            sa.text(
-                f"""
-                INSERT INTO public.app_installations (
-                    id, tenant_id, store_id, app_id, is_enabled, settings,
-                    created_at, updated_at
-                )
-                SELECT gen_random_uuid(), s.tenant_id, s.id, a.id, true,
-                       '{{}}'::jsonb, now(), now()
-                FROM public.stores s
-                JOIN public.apps a ON a.slug = :slug
-                WHERE s.id IN ({_USERS[app["slug"]]})
-                  AND s.tenant_id IS NOT NULL
-                ON CONFLICT ON CONSTRAINT uq_app_installation_store_app DO NOTHING
-                """
-            ),
-            {"slug": app["slug"]},
+
+    # Install each app where the store already uses it: any access request or
+    # channel connection, whatever its status (a store mid-request or with a
+    # lapsed connection still uses the feature). Written out per app, with no
+    # string building, so the migration-safety check can read the SQL.
+    bind.execute(
+        sa.text(
+            """
+            INSERT INTO public.app_installations (
+                id, tenant_id, store_id, app_id, is_enabled, settings,
+                created_at, updated_at
+            )
+            SELECT gen_random_uuid(), s.tenant_id, s.id, a.id, true,
+                   '{}'::jsonb, now(), now()
+            FROM public.stores s
+            JOIN public.apps a ON a.slug = 'whatsapp'
+            WHERE s.id IN (SELECT store_id FROM public.whatsapp_access_requests)
+              AND s.tenant_id IS NOT NULL
+            ON CONFLICT ON CONSTRAINT uq_app_installation_store_app DO NOTHING
+            """
         )
+    )
+    bind.execute(
+        sa.text(
+            """
+            INSERT INTO public.app_installations (
+                id, tenant_id, store_id, app_id, is_enabled, settings,
+                created_at, updated_at
+            )
+            SELECT gen_random_uuid(), s.tenant_id, s.id, a.id, true,
+                   '{}'::jsonb, now(), now()
+            FROM public.stores s
+            JOIN public.apps a ON a.slug = 'inbox'
+            WHERE s.id IN (SELECT store_id FROM public.channel_connections)
+              AND s.tenant_id IS NOT NULL
+            ON CONFLICT ON CONSTRAINT uq_app_installation_store_app DO NOTHING
+            """
+        )
+    )
 
 
 def downgrade() -> None:
