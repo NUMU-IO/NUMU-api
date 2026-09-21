@@ -34,6 +34,7 @@ from src.application.use_cases.billing.cancel_subscription import (
     CancelSubscriptionUseCase,
 )
 from src.application.use_cases.billing.subscribe import SubscribeUseCase
+from src.core.entities.subscription_payment import PLAN_PURPOSES
 from src.core.interfaces.services.storage_service import IStorageService
 from src.infrastructure.database.models.public.billing import (
     BillingInvoiceModel,
@@ -395,7 +396,7 @@ async def list_instapay_intents(
                 select(SubscriptionPaymentIntentModel)
                 .where(
                     SubscriptionPaymentIntentModel.tenant_id == tenant.id,
-                    SubscriptionPaymentIntentModel.purpose != "whatsapp_addon",
+                    SubscriptionPaymentIntentModel.purpose.in_(PLAN_PURPOSES),
                 )
                 .order_by(SubscriptionPaymentIntentModel.created_at.desc())
                 .limit(10)

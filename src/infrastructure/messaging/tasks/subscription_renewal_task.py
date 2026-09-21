@@ -285,6 +285,7 @@ async def _has_succeeded_instapay_payment(session, tenant_id) -> bool:  # noqa: 
     """
     from sqlalchemy import select
 
+    from src.core.entities.subscription_payment import PLAN_PURPOSES
     from src.infrastructure.database.models.public.subscription_payment import (
         SubscriptionPaymentIntentModel,
     )
@@ -295,7 +296,7 @@ async def _has_succeeded_instapay_payment(session, tenant_id) -> bool:  # noqa: 
             .where(
                 SubscriptionPaymentIntentModel.tenant_id == tenant_id,
                 SubscriptionPaymentIntentModel.status == "succeeded",
-                SubscriptionPaymentIntentModel.purpose != "whatsapp_addon",
+                SubscriptionPaymentIntentModel.purpose.in_(PLAN_PURPOSES),
             )
             .limit(1)
         )

@@ -255,3 +255,39 @@ async def test_grandfather_guard_instapay_opt_in_signal(test_session):
     pending.status = "succeeded"
     await test_session.commit()
     assert await _has_succeeded_instapay_payment(test_session, tenant.id) is True
+
+
+@pytest.mark.asyncio
+async def test_a_whatsapp_addon_payment_is_not_a_plan_payment(test_session):
+    """A token-less tenant whose only InstaPay payment bought WhatsApp access
+    was never charged for its plan, so the renewal sweep skips it. The
+    renewal-warning email used to count ANY succeeded intent and told this
+    merchant a renewal was due that nobody would ever collect."""
+    from src.infrastructure.messaging.tasks.subscription_renewal_task import (
+        _has_succeeded_instapay_payment,
+    )
+
+    now = datetime.now(UTC)
+    cfg = await get_billing_settings(test_session, use_cache=False)
+    whatsapp_only = await _mk_tenant(
+        test_session, next_renewal_at=now + timedelta(days=3)
+    )
+    test_session.add(
+        SubscriptionPaymentIntentModel(
+            tenant_id=whatsapp_only.id,
+            plan_key="starter",
+            billing_cycle="monthly",
+            purpose="whatsapp_addon",
+            amount_cents=15_000,
+            currency="EGP",
+            status="succeeded",
+            special_reference=f"SUB-{uuid4().hex[:6].upper()}",
+        )
+    )
+    await test_session.commit()
+
+    targets = await _collect_warning_targets(test_session, cfg, now)
+    assert str(whatsapp_only.id) not in {str(t.id) for t, _kind, _a in targets}
+    assert (
+        await _has_succeeded_instapay_payment(test_session, whatsapp_only.id) is False
+    )

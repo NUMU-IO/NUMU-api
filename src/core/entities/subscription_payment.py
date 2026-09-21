@@ -24,6 +24,16 @@ class SubscriptionPaymentPurpose(StrEnum):
     WHATSAPP_ADDON = "whatsapp_addon"
 
 
+#: The purposes that pay for the platform plan. Anything else (the WhatsApp
+#: add-on, a future add-on) buys something else and must never read as "this
+#: tenant pays its plan by InstaPay": not for the renewal sweep's opt-in, not
+#: for renewal-warning emails, not for the /billing page.
+PLAN_PURPOSES = frozenset({
+    SubscriptionPaymentPurpose.NEW_SUBSCRIPTION.value,
+    SubscriptionPaymentPurpose.RENEWAL.value,
+})
+
+
 class SubscriptionPaymentIntentStatus(StrEnum):
     """Intent lifecycle (manual InstaPay only — no gateway 'pending' leg)."""
 
