@@ -97,6 +97,42 @@ async def _get_kashier_api_key(store_settings: dict) -> str | None:
         return None
 
 
+async def _candidate_api_keys(db: AsyncSession, tenant_id, store) -> list[str]:
+    """Every Kashier API key this order's payment could have been created with.
+
+    Same order checkout uses (api/dependencies/payment.py): the tenant's saved
+    gateway credentials, then NUMU's default merchant account from the
+    environment. The legacy store.settings credentials are included too.
+    Kashier signs with the key of the account that took the payment.
+    """
+    from src.infrastructure.database.models.tenant.configuration import (
+        ServiceName,
+        ServiceType,
+    )
+    from src.infrastructure.repositories.credential_repository import (
+        CredentialRepository,
+    )
+
+    keys: list[str] = []
+    try:
+        creds = await CredentialRepository(db).get_decrypted_credentials(
+            tenant_id=tenant_id,
+            service_type=ServiceType.PAYMENT_GATEWAY,
+            service_name=ServiceName.KASHIER,
+        )
+        if creds and creds.get("api_key"):
+            keys.append(creds["api_key"])
+    except Exception:  # noqa: BLE001 - a lookup failure must not open the gate
+        logger.warning("kashier_webhook_tenant_credentials_unreadable")
+    if store is not None:
+        legacy = await _get_kashier_api_key(store.settings or {})
+        if legacy:
+            keys.append(legacy)
+    if settings.kashier_api_key:
+        keys.append(settings.kashier_api_key)
+    return list(dict.fromkeys(keys))
+
+
 @router.post("/callback", operation_id="kashier_callback")
 async def kashier_callback(
     request: Request,
@@ -136,16 +172,6 @@ async def kashier_callback(
     )
     log.info("webhook_received")
 
-    # ── Replay protection ────────────────────────────────────────
-    if transaction_id and _cache_service:
-        nonce_key = f"kashier:processed:{transaction_id}"
-        was_set = await _cache_service.set_if_absent(
-            nonce_key, "1", expire=NONCE_TTL_SECONDS
-        )
-        if not was_set:
-            log.warning("webhook_duplicate_rejected")
-            return {"status": "duplicate", "transaction_id": transaction_id}
-
     # ── Order lookup ─────────────────────────────────────────────
     order_repo = OrderRepository(db)
     store_repo = StoreRepository(db)
@@ -168,19 +194,34 @@ async def kashier_callback(
 
     log = log.bind(order_id=str(order.id), order_number=order.order_number)
 
-    # ── Signature verification via store.settings credentials ────
+    # ── Signature verification: nothing below runs on an unverified call ──
+    # This used to log "webhook_signature_invalid_proceeding" and carry on, so
+    # a forged SUCCESS for a known order id marked it paid. The key it checked
+    # (store.settings) is also not where checkout gets the key from, which is
+    # why genuine calls "failed" verification. We now accept a signature made
+    # with any key this order's payment session could have been created with.
     store = await store_repo.get_by_id(order.store_id)
-    if store:
-        api_key = await _get_kashier_api_key(store.settings)
-        if api_key:
-            kashier_service = KashierPaymentService(api_key=api_key)
-            verified = kashier_service.verify_webhook_signature(
-                payload, x_kashier_signature or ""
-            )
-            if not verified:
-                log.warning("webhook_signature_invalid_proceeding")
-        else:
-            log.warning("webhook_no_api_key")
+    keys = await _candidate_api_keys(db, order.tenant_id, store)
+    if not any(
+        KashierPaymentService(api_key=key).verify_webhook_signature(
+            payload, x_kashier_signature or ""
+        )
+        for key in keys
+    ):
+        log.warning("webhook_signature_invalid_rejected", keys_tried=len(keys))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature"
+        )
+
+    # ── Replay protection (only for verified calls) ──────────────
+    if transaction_id and _cache_service:
+        nonce_key = f"kashier:processed:{transaction_id}"
+        was_set = await _cache_service.set_if_absent(
+            nonce_key, "1", expire=NONCE_TTL_SECONDS
+        )
+        if not was_set:
+            log.warning("webhook_duplicate_rejected")
+            return {"status": "duplicate", "transaction_id": transaction_id}
 
     # ── RLS narrowing ────────────────────────────────────────────
     await narrow_to_tenant(db, order.tenant_id)
@@ -368,40 +409,11 @@ async def kashier_redirect(
 
             success = (paymentStatus or "").upper() == "SUCCESS"
 
-            # Backup: mark as paid if webhook hasn't processed yet
-            if success and internal_order.payment_status.value == "pending":
-                await narrow_to_tenant(db, internal_order.tenant_id)
-                internal_order.mark_as_paid(
-                    payment_id=order_id or "",
-                    payment_method="kashier",
-                )
-                await order_repo.update(internal_order)
-
-                # Meta CAPI Purchase fan-out — backup path. event_id
-                # = order.id is shared with the webhook callback above
-                # so even if both fire, Meta dedupes them as one event.
-                try:
-                    from src.application.services.meta_capi_purchase_dispatcher import (
-                        enqueue_meta_capi_purchase,
-                    )
-
-                    await enqueue_meta_capi_purchase(db, internal_order)
-                except Exception:
-                    log.warning(
-                        "meta_capi_purchase_enqueue_failed_redirect", exc_info=True
-                    )
-
-                try:
-                    from src.application.services.tiktok_capi_purchase_dispatcher import (  # noqa: E501
-                        enqueue_tiktok_capi_purchase,
-                    )
-
-                    await enqueue_tiktok_capi_purchase(db, internal_order)
-                except Exception:
-                    log.warning(
-                        "tiktok_capi_purchase_enqueue_failed_redirect", exc_info=True
-                    )
-
+            # No "backup" mark-as-paid here. This GET is the shopper's browser
+            # coming back, and its query string is whatever the browser sends:
+            # it used to flip any pending order to paid (and fire Purchase events)
+            # for anyone who opened ?order_id=<id>&paymentStatus=SUCCESS. Only the
+            # signed server-to-server callback above confirms a payment.
             if success:
                 # Include the total (in cents) so the receipt can render
                 # the "Total: EGP X,XXX" row on the hard-redirect path.

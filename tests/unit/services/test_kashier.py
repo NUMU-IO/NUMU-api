@@ -1,5 +1,6 @@
 """Unit tests for KashierPaymentService."""
 
+import copy
 import hashlib
 import hmac
 import json
@@ -11,6 +12,57 @@ from src.core.interfaces.services.payment_service import PaymentProvider
 from src.infrastructure.external_services.kashier.payment_service import (
     KashierPaymentService,
 )
+
+# The sample webhook body from developers.kashier.io/payment/webhook, and the
+# signature Kashier's documented Node signer computes for it
+# (`queryString.stringify(_.pick(data, data.signatureKeys.sort()))`, npm
+# query-string 7.1.3) with the key below. Regenerate only from that code.
+DOC_SAMPLE_KEY = "kashier-doc-sample-key"
+DOC_SAMPLE_SIGNATURE = (
+    "9b618fe7c05b33e3b6cfae86734128271b572aaea184fae23f153aa7f3c832b0"
+)
+DOC_SAMPLE = {
+    "event": "pay",
+    "data": {
+        "merchantOrderId": "1642935044835",
+        "kashierOrderId": "efb3d440-e3bf-4c86-b98e-c7bb1cbbcca1",
+        "orderReference": "TEST-ORD-33581",
+        "transactionId": "TX-249893122",
+        "status": "SUCCESS",
+        "method": "card",
+        "creationDate": "2022-01-23T10:50:54.261Z",
+        "amount": 11334,
+        "currency": "EGP",
+        "card": {
+            "cardInfo": {
+                "cardHolderName": "John Doe",
+                "cardBrand": "Mastercard",
+                "maskedCard": "511111******1118",
+            },
+            "merchant": {"merchantRedirectURL": "http://localhost:9000/callback"},
+            "amount": 11334,
+            "currency": "EGP",
+        },
+        "metaData": {"time": "2022-01-23T10:50:52.562Z"},
+        "transactionResponseCode": "00",
+        "transactionResponseMessage": {"en": "Approved", "ar": "تمت الموافقة"},
+        "channel": "online | e-commerce",
+        "merchantDetails": {"businessEmail": "billing@example.com"},
+        "signatureKeys": [
+            "amount",
+            "channel",
+            "currency",
+            "kashierOrderId",
+            "merchantOrderId",
+            "method",
+            "orderReference",
+            "status",
+            "transactionId",
+            "transactionResponseCode",
+        ],
+        "platform": {},
+    },
+}
 
 
 def _response(status_code: int, payload: dict | None = None):
@@ -155,64 +207,33 @@ class TestKashierPaymentService:
 
     # -- verify_webhook_signature -----------------------------------------
 
-    def test_verify_webhook_valid_signature(self):
-        """Valid HMAC should return parsed payload."""
-        payload_dict = {
-            "paymentStatus": "SUCCESS",
-            "cardDataToken": "tok_123",
-            "maskedCard": "****1234",
-            "merchantOrderId": "ORDER-001",
-            "orderId": "KSH-001",
-            "cardBrand": "Visa",
-            "orderReference": "ref-001",
-            "transactionId": "txn-001",
-            "amount": "100.00",
-            "currency": "EGP",
-        }
-
-        # Compute the correct signature
-        query_string = (
-            f"paymentStatus={payload_dict['paymentStatus']}"
-            f"&cardDataToken={payload_dict['cardDataToken']}"
-            f"&maskedCard={payload_dict['maskedCard']}"
-            f"&merchantOrderId={payload_dict['merchantOrderId']}"
-            f"&orderId={payload_dict['orderId']}"
-            f"&cardBrand={payload_dict['cardBrand']}"
-            f"&orderReference={payload_dict['orderReference']}"
-            f"&transactionId={payload_dict['transactionId']}"
-            f"&amount={payload_dict['amount']}"
-            f"&currency={payload_dict['currency']}"
+    def test_verify_webhook_matches_kashier_reference_signer(self):
+        """Kashier's own Node sample must verify: the known-answer vector."""
+        service = KashierPaymentService(
+            mid="MID-1234-5678", api_key=DOC_SAMPLE_KEY, mode="test"
         )
-        valid_sig = hmac.new(
-            b"test_api_key_abc123",
-            query_string.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-
-        result = self.service.verify_webhook_signature(
-            json.dumps(payload_dict).encode("utf-8"),
-            valid_sig,
+        result = service.verify_webhook_signature(
+            json.dumps(DOC_SAMPLE).encode("utf-8"), DOC_SAMPLE_SIGNATURE
         )
         assert result is not None
-        assert result["paymentStatus"] == "SUCCESS"
-        assert result["merchantOrderId"] == "ORDER-001"
+        assert result["data"]["status"] == "SUCCESS"
+        assert result["data"]["merchantOrderId"] == "1642935044835"
+
+    def test_verify_webhook_rejects_a_tampered_signed_field(self):
+        service = KashierPaymentService(
+            mid="MID-1234-5678", api_key=DOC_SAMPLE_KEY, mode="test"
+        )
+        body = copy.deepcopy(DOC_SAMPLE)
+        body["data"]["amount"] = 1
+        result = service.verify_webhook_signature(
+            json.dumps(body).encode("utf-8"), DOC_SAMPLE_SIGNATURE
+        )
+        assert result is None
 
     def test_verify_webhook_invalid_signature(self):
         """Invalid HMAC should return None."""
-        payload_dict = {
-            "paymentStatus": "SUCCESS",
-            "cardDataToken": "",
-            "maskedCard": "",
-            "merchantOrderId": "ORDER-001",
-            "orderId": "KSH-001",
-            "cardBrand": "",
-            "orderReference": "",
-            "transactionId": "txn-001",
-            "amount": "100.00",
-            "currency": "EGP",
-        }
         result = self.service.verify_webhook_signature(
-            json.dumps(payload_dict).encode("utf-8"),
+            json.dumps(DOC_SAMPLE).encode("utf-8"),
             "invalid_signature_value",
         )
         assert result is None
@@ -222,42 +243,73 @@ class TestKashierPaymentService:
         result = self.service.verify_webhook_signature(b"not valid json", "any_sig")
         assert result is None
 
-    def test_verify_webhook_missing_fields_uses_empty_string(self):
-        """Missing optional fields should default to empty string in hash."""
-        payload_dict = {
-            "paymentStatus": "FAILED",
-            "merchantOrderId": "ORDER-003",
-            "orderId": "KSH-003",
-            "transactionId": "txn-003",
-            "amount": "50.00",
+    def test_verify_webhook_rejects_the_redirect_signature_format(self):
+        """A redirect-style signature must never pass as a webhook.
+
+        The shopper's browser sees the redirect's query string and signature.
+        The old verifier fell back to that format when `signatureKeys` was
+        missing, so a failed payment's redirect could be posted back as a
+        webhook with an extra unsigned `status: SUCCESS`.
+        """
+        redirect = {
+            "paymentStatus": "FAILURE",
+            "cardDataToken": "",
+            "maskedCard": "****1234",
+            "merchantOrderId": "ORDER-001",
+            "orderId": "KSH-001",
+            "cardBrand": "Visa",
+            "orderReference": "ref-001",
+            "transactionId": "txn-001",
+            "amount": "100.00",
             "currency": "EGP",
         }
-
-        # Compute signature with missing fields defaulting to empty
-        query_string = (
-            f"paymentStatus={payload_dict['paymentStatus']}"
-            f"&cardDataToken="
-            f"&maskedCard="
-            f"&merchantOrderId={payload_dict['merchantOrderId']}"
-            f"&orderId={payload_dict['orderId']}"
-            f"&cardBrand="
-            f"&orderReference="
-            f"&transactionId={payload_dict['transactionId']}"
-            f"&amount={payload_dict['amount']}"
-            f"&currency={payload_dict['currency']}"
+        signed = "&".join(f"{k}={v}" for k, v in redirect.items())
+        signature = hmac.new(
+            b"test_api_key_abc123", signed.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        forged = {**redirect, "status": "SUCCESS"}
+        result = self.service.verify_webhook_signature(
+            json.dumps(forged).encode("utf-8"), signature
         )
-        valid_sig = hmac.new(
+        assert result is None
+
+    def test_verify_webhook_skips_listed_keys_missing_from_data(self):
+        """`_.pick` drops a listed key the data doesn't carry."""
+        data = {
+            "merchantOrderId": "ORDER-003",
+            "status": "FAILED",
+            "signatureKeys": ["status", "transactionId", "merchantOrderId"],
+        }
+        signature = hmac.new(
             b"test_api_key_abc123",
-            query_string.encode("utf-8"),
+            b"merchantOrderId=ORDER-003&status=FAILED",
             hashlib.sha256,
         ).hexdigest()
-
         result = self.service.verify_webhook_signature(
-            json.dumps(payload_dict).encode("utf-8"),
-            valid_sig,
+            json.dumps({"event": "pay", "data": data}).encode("utf-8"), signature
         )
         assert result is not None
-        assert result["paymentStatus"] == "FAILED"
+
+    def test_verify_webhook_encodes_like_query_string_strict(self):
+        """Null is a bare key; RFC 3986 escapes ' ( ) * ! and spaces.
+
+        Expected string produced by npm query-string 7.1.3 (Kashier's signer).
+        """
+        data = {
+            "a": None,
+            "b": "it's (x)*!",
+            "c": "",
+            "signatureKeys": ["c", "b", "a"],
+        }
+        signature = hmac.new(
+            b"test_api_key_abc123",
+            b"a&b=it%27s%20%28x%29%2A%21&c=",
+            hashlib.sha256,
+        ).hexdigest()
+        result = self.service.verify_webhook_signature(
+            json.dumps({"data": data}).encode("utf-8"), signature
+        )
+        assert result is not None
 
     def test_verify_webhook_no_api_key_returns_none(self):
         """Service without API key should return None."""
