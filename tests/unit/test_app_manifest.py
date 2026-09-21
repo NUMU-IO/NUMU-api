@@ -271,3 +271,53 @@ def test_an_install_only_subscribes_to_events_it_was_granted():
     # orders:write alone doesn't read orders, so it doesn't receive them.
     assert app_subscriptions(hooks, ["orders:write"]) == {}
     assert app_subscriptions(hooks, None) == {}
+
+
+# ─── Paid apps (Phase 7) ───────────────────────────────────────────
+
+
+RECURRING = {
+    "model": "recurring",
+    "price_cents": 9900,
+    "cycle": "monthly",
+}
+
+
+def test_a_recurring_price_is_valid_and_reaches_the_listing():
+    m = ManifestV1.model_validate(bad(**{"pricing": RECURRING})).model_dump(
+        mode="json", by_alias=True
+    )
+    listing = to_listing_manifest(m, developer_name="Bosta Sync Co")["pricing"]
+    assert listing["plan"] == "recurring"
+    assert (listing["price_cents"], listing["cycle"], listing["currency"]) == (
+        9900,
+        "monthly",
+        "EGP",
+    )
+    assert listing["locales"]["en"]["label"] == "EGP 99 / month"
+    assert listing["locales"]["ar"]["label"] == "99 ج.م في الشهر"
+
+
+@pytest.mark.parametrize(
+    ("pricing", "message"),
+    [
+        ({"model": "recurring", "cycle": "monthly"}, "price_cents"),
+        ({"model": "recurring", "price_cents": 9900}, "cycle"),
+        ({"model": "free", "price_cents": 9900}, "recurring only"),
+        ({**RECURRING, "price_cents": 100}, "greater than or equal"),
+        ({**RECURRING, "cycle": "weekly"}, "cycle"),
+        ({**RECURRING, "currency": "USD"}, "currency"),
+    ],
+)
+def test_bad_prices_are_rejected(pricing, message):
+    with pytest.raises(ValidationError) as exc:
+        ManifestV1.model_validate(bad(**{"pricing": pricing}))
+    assert message in str(exc.value)
+
+
+def test_a_price_change_is_its_own_review_type():
+    base = ManifestV1.model_validate(bad(**{"pricing": RECURRING})).model_dump(
+        mode="json"
+    )
+    raised = {**base, "pricing": {**base["pricing"], "price_cents": 19900}}
+    assert change_type(raised, base) == "pricing"

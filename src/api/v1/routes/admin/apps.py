@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
-from src.application.services.app_manifest import change_type
+from src.application.services.app_manifest import Pricing, change_type, price_label
 from src.application.services.audit_service import AuditService
 from src.application.services.partner_program import (
     KILL_SWITCH_KEY,
@@ -416,3 +416,54 @@ async def put_kill_switch(
         new_value={"enabled": body.enabled},
     )
     return SuccessResponse(data=body)
+
+
+@router.put(
+    "/{app_id}/pricing", response_model=SuccessResponse[dict], dependencies=_STEP_UP
+)
+async def set_numu_app_pricing(
+    app_id: UUID,
+    body: Pricing,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Price a NUMU App (``free`` or ``recurring``). A Partner App's price is
+    part of its manifest and changes only through a reviewed version.
+
+    Existing subscribers keep the price they subscribed at; the new price
+    applies to new subscriptions and to re-subscribing after a lapse.
+    """
+    app = await db.get(AppModel, app_id)
+    if app is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    if app.developer_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="A Partner App's price comes from its reviewed manifest.",
+        )
+    if body.model == "external":
+        raise HTTPException(status_code=422, detail="NUMU Apps are free or recurring.")
+    pricing = body.model_dump(mode="json", exclude_none=True)
+    label = price_label(pricing)
+    new = {
+        "plan": body.model,
+        "locales": {lang: {"label": label[lang]} for lang in ("ar", "en")},
+        **(
+            {"price_cents": body.price_cents, "cycle": body.cycle, "currency": "EGP"}
+            if body.model == "recurring"
+            else {}
+        ),
+    }
+    old = (app.manifest or {}).get("pricing")
+    app.manifest = {**(app.manifest or {}), "pricing": new}
+    await AuditService(db).log(
+        event_type="admin.app_catalog",
+        action="numu_app_pricing",
+        resource_type="app",
+        resource_id=str(app.id),
+        user_id=admin_id,
+        old_value={"pricing": old},
+        new_value={"pricing": new},
+    )
+    await db.flush()
+    return SuccessResponse(data=new)

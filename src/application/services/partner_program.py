@@ -44,14 +44,37 @@ async def program_enabled(db: AsyncSession) -> bool:
 
 
 async def set_program_enabled(db: AsyncSession, enabled: bool) -> None:
+    await _set_switch(db, CONFIG_KEY, enabled)
+
+
+async def _set_switch(db: AsyncSession, key: str, enabled: bool) -> None:
     await db.execute(
         pg_insert(PlatformConfigModel)
-        .values(key=CONFIG_KEY, value={"enabled": enabled})
+        .values(key=key, value={"enabled": enabled})
         .on_conflict_do_update(
             index_elements=[PlatformConfigModel.key],
             set_={"value": {"enabled": enabled}},
         )
     )
+
+
+#: NUMU billing for Partner Apps (Partner Agreement § 11.1), off unless an
+#: admin turns it on. It stays off until NUMU announces in writing that it is
+#: live, which waits on counsel (VAT, e-invoicing, the collect-and-pay-out
+#: structure). While off, a Partner App may only be ``free`` or ``external``.
+#: NUMU Apps may be priced at any time.
+BILLING_KEY = "partner_billing"
+
+
+async def partner_billing_enabled(db: AsyncSession) -> bool:
+    value = await db.scalar(
+        select(PlatformConfigModel.value).where(PlatformConfigModel.key == BILLING_KEY)
+    )
+    return bool((value or {}).get("enabled", False))
+
+
+async def set_partner_billing_enabled(db: AsyncSession, enabled: bool) -> None:
+    await _set_switch(db, BILLING_KEY, enabled)
 
 
 #: The Partner-apps kill switch (platform_config), on unless turned off. Off:
