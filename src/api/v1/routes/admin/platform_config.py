@@ -24,6 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.meta_platform_credentials import (
+    META_CONFIG_KEY,
+    encrypt_meta_secrets,
+    get_meta_platform_credentials,
+)
 from src.application.services.platform_default_theme_service import (
     PlatformDefaultThemeService,
 )
@@ -46,7 +51,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-META_CONFIG_KEY = "meta_credentials"
 # Phase 5.2 — theme-engine platform flags (e.g. App-embeds tab visibility).
 THEME_ENGINE_KEY = "theme_engine"
 
@@ -128,10 +132,12 @@ def _resolve_checkout_identity_enabled(checkout_cfg: dict) -> bool:
 
 
 class MetaCredentialsRequest(BaseModel):
-    meta_app_id: str
-    meta_app_secret: str
-    meta_webhook_verify_token: str
-    meta_login_config_id: str
+    meta_app_id: str | None = None
+    meta_app_secret: str | None = None
+    meta_webhook_verify_token: str | None = None
+    meta_login_config_id: str | None = None
+    meta_config_id: str | None = None
+    meta_graph_api_version: str | None = None
 
 
 class MetaCredentialsResponse(BaseModel):
@@ -139,6 +145,8 @@ class MetaCredentialsResponse(BaseModel):
     meta_app_secret: str
     meta_webhook_verify_token: str
     meta_login_config_id: str
+    meta_config_id: str
+    meta_graph_api_version: str
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +171,9 @@ async def _get_or_create_config(db: AsyncSession) -> PlatformConfigModel:
                 key=META_CONFIG_KEY,
                 value={
                     "meta_app_id": "",
-                    "meta_app_secret": "",
-                    "meta_webhook_verify_token": "",
                     "meta_login_config_id": "",
+                    "meta_config_id": "",
+                    "meta_graph_api_version": "",
                 },
                 description="Meta (Facebook/Instagram/WhatsApp) API credentials",
             )
@@ -382,16 +390,15 @@ async def get_meta_credentials(
     _admin: Annotated[dict, Depends(require_admin)],
 ) -> SuccessResponse[MetaCredentialsResponse]:
     """Get the current Meta credentials configuration."""
-    config = await _get_or_create_config(db)
-
-    # Redact secrets for response
+    await _get_or_create_config(db)
+    meta = await get_meta_platform_credentials(db)
     response = MetaCredentialsResponse(
-        meta_app_id=config.value.get("meta_app_id", ""),
-        meta_app_secret="****" if config.value.get("meta_app_secret") else "",
-        meta_webhook_verify_token="****"
-        if config.value.get("meta_webhook_verify_token")
-        else "",
-        meta_login_config_id=config.value.get("meta_login_config_id", ""),
+        meta_app_id=meta.app_id,
+        meta_app_secret="****" if meta.app_secret else "",
+        meta_webhook_verify_token="****" if meta.webhook_verify_token else "",
+        meta_login_config_id=meta.login_config_id,
+        meta_config_id=meta.embedded_signup_config_id,
+        meta_graph_api_version=meta.graph_api_version,
     )
 
     return SuccessResponse(data=response)
@@ -410,13 +417,35 @@ async def update_meta_credentials(
 ) -> SuccessResponse[MetaCredentialsResponse]:
     """Update the Meta credentials configuration."""
     config = await _get_or_create_config(db)
+    current = await get_meta_platform_credentials(db)
+    app_secret = current.app_secret
+    verify_token = current.webhook_verify_token
+    if (
+        "meta_app_secret" in request.model_fields_set
+        and request.meta_app_secret != "****"
+    ):
+        app_secret = request.meta_app_secret or ""
+    if (
+        "meta_webhook_verify_token" in request.model_fields_set
+        and request.meta_webhook_verify_token != "****"
+    ):
+        verify_token = request.meta_webhook_verify_token or ""
 
-    # Update values (allow clearing by sending empty string)
+    encrypted = await encrypt_meta_secrets(app_secret, verify_token)
     config.value = {
-        "meta_app_id": request.meta_app_id,
-        "meta_app_secret": request.meta_app_secret,
-        "meta_webhook_verify_token": request.meta_webhook_verify_token,
-        "meta_login_config_id": request.meta_login_config_id,
+        "meta_app_id": request.meta_app_id
+        if request.meta_app_id is not None
+        else current.app_id,
+        "meta_login_config_id": request.meta_login_config_id
+        if request.meta_login_config_id is not None
+        else current.login_config_id,
+        "meta_config_id": request.meta_config_id
+        if request.meta_config_id is not None
+        else current.embedded_signup_config_id,
+        "meta_graph_api_version": request.meta_graph_api_version
+        if request.meta_graph_api_version is not None
+        else current.graph_api_version,
+        **encrypted,
     }
 
     await db.commit()
@@ -427,14 +456,14 @@ async def update_meta_credentials(
         str(_admin),
     )
 
-    # Redact secrets in response
+    meta = await get_meta_platform_credentials(db)
     response = MetaCredentialsResponse(
-        meta_app_id=config.value.get("meta_app_id", ""),
-        meta_app_secret="****" if config.value.get("meta_app_secret") else "",
-        meta_webhook_verify_token="****"
-        if config.value.get("meta_webhook_verify_token")
-        else "",
-        meta_login_config_id=config.value.get("meta_login_config_id", ""),
+        meta_app_id=meta.app_id,
+        meta_app_secret="****" if meta.app_secret else "",
+        meta_webhook_verify_token="****" if meta.webhook_verify_token else "",
+        meta_login_config_id=meta.login_config_id,
+        meta_config_id=meta.embedded_signup_config_id,
+        meta_graph_api_version=meta.graph_api_version,
     )
 
     return SuccessResponse(data=response)

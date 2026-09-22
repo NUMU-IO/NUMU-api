@@ -37,6 +37,9 @@ from src.api.v1.schemas.stores.whatsapp_connection import (
     WhatsAppStatus,
 )
 from src.application.services import admin_notifications
+from src.application.services.meta_platform_credentials import (
+    get_meta_platform_credentials,
+)
 from src.application.services.whatsapp_entitlement import (
     BillingUnavailableError,
     entitlement,
@@ -66,7 +69,25 @@ from src.infrastructure.repositories import StoreRepository
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/{store_id}/whatsapp")
 
-GRAPH_API_BASE = "https://graph.facebook.com/v18.0"
+
+def _graph_api_base(version: str | None = None) -> str:
+    return f"https://graph.facebook.com/{version or settings.meta_graph_api_version}"
+
+
+def _select_signup_phone(
+    phones: list[dict], requested_phone_id: str | None
+) -> tuple[str, dict]:
+    phone_by_id = {str(phone.get("id")): phone for phone in phones if phone.get("id")}
+    phone_number_id = requested_phone_id or next(iter(phone_by_id), None)
+    if not phone_number_id or phone_number_id not in phone_by_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "The selected phone number does not belong to the selected "
+                "WhatsApp account"
+            ),
+        )
+    return phone_number_id, phone_by_id[phone_number_id]
 
 
 # ── Embedded Signup ──
@@ -80,13 +101,18 @@ GRAPH_API_BASE = "https://graph.facebook.com/v18.0"
 )
 async def get_signup_config(
     store: Annotated[Store, Depends(get_current_store)],
+    db: AsyncSession = Depends(get_db),
 ):
     """Return the Meta App ID and config needed for the embedded signup JS SDK."""
+    meta = await get_meta_platform_credentials(db)
     return SuccessResponse(
         data=EmbeddedSignupConfig(
-            app_id=settings.meta_app_id or "",
-            config_id=settings.meta_config_id or "",
-            enabled=bool(settings.meta_app_id),
+            app_id=meta.app_id,
+            config_id=meta.embedded_signup_config_id,
+            graph_api_version=meta.graph_api_version,
+            enabled=bool(
+                meta.app_id and meta.app_secret and meta.embedded_signup_config_id
+            ),
         ),
         message="Signup config retrieved",
     )
@@ -112,14 +138,22 @@ async def complete_signup(
     5. Store encrypted credentials
     """
     await _require_whatsapp_access_approved(store, db)
+    meta = await get_meta_platform_credentials(db)
+    if not (meta.app_id and meta.app_secret and meta.embedded_signup_config_id):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Meta Embedded Signup is not configured",
+        )
+
+    graph_api_base = _graph_api_base(meta.graph_api_version)
     try:
         async with httpx.AsyncClient() as client:
             # Step 1: Exchange code for user access token
             token_resp = await client.get(
-                f"{GRAPH_API_BASE}/oauth/access_token",
+                f"{graph_api_base}/oauth/access_token",
                 params={
-                    "client_id": settings.meta_app_id,
-                    "client_secret": settings.meta_app_secret,
+                    "client_id": meta.app_id,
+                    "client_secret": meta.app_secret,
                     "code": request.code,
                 },
                 timeout=30.0,
@@ -134,57 +168,91 @@ async def complete_signup(
 
             # Step 2: Debug token to get WABA and phone info
             debug_resp = await client.get(
-                f"{GRAPH_API_BASE}/debug_token",
+                f"{graph_api_base}/debug_token",
                 params={
                     "input_token": access_token,
-                    "access_token": f"{settings.meta_app_id}|{settings.meta_app_secret}",
+                    "access_token": f"{meta.app_id}|{meta.app_secret}",
                 },
                 timeout=30.0,
             )
+            if debug_resp.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Could not validate the Meta signup token",
+                )
             debug_data = debug_resp.json().get("data", {})
+            if not debug_data.get("is_valid") or str(debug_data.get("app_id")) != str(
+                meta.app_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Meta returned a token that is not valid for this app",
+                )
             granular_scopes = debug_data.get("granular_scopes", [])
 
             # Extract WABA ID from scopes
-            waba_id = None
-            phone_number_id = None
+            granted_waba_ids: list[str] = []
+            granted_scopes: set[str] = set()
             for scope in granular_scopes:
+                scope_name = str(scope.get("scope") or "")
+                granted_scopes.add(scope_name)
                 if scope.get("scope") == "whatsapp_business_management":
-                    waba_ids = scope.get("target_ids", [])
-                    if waba_ids:
-                        waba_id = waba_ids[0]
-                elif scope.get("scope") == "whatsapp_business_messaging":
-                    phone_ids = scope.get("target_ids", [])
-                    if phone_ids:
-                        phone_number_id = phone_ids[0]
+                    granted_waba_ids.extend(
+                        str(value) for value in scope.get("target_ids", [])
+                    )
 
-            if not waba_id:
+            required_scopes = {
+                "whatsapp_business_management",
+                "whatsapp_business_messaging",
+            }
+            if not required_scopes.issubset(granted_scopes):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Could not determine WhatsApp Business Account ID from signup",
+                    detail="Meta did not grant the required WhatsApp permissions",
                 )
 
-            # Step 3: If no phone_number_id from scopes, fetch from WABA
-            display_name = None
-            phone_number = None
-            if not phone_number_id:
-                phones_resp = await client.get(
-                    f"{GRAPH_API_BASE}/{waba_id}/phone_numbers",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    timeout=30.0,
-                )
-                if phones_resp.status_code == 200:
-                    phones = phones_resp.json().get("data", [])
-                    if phones:
-                        phone_number_id = phones[0].get("id")
-                        display_name = phones[0].get("verified_name")
-                        phone_number = phones[0].get("display_phone_number")
+            waba_id = request.waba_id or (
+                granted_waba_ids[0] if granted_waba_ids else None
+            )
 
-            # Step 4: Subscribe WABA to our app's webhooks
-            await client.post(
-                f"{GRAPH_API_BASE}/{waba_id}/subscribed_apps",
+            if not waba_id or waba_id not in granted_waba_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The selected WhatsApp Business Account was not granted to NUMU",
+                )
+
+            # Step 3: Read the selected WABA's numbers. Besides collecting
+            # display metadata, this prevents a caller from pairing a granted
+            # WABA with a phone ID that belongs to another business.
+            phones_resp = await client.get(
+                f"{graph_api_base}/{waba_id}/phone_numbers",
+                params={"fields": "id,verified_name,display_phone_number"},
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=30.0,
             )
+            if phones_resp.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Could not read phone numbers from the selected WhatsApp account",
+                )
+            phones = phones_resp.json().get("data", [])
+            phone_number_id, phone_data = _select_signup_phone(
+                phones, request.phone_number_id
+            )
+            display_name = phone_data.get("verified_name")
+            phone_number = phone_data.get("display_phone_number")
+
+            # Step 4: Subscribe WABA to our app's webhooks
+            subscribe_resp = await client.post(
+                f"{graph_api_base}/{waba_id}/subscribed_apps",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=30.0,
+            )
+            if subscribe_resp.status_code not in {200, 201}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="WhatsApp connected, but NUMU could not subscribe to its webhooks",
+                )
 
             # Step 5: Store credentials encrypted
             from src.infrastructure.external_services.secrets import (
@@ -199,6 +267,7 @@ async def complete_signup(
                 "phone_number_id": str(phone_number_id),
                 "display_name": display_name,
                 "phone_number": phone_number,
+                "graph_api_version": meta.graph_api_version,
             }
             encrypted = await secrets.encrypt(creds_data, key_id)
 
@@ -221,6 +290,7 @@ async def complete_signup(
                     "phone_number": phone_number,
                     "display_name": display_name,
                     "waba_id": str(waba_id),
+                    "phone_number_id": str(phone_number_id),
                 }
             else:
                 cred = ServiceCredential(
@@ -236,6 +306,7 @@ async def complete_signup(
                         "phone_number": phone_number,
                         "display_name": display_name,
                         "waba_id": str(waba_id),
+                        "phone_number_id": str(phone_number_id),
                     },
                 )
                 db.add(cred)

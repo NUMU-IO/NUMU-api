@@ -19,6 +19,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import get_current_user_id
+from src.application.services.meta_platform_credentials import (
+    get_meta_platform_credentials,
+)
 from src.config import settings
 from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.whatsapp import WhatsAppMessagingService
@@ -38,6 +41,7 @@ async def whatsapp_verify(
     hub_mode: str = Query(None, alias="hub.mode"),
     hub_verify_token: str = Query(None, alias="hub.verify_token"),
     hub_challenge: str = Query(None, alias="hub.challenge"),
+    db: AsyncSession = Depends(get_admin_db_session),
 ):
     """Handle WhatsApp webhook verification challenge.
 
@@ -60,7 +64,8 @@ async def whatsapp_verify(
         )
 
     # Verify the token matches what we configured
-    expected_token = settings.whatsapp_webhook_verify_token
+    meta = await get_meta_platform_credentials(db)
+    expected_token = meta.webhook_verify_token
     if not expected_token:
         logger.warning("WhatsApp verify token not configured")
         raise HTTPException(
@@ -99,10 +104,14 @@ async def whatsapp_callback(
     application level via explicit tenant_id on every log entry.
     """
     payload = await request.body()
+    meta = await get_meta_platform_credentials(db)
 
     # Verify signature
-    if settings.whatsapp_app_secret:
-        verified_data = whatsapp_service.verify_webhook_signature(
+    if meta.app_secret or settings.whatsapp_app_secret:
+        verifier = WhatsAppMessagingService(
+            app_secret=meta.app_secret or settings.whatsapp_app_secret
+        )
+        verified_data = verifier.verify_webhook_signature(
             payload,
             x_hub_signature_256 or "",
         )

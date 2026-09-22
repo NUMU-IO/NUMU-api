@@ -24,13 +24,14 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import settings
+from src.application.services.meta_platform_credentials import (
+    get_meta_platform_credentials,
+)
 from src.core.entities.channel_connection import ChannelType
 from src.core.logging import get_logger
 from src.infrastructure.database.connection import get_admin_db_session
 from src.infrastructure.external_services.meta.signature import (
     parse_signed_request,
-    verify_meta_webhook,
     verify_x_hub_signature,
 )
 
@@ -50,12 +51,16 @@ async def verify_webhook(
     hub_mode: str | None = Query(None, alias="hub.mode"),
     hub_verify_token: str | None = Query(None, alias="hub.verify_token"),
     hub_challenge: str | None = Query(None, alias="hub.challenge"),
+    db: AsyncSession = Depends(get_admin_db_session),
 ) -> PlainTextResponse:
     """Webhook verification handshake — Meta sends GET with hub.* params."""
-    challenge = verify_meta_webhook(
-        mode=hub_mode or "",
-        token=hub_verify_token or "",
-        challenge=hub_challenge or "",
+    meta = await get_meta_platform_credentials(db)
+    challenge = (
+        hub_challenge
+        if hub_mode == "subscribe"
+        and meta.webhook_verify_token
+        and hub_verify_token == meta.webhook_verify_token
+        else None
     )
     if challenge is not None:
         return PlainTextResponse(content=challenge, status_code=status.HTTP_200_OK)
@@ -86,10 +91,11 @@ async def receive_webhook(
     event_id = str(uuid.uuid4())
 
     raw_body = await request.body()
+    meta = await get_meta_platform_credentials(db)
 
-    if settings.meta_app_secret:
+    if meta.app_secret:
         if not x_hub_signature_256 or not verify_x_hub_signature(
-            raw_body, x_hub_signature_256
+            raw_body, x_hub_signature_256, app_secret=meta.app_secret
         ):
             logger.warning(
                 "meta_webhook_signature_rejected",
@@ -178,7 +184,8 @@ async def deauthorize_callback(
         WebhookEventModel,
     )
 
-    data = parse_signed_request(signed_request)
+    meta = await get_meta_platform_credentials(db)
+    data = parse_signed_request(signed_request, app_secret=meta.app_secret)
     if data is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signed_request"
@@ -219,7 +226,8 @@ async def data_deletion_callback(
         WebhookEventModel,
     )
 
-    data = parse_signed_request(signed_request)
+    meta = await get_meta_platform_credentials(db)
+    data = parse_signed_request(signed_request, app_secret=meta.app_secret)
     if data is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signed_request"
