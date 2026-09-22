@@ -368,6 +368,11 @@ async def complete_signup(
             store_repo = StoreRepository(db)
             await store_repo.update(store)
 
+            # Make the new credential visible before the client follows this
+            # response with /byo/status. The request dependency also commits,
+            # but that can finish after the browser starts the next request.
+            await db.commit()
+
         return SuccessResponse(
             data=EmbeddedSignupResponse(
                 connected=True,
