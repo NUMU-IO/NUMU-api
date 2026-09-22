@@ -604,6 +604,8 @@ class Settings(BaseSettings):
     # owner: docs/external-contracts.md.
     meta_graph_api_version: str = "v25.0"
     meta_webhook_verify_token: str | None = None
+    # Six-digit PIN used by the Cloud API /{phone-number-id}/register call.
+    meta_phone_registration_pin: str | None = None
     meta_login_config_id: str | None = None
 
     # TikTok for Business — Marketing/Events API OAuth. Activation switch

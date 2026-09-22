@@ -90,6 +90,29 @@ def _select_signup_phone(
     return phone_number_id, phone_by_id[phone_number_id]
 
 
+async def _register_signup_phone(
+    client: httpx.AsyncClient,
+    graph_api_base: str,
+    phone_number_id: str,
+    access_token: str,
+    registration_pin: str,
+) -> None:
+    response = await client.post(
+        f"{graph_api_base}/{phone_number_id}/register",
+        json={"messaging_product": "whatsapp", "pin": registration_pin},
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=30.0,
+    )
+    if response.status_code not in {200, 201}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "NUMU could not register the selected phone number for "
+                "WhatsApp Cloud API"
+            ),
+        )
+
+
 # ── Embedded Signup ──
 
 
@@ -111,7 +134,10 @@ async def get_signup_config(
             config_id=meta.embedded_signup_config_id,
             graph_api_version=meta.graph_api_version,
             enabled=bool(
-                meta.app_id and meta.app_secret and meta.embedded_signup_config_id
+                meta.app_id
+                and meta.app_secret
+                and meta.embedded_signup_config_id
+                and meta.phone_registration_pin
             ),
         ),
         message="Signup config retrieved",
@@ -139,7 +165,12 @@ async def complete_signup(
     """
     await _require_whatsapp_access_approved(store, db)
     meta = await get_meta_platform_credentials(db)
-    if not (meta.app_id and meta.app_secret and meta.embedded_signup_config_id):
+    if not (
+        meta.app_id
+        and meta.app_secret
+        and meta.embedded_signup_config_id
+        and meta.phone_registration_pin
+    ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Meta Embedded Signup is not configured",
@@ -155,6 +186,7 @@ async def complete_signup(
                     "client_id": meta.app_id,
                     "client_secret": meta.app_secret,
                     "code": request.code,
+                    "redirect_uri": "",
                 },
                 timeout=30.0,
             )
@@ -242,7 +274,16 @@ async def complete_signup(
             display_name = phone_data.get("verified_name")
             phone_number = phone_data.get("display_phone_number")
 
-            # Step 4: Subscribe WABA to our app's webhooks
+            # Step 4: Register the selected number for Cloud API messaging.
+            await _register_signup_phone(
+                client,
+                graph_api_base,
+                phone_number_id,
+                access_token,
+                meta.phone_registration_pin,
+            )
+
+            # Step 5: Subscribe WABA to our app's webhooks
             subscribe_resp = await client.post(
                 f"{graph_api_base}/{waba_id}/subscribed_apps",
                 headers={"Authorization": f"Bearer {access_token}"},
@@ -254,7 +295,7 @@ async def complete_signup(
                     detail="WhatsApp connected, but NUMU could not subscribe to its webhooks",
                 )
 
-            # Step 5: Store credentials encrypted
+            # Step 6: Store credentials encrypted
             from src.infrastructure.external_services.secrets import (
                 get_secrets_manager,
             )
@@ -268,6 +309,7 @@ async def complete_signup(
                 "display_name": display_name,
                 "phone_number": phone_number,
                 "graph_api_version": meta.graph_api_version,
+                "business_id": request.business_id,
             }
             encrypted = await secrets.encrypt(creds_data, key_id)
 
@@ -291,6 +333,7 @@ async def complete_signup(
                     "display_name": display_name,
                     "waba_id": str(waba_id),
                     "phone_number_id": str(phone_number_id),
+                    "business_id": request.business_id,
                 }
             else:
                 cred = ServiceCredential(
@@ -307,6 +350,7 @@ async def complete_signup(
                         "display_name": display_name,
                         "waba_id": str(waba_id),
                         "phone_number_id": str(phone_number_id),
+                        "business_id": request.business_id,
                     },
                 )
                 db.add(cred)

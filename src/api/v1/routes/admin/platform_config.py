@@ -16,7 +16,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -135,15 +135,26 @@ class MetaCredentialsRequest(BaseModel):
     meta_app_id: str | None = None
     meta_app_secret: str | None = None
     meta_webhook_verify_token: str | None = None
+    meta_phone_registration_pin: str | None = None
     meta_login_config_id: str | None = None
     meta_config_id: str | None = None
     meta_graph_api_version: str | None = None
+
+    @field_validator("meta_phone_registration_pin")
+    @classmethod
+    def validate_registration_pin(cls, value: str | None) -> str | None:
+        if value in (None, "", "****"):
+            return value
+        if len(value) != 6 or not value.isdigit():
+            raise ValueError("Phone registration PIN must contain exactly 6 digits")
+        return value
 
 
 class MetaCredentialsResponse(BaseModel):
     meta_app_id: str
     meta_app_secret: str
     meta_webhook_verify_token: str
+    meta_phone_registration_pin: str
     meta_login_config_id: str
     meta_config_id: str
     meta_graph_api_version: str
@@ -396,6 +407,7 @@ async def get_meta_credentials(
         meta_app_id=meta.app_id,
         meta_app_secret="****" if meta.app_secret else "",
         meta_webhook_verify_token="****" if meta.webhook_verify_token else "",
+        meta_phone_registration_pin="****" if meta.phone_registration_pin else "",
         meta_login_config_id=meta.login_config_id,
         meta_config_id=meta.embedded_signup_config_id,
         meta_graph_api_version=meta.graph_api_version,
@@ -420,6 +432,7 @@ async def update_meta_credentials(
     current = await get_meta_platform_credentials(db)
     app_secret = current.app_secret
     verify_token = current.webhook_verify_token
+    registration_pin = current.phone_registration_pin
     if (
         "meta_app_secret" in request.model_fields_set
         and request.meta_app_secret != "****"
@@ -431,7 +444,13 @@ async def update_meta_credentials(
     ):
         verify_token = request.meta_webhook_verify_token or ""
 
-    encrypted = await encrypt_meta_secrets(app_secret, verify_token)
+    if (
+        "meta_phone_registration_pin" in request.model_fields_set
+        and request.meta_phone_registration_pin != "****"
+    ):
+        registration_pin = request.meta_phone_registration_pin or ""
+
+    encrypted = await encrypt_meta_secrets(app_secret, verify_token, registration_pin)
     config.value = {
         "meta_app_id": request.meta_app_id
         if request.meta_app_id is not None
@@ -461,6 +480,7 @@ async def update_meta_credentials(
         meta_app_id=meta.app_id,
         meta_app_secret="****" if meta.app_secret else "",
         meta_webhook_verify_token="****" if meta.webhook_verify_token else "",
+        meta_phone_registration_pin="****" if meta.phone_registration_pin else "",
         meta_login_config_id=meta.login_config_id,
         meta_config_id=meta.embedded_signup_config_id,
         meta_graph_api_version=meta.graph_api_version,

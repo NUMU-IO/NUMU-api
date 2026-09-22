@@ -63,6 +63,7 @@ class EmbeddedSignupRequest(BaseModel):
     code: str = Field(..., min_length=1)
     waba_id: str | None = Field(default=None, min_length=1)
     phone_number_id: str | None = Field(default=None, min_length=1)
+    business_id: str | None = Field(default=None, min_length=1)
 
 
 class EmbeddedSignupResponse(BaseModel):
