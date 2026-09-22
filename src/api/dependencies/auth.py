@@ -332,6 +332,17 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
             )
         record, user = resolved
 
+        # Expose PAT identity to downstream handlers (e.g. /auth/api-key/me)
+        # without re-authenticating the token. Set before the checks below so
+        # the per-token request trail also records the requests they refuse.
+        request.state.pat = {
+            "token_id": str(record.id),
+            "name": record.name,
+            "scopes": record.scopes,
+            "store_id": str(record.store_id) if record.store_id else None,
+            "tenant_id": str(record.tenant_id),
+        }
+
         # Defense in depth: a PAT may only act on the tenant it was minted for.
         # The subdomain middleware has already resolved the target tenant, so a
         # token replayed against another store's subdomain is rejected here.
@@ -393,16 +404,6 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
         await service.mark_used(record)
         await session.commit()
 
-        # Expose PAT identity to downstream handlers (e.g. /auth/api-key/me)
-        # without re-authenticating the token.
-        request.state.pat = {
-            "token_id": str(record.id),
-            "name": record.name,
-            "scopes": record.scopes,
-            "store_id": str(record.store_id) if record.store_id else None,
-            "tenant_id": str(record.tenant_id),
-        }
-
         role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
         return TokenPayload(
             user_id=user.id,
@@ -441,6 +442,18 @@ async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
             )
         installation = principal.installation
         store_id = str(installation.store_id)
+        scopes = list(principal.token.scopes or [])
+
+        # The same shape /auth/api-key/me reads for PATs, plus the app. Set
+        # before the checks below so refused requests reach the token trail.
+        request.state.pat = {
+            "token_id": str(principal.token.id),
+            "name": f"app:{principal.app.slug}",
+            "scopes": scopes,
+            "store_id": store_id,
+            "tenant_id": str(installation.tenant_id),
+            "app_slug": principal.app.slug,
+        }
 
         # Defense in depth, as for PATs: the token only acts on the tenant its
         # installation belongs to, whatever host the request arrived on.
@@ -476,7 +489,6 @@ async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
                 detail="Access token is bound to a different store",
             )
 
-        scopes = list(principal.token.scopes or [])
         required = required_app_scope(path, request.method)
         if required is None or not scope_allows(scopes, required):
             raise HTTPException(
@@ -503,15 +515,6 @@ async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
         principal.token.last_used_at = datetime.now(UTC)
         await session.commit()
 
-        # The same shape /auth/api-key/me reads for PATs, plus the app.
-        request.state.pat = {
-            "token_id": str(principal.token.id),
-            "name": f"app:{principal.app.slug}",
-            "scopes": scopes,
-            "store_id": store_id,
-            "tenant_id": str(installation.tenant_id),
-            "app_slug": principal.app.slug,
-        }
         role_value = (
             owner.role.value if hasattr(owner.role, "value") else str(owner.role)
         )
