@@ -22,6 +22,7 @@ class MetaPlatformCredentials:
     app_id: str = ""
     app_secret: str = ""
     webhook_verify_token: str = ""
+    phone_registration_pin: str = ""
     login_config_id: str = ""
     embedded_signup_config_id: str = ""
     graph_api_version: str = "v25.0"
@@ -47,12 +48,18 @@ async def get_meta_platform_credentials(db: AsyncSession) -> MetaPlatformCredent
     verify_token = secrets.get("meta_webhook_verify_token") or value.get(
         "meta_webhook_verify_token"
     )
+    registration_pin = secrets.get("meta_phone_registration_pin") or value.get(
+        "meta_phone_registration_pin"
+    )
     return MetaPlatformCredentials(
         app_id=value.get("meta_app_id") or settings.meta_app_id or "",
         app_secret=app_secret or settings.meta_app_secret or "",
         webhook_verify_token=verify_token
         or settings.meta_webhook_verify_token
         or settings.whatsapp_webhook_verify_token
+        or "",
+        phone_registration_pin=registration_pin
+        or settings.meta_phone_registration_pin
         or "",
         login_config_id=value.get("meta_login_config_id")
         or settings.meta_login_config_id
@@ -65,13 +72,16 @@ async def get_meta_platform_credentials(db: AsyncSession) -> MetaPlatformCredent
     )
 
 
-async def encrypt_meta_secrets(app_secret: str, webhook_token: str) -> dict[str, str]:
+async def encrypt_meta_secrets(
+    app_secret: str, webhook_token: str, phone_registration_pin: str
+) -> dict[str, str]:
     manager = get_secrets_manager()
     key_id = await manager.get_current_key_id()
     encrypted = await manager.encrypt(
         {
             "meta_app_secret": app_secret,
             "meta_webhook_verify_token": webhook_token,
+            "meta_phone_registration_pin": phone_registration_pin,
         },
         key_id,
     )
