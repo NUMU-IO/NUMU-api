@@ -386,7 +386,14 @@ class WhatsAppMessagingService(IMessagingService):
                     )
                     error_code = error_data.get("error", {}).get("code")
 
-                    logger.error(f"WhatsApp send failed: {error_msg}")
+                    # 131030 is an expected Meta sandbox restriction: the
+                    # recipient has not been added to the test-number allow
+                    # list. Surface it to the merchant, but do not page the
+                    # production error channel as an unexpected server fault.
+                    log = (
+                        logger.warning if str(error_code) == "131030" else logger.error
+                    )
+                    log(f"WhatsApp send failed: {error_msg}")
                     return MessageResult(
                         success=False,
                         channel=MessageChannel.WHATSAPP,
