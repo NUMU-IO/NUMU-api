@@ -32,6 +32,19 @@ _PERMANENT_ERROR_PHRASES = [
 ]
 
 
+# The deploy canary and the load tests check out with addresses at these
+# domains, and the load-test stores belong to the CI admin at numueg.tech.
+# Neither domain can receive mail (numu-test.io does not resolve, numueg.tech
+# has no MX), so every send bounced: wasted Resend quota, and a bounce rate
+# that puts the sending domain's reputation at risk.
+_UNDELIVERABLE_TEST_DOMAINS = frozenset({"numu-test.io", "numueg.tech"})
+
+
+def _is_test_recipient(address: str) -> bool:
+    domain = address.rsplit("@", 1)[-1].strip().rstrip(">").lower()
+    return domain in _UNDELIVERABLE_TEST_DOMAINS
+
+
 class EmailConfigurationError(ExternalServiceError):
     """Raised for permanent email configuration problems (non-retryable)."""
 
@@ -168,6 +181,10 @@ class ResendEmailService(IEmailService):
     async def send_email(self, message: EmailMessage) -> bool:
         """Send an email using Resend."""
         to_list = message.to if isinstance(message.to, list) else [message.to]
+        to_list = [a for a in to_list if not _is_test_recipient(a)]
+        if not to_list:
+            logger.info("email_skipped_test_recipient")
+            return True
 
         # ── Dev / missing-key guard ─────────────────────────────────
         if not self.api_key:
