@@ -157,11 +157,11 @@ async def complete_signup(
 ):
     """Exchange the code from Meta's embedded signup for permanent credentials.
 
-    1. Exchange code for short-lived user token
-    2. Exchange for system user token
-    3. Get WABA ID and phone number ID from debug_token
-    4. Subscribe to webhooks
-    5. Store encrypted credentials
+    1. Exchange the one-time code for the business integration token
+    2. Validate the token and its granted WhatsApp accounts
+    3. Validate and register the selected phone number
+    4. Subscribe the WABA to webhooks
+    5. Store the account credentials encrypted
     """
     await _require_whatsapp_access_approved(store, db)
     meta = await get_meta_platform_credentials(db)
