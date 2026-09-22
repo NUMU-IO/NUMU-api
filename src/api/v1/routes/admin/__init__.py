@@ -18,6 +18,7 @@ from fastapi import APIRouter
 from src.api.v1.routes.admin.analytics_rollups import (
     router as analytics_rollups_router,
 )
+from src.api.v1.routes.admin.api_tokens import router as api_tokens_router
 from src.api.v1.routes.admin.apps import router as admin_apps_router
 from src.api.v1.routes.admin.auth import router as admin_auth_router
 from src.api.v1.routes.admin.campaigns import router as campaigns_router
@@ -148,6 +149,8 @@ router.include_router(
 router.include_router(whatsapp_access_router)
 router.include_router(partners_router)
 router.include_router(admin_apps_router)
+# Carries its own prefix="/api-tokens" -> /api/v1/admin/api-tokens
+router.include_router(api_tokens_router)
 # Credentials router already has prefix="/admin/credentials" built-in,
 # so we include it at root "" to avoid /admin/admin/credentials
 router.include_router(credentials_router)
