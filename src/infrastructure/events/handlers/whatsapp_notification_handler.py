@@ -17,7 +17,7 @@ keyed on ``metadata.order_id`` + event-type tag (research R5, FR-005).
 """
 
 from typing import TYPE_CHECKING
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
@@ -64,8 +64,9 @@ async def _persist_message_log(
     message_id: str | None,
     status_str: str,
     metadata: dict,
+    error_code: str | None = None,
 ) -> None:
-    """Write a row to ``message_logs`` after a successful template send.
+    """Write a row to ``message_logs`` after a template send attempt.
 
     This is the other half of the idempotency contract: ``_resolve_send_context``
     scans recent rows for a matching ``(template_name, metadata.order_id,
@@ -77,10 +78,12 @@ async def _persist_message_log(
     send on the next event replay; that's exactly what we're already
     fixing, so don't make it worse by raising.
     """
-    if not message_id:
+    if not message_id and status_str != "failed":
         # Send succeeded but Meta didn't return an id (rare). Skip the
         # log — without an id the row violates a NOT NULL constraint.
         return
+    if not message_id:
+        message_id = f"failed:{uuid4()}"
     try:
         from src.core.entities.message_log import (
             MessageDirection,
@@ -107,6 +110,7 @@ async def _persist_message_log(
                 direction=MessageDirection.OUTBOUND,
                 template_name=template_name,
                 status=status_enum,
+                error_code=error_code,
             )
         )
         await session.commit()
@@ -639,19 +643,20 @@ async def _maybe_send_cod_confirm_request(
         order_row.customer_confirmation_status = "pending"
         order_row.customer_confirmation_requested_at = now
         await session.commit()
-        await _persist_message_log(
-            session,
-            tenant_id=extras["tenant_id"],
-            store_id=event.store_id,
-            phone=extras["customer_phone"],
-            template_name="order_confirmation_request_v2",
-            message_id=result.message_id,
-            status_str=str(getattr(result.status, "value", result.status)),
-            metadata={
-                "order_id": str(event.order_id),
-                "event_tag": "order_confirm_request",
-            },
-        )
+    await _persist_message_log(
+        session,
+        tenant_id=extras["tenant_id"],
+        store_id=event.store_id,
+        phone=extras["customer_phone"],
+        template_name="order_confirmation_request_v2",
+        message_id=result.message_id,
+        status_str=str(getattr(result.status, "value", result.status)),
+        metadata={
+            "order_id": str(event.order_id),
+            "event_tag": "order_confirm_request",
+        },
+        error_code=result.error_code,
+    )
 
     logger.info(
         "whatsapp_order_confirm_request_sent",
@@ -762,20 +767,20 @@ async def handle_order_created_whatsapp(
             payment_label_text=payment_label_str,
         )
 
-        if result.success:
-            await _persist_message_log(
-                session,
-                tenant_id=extras["tenant_id"],
-                store_id=event.store_id,
-                phone=extras["customer_phone"],
-                template_name="order_confirmation_v3",
-                message_id=result.message_id,
-                status_str=str(getattr(result.status, "value", result.status)),
-                metadata={
-                    "order_id": str(event.order_id),
-                    "event_tag": "order_created",
-                },
-            )
+        await _persist_message_log(
+            session,
+            tenant_id=extras["tenant_id"],
+            store_id=event.store_id,
+            phone=extras["customer_phone"],
+            template_name="order_confirmation_v3",
+            message_id=result.message_id,
+            status_str=str(getattr(result.status, "value", result.status)),
+            metadata={
+                "order_id": str(event.order_id),
+                "event_tag": "order_created",
+            },
+            error_code=result.error_code,
+        )
 
         logger.info(
             "whatsapp_order_created_sent",
