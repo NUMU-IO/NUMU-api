@@ -53,6 +53,7 @@ class EmbeddedSignupConfig(BaseModel):
 
     app_id: str
     config_id: str
+    graph_api_version: str
     enabled: bool = True
 
 
@@ -60,6 +61,8 @@ class EmbeddedSignupRequest(BaseModel):
     """Code received from Meta's embedded signup callback."""
 
     code: str = Field(..., min_length=1)
+    waba_id: str | None = Field(default=None, min_length=1)
+    phone_number_id: str | None = Field(default=None, min_length=1)
 
 
 class EmbeddedSignupResponse(BaseModel):
