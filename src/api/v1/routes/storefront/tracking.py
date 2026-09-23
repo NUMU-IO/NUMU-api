@@ -1242,6 +1242,30 @@ _IDENTITY_CACHE_FIELDS = (
 )
 
 
+async def remember_session_identity(
+    store_id: UUID, fingerprint: str | None, fields: dict
+) -> None:
+    """Attach identity a shopper just gave (e.g. a newsletter email) to every
+    later event from their browser, merged into what is already known."""
+    if not fingerprint:
+        return
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    cache = RedisCacheService()
+    key = f"{_IDENTITY_CACHE_PREFIX}{store_id}:{fingerprint}"
+    with contextlib.suppress(Exception):
+        cached = await cache.get(key)
+        merged = {
+            k: v
+            for k, v in (cached if isinstance(cached, dict) else {}).items()
+            if k in _IDENTITY_CACHE_FIELDS
+        }
+        merged.update({
+            k: v for k, v in fields.items() if v and k in _IDENTITY_CACHE_FIELDS
+        })
+        await cache.set(key, merged, expire=_IDENTITY_CACHE_TTL_SECONDS)
+
+
 async def _resolve_session_identity(
     user_data: dict,
     fingerprint: str | None,

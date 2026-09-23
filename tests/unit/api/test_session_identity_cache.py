@@ -49,3 +49,17 @@ def test_found_identity_rides_later_browsing_events(monkeypatch):
     user, lookups = _run(monkeypatch, "page_view")
     assert user["email"] == "a@b.co"
     assert lookups == []
+
+
+def test_a_newsletter_email_merges_into_what_is_known(monkeypatch):
+    _Cache.store = {f"capi_identity:{STORE}:fp-1": {"phone": "+201000000000"}}
+    monkeypatch.setattr(
+        "src.infrastructure.cache.redis_cache.RedisCacheService", _Cache
+    )
+    asyncio.run(
+        tracking.remember_session_identity(STORE, "fp-1", {"email": "a@b.co", "x": 1})
+    )
+    assert _Cache.store[f"capi_identity:{STORE}:fp-1"] == {
+        "phone": "+201000000000",
+        "email": "a@b.co",
+    }
