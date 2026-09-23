@@ -360,6 +360,7 @@ class TestExcludeNonRevenue:
             "refunded",
             "draft",
             "payment_failed",
+            "awaiting_payment",
         )
 
     def test_returned_stays_in_booked_revenue(self):

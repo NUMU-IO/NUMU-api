@@ -43,11 +43,13 @@ from sqlalchemy import String, cast, func
 #   refunded       — money went back
 #   draft          — merchant-only, never visible to a customer, never billable
 #   payment_failed — customer never completed payment
+#   awaiting_payment — card checkout the customer has not paid (yet)
 NON_REVENUE_STATUSES_LC: tuple[str, ...] = (
     "cancelled",
     "refunded",
     "draft",
     "payment_failed",
+    "awaiting_payment",
 )
 
 
