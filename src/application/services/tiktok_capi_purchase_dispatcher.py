@@ -218,6 +218,7 @@ async def enqueue_tiktok_capi_event_for_order(
             user_data=user_data,
             custom_data=custom_data,
             action_source="web",
+            opt_out=bool(order_view(order).metadata.get("opt_out")),
         )
 
 

@@ -33,6 +33,9 @@ class CheckoutRequest(BaseModel):
     shipping_address: OrderAddressRequest
     billing_address: OrderAddressRequest | None = None
     payment_method: str | None = Field(None, description="e.g. paymob_card, cod")
+    # The shopper declined tracking in the store's cookie banner. Carried onto
+    # the order so its server Purchase honours the choice.
+    opt_out: bool | None = None
     # Guest checkout fields (used when not authenticated)
     guest_email: str | None = Field(
         None, max_length=254, description="Email for guest checkout"

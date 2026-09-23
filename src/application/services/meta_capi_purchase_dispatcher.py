@@ -670,6 +670,7 @@ async def enqueue_meta_capi_event_for_order(
             user_data=user_data,
             custom_data=custom_data,
             action_source="website",
+            opt_out=bool(order_view(order).metadata.get("opt_out")),
         )
 
 
@@ -748,4 +749,5 @@ async def enqueue_meta_capi_refund(db: AsyncSession, order: Any) -> None:
             user_data=user_data,
             custom_data=custom_data,
             action_source="system_generated",
+            opt_out=bool(order_view(order).metadata.get("opt_out")),
         )
