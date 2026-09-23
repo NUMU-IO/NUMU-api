@@ -38,6 +38,7 @@ import httpx
 import sentry_sdk
 
 from src.core.logging import get_logger
+from src.core.services.meta_delivery_policy import FailureKind
 from src.core.services.tiktok_delivery_policy import (
     classify_response as classify_tiktok_response,
 )
@@ -700,6 +701,8 @@ async def _send_event(
         level="warning",
         fingerprint=["tiktok_capi", status_class, store_id, str(response_code)],
     )
+    if kind is FailureKind.INVALID_CREDENTIALS:
+        await notify_tracking_reconnect(store_id, "TikTok")
     return {"status": "failed", "request_id": request_id}
 
 
@@ -1238,3 +1241,24 @@ async def _find_purchase_gaps() -> list[dict[str, Any]]:
                     "orders": orders[store.id],
                 })
     return gaps
+
+
+async def notify_tracking_reconnect(store_id: str, platform: str) -> None:
+    """Tell the merchant their Meta / TikTok connection stopped working.
+
+    A dead token used to reach only Sentry, and every conversion was lost
+    until someone noticed. One notification per platform per day.
+    """
+    from src.application.services.notification_feed import (
+        emit_notification_standalone,
+    )
+
+    await emit_notification_standalone(
+        store_id=UUID(str(store_id)),
+        category="system",
+        kind="tracking.reconnect_required",
+        data={"details": platform},
+        link="/settings/tracking",
+        important=True,
+        dedupe_key=f"tracking.reconnect:{platform}:{datetime.now(UTC).date()}",
+    )

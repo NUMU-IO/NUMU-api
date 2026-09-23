@@ -148,3 +148,11 @@ class TestVendorParityGaps:
         key and did not get one. Recorded so the asymmetry is deliberate."""
         out = hash_tiktok_user_data({"state": "Cairo"})
         assert "state" not in out
+
+
+def test_external_id_carries_customer_and_session_ids():
+    """A Purchase must join the browsing session that led to it, which only
+    ever carried the fingerprint."""
+    both = hash_tiktok_user_data({"customer_id": "c-1", "external_id": "fp-1"})
+    assert both["external_id"] == [_sha("c-1"), _sha("fp-1")]
+    assert hash_tiktok_user_data({"external_id": "fp-1"})["external_id"] == _sha("fp-1")

@@ -1942,6 +1942,7 @@ async def checkout(
                 else {}
             ),
             **({"ip_address": shopper_ip} if shopper_ip else {}),
+            **({"opt_out": True} if request.opt_out else {}),
             **({"user_agent": client_user_agent} if client_user_agent else {}),
             # Read back by the Meta / TikTok CAPI purchase dispatchers to
             # attach Advanced Matching keys the webhook itself can't see.

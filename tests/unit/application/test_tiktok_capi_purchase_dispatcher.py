@@ -123,3 +123,14 @@ class TestFire:
         assert kwargs["custom_data"]["order_id"] == str(order.id)
         # ttclid from order metadata threads into user_data.
         assert kwargs["user_data"].get("ttclid") == "TT9"
+        assert kwargs["opt_out"] is False
+
+    async def test_declined_consent_on_the_order_reaches_tiktok(self, patched):
+        store_repo_cls, send_task = patched
+        store_repo_cls.return_value.get_by_id = AsyncMock(return_value=_make_store())
+        order = _make_order()
+        order.metadata = {**order.metadata, "opt_out": True}
+
+        await enqueue_tiktok_capi_purchase(MagicMock(), order)
+
+        assert send_task.delay.call_args.kwargs["opt_out"] is True
