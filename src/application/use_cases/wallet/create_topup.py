@@ -3,9 +3,9 @@
 Three methods, one table — all switchable from the admin panel
 (``wallet_settings`` in platform_config):
 
-* ``card`` — Kashier hosted payment session on NUMU's own (platform)
-  account; the merchant is redirected and the platform Kashier webhook
-  credits the wallet instantly.
+* ``card`` — the hub's own card form, posted by the browser straight to
+  Kashier's Direct API on NUMU's own (platform) account; the platform
+  Kashier webhook credits the wallet instantly.
 * ``vodafone_cash`` — MANUAL: merchant transfers to NUMU's own Vodafone
   Cash number and uploads a receipt (:mod:`submit_topup_proof`). Not a
   gateway flow.
@@ -34,7 +34,6 @@ from src.application.services.wallet_settings import (
 )
 from src.config.settings import get_settings
 from src.core.entities.wallet import TopupIntentStatus, TopupMethod
-from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.public.wallet import WalletTopupIntentModel
 
 logger = logging.getLogger(__name__)
@@ -43,16 +42,21 @@ logger = logging.getLogger(__name__)
 # stays a hard platform constant.
 MAX_TOPUP_CENTS = 5_000_000  # 50,000 EGP
 MANUAL_EXPIRY_MINUTES = 30
-GATEWAY_EXPIRY_HOURS = 24
+# The card form is filled in on the spot; an unsubmitted card intent only
+# counts against the open-intent cap. A late webhook still credits it
+# (the platform webhook accepts success on an expired intent).
+GATEWAY_EXPIRY_HOURS = 1
 
 
 @dataclass
 class CreateTopupResult:
     intent: WalletTopupIntentModel
-    # Card: hosted checkout redirect. Manual methods: None.
+    # Legacy hosted-checkout redirect; card top-ups now use card_form.
     checkout_url: str | None
     # Manual payload for the hub dialog (destination, reference, QR...).
     manual: dict | None
+    # Card: signed Direct API order the hub's card form submits to Kashier.
+    card_form: dict | None = None
 
 
 class CreateTopupUseCase:
@@ -108,40 +112,15 @@ class CreateTopupUseCase:
     async def _create_card(
         self, *, tenant_id: UUID, user_id: UUID, amount_cents: int
     ) -> CreateTopupResult:
-        s = self.settings
-        if not (s.platform_kashier_mid and s.platform_kashier_api_key):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Card top-ups are not configured.",
-            )
-
-        from src.infrastructure.external_services.kashier import (
-            KashierPaymentService,
-        )
-
-        owner = (
-            await self.db.execute(select(UserModel).where(UserModel.id == user_id))
-        ).scalar_one_or_none()
+        from src.application.services.platform_kashier import platform_card_params
 
         intent_id = uuid4()
         special_reference = f"WTOP-{intent_id}"
-        api_base = s.platform_api_base_url.rstrip("/")
-        service = KashierPaymentService(
-            mid=s.platform_kashier_mid,
-            api_key=s.platform_kashier_api_key,
-            mode=s.platform_kashier_mode,
-        )
-        payment_intent = await service.create_payment_intent(
-            amount=amount_cents,
-            currency="EGP",
-            customer_email=str(owner.email) if owner else None,
-            metadata={
-                "order_id": special_reference,
-                "webhook_url": (
-                    f"{api_base}/api/v1/webhooks/kashier/platform/callback"
-                ),
-                "redirect_url": (f"{s.merchant_hub_url}/wallet?topup_id={intent_id}"),
-            },
+        card_form = platform_card_params(
+            reference=special_reference,
+            amount_cents=amount_cents,
+            description="NUMU wallet top-up",
+            redirect_url=f"{self.settings.merchant_hub_url}/wallet?topup_id={intent_id}",
         )
 
         intent = WalletTopupIntentModel(
@@ -153,8 +132,6 @@ class CreateTopupUseCase:
             currency="EGP",
             status=TopupIntentStatus.PENDING.value,
             special_reference=special_reference,
-            gateway_reference=payment_intent.id,
-            gateway_payload=payment_intent.client_secret,  # session URL
             expires_at=datetime.now(UTC) + timedelta(hours=GATEWAY_EXPIRY_HOURS),
         )
         self.db.add(intent)
@@ -169,11 +146,8 @@ class CreateTopupUseCase:
                 "amount_cents": amount_cents,
             },
         )
-        # Kashier's client_secret IS the hosted session URL.
         return CreateTopupResult(
-            intent=intent,
-            checkout_url=payment_intent.client_secret,
-            manual=None,
+            intent=intent, checkout_url=None, manual=None, card_form=card_form
         )
 
     # ------------------------------------------------------------------

@@ -81,6 +81,9 @@ from src.api.v1.routes.omnichannel import (
 from src.api.v1.routes.partner_apps import router as partner_apps_router
 from src.api.v1.routes.partners import router as partners_router
 from src.api.v1.routes.permissions.routes import router as permissions_router
+
+# Merchant wallet routes (pay-as-you-go balance + top-ups)
+from src.api.v1.routes.platform_pay import router as platform_pay_router
 from src.api.v1.routes.public import router as public_router
 
 # Referral routes (merchant-to-merchant referral program)
@@ -224,8 +227,6 @@ from src.api.v1.routes.themes import router as themes_marketplace_router
 
 # Theme ZIP upload + build status + preview token (authenticated developers)
 from src.api.v1.routes.themes_upload import router as themes_upload_router
-
-# Merchant wallet routes (pay-as-you-go balance + top-ups)
 from src.api.v1.routes.wallet import router as wallet_router
 
 # Webhook routes (external service callbacks)
@@ -638,6 +639,7 @@ api_router.include_router(billing_router, tags=["Billing"])
 
 # Merchant wallet (payg): balance, ledger, top-ups
 api_router.include_router(wallet_router, tags=["Wallet"])
+api_router.include_router(platform_pay_router)
 
 # Referral routes (merchant referral program)
 api_router.include_router(referrals_router, tags=["Referrals"])

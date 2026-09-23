@@ -30,10 +30,15 @@ from src.api.dependencies.tenant_context import (
 )
 from src.api.responses import SuccessResponse
 from src.api.utils.upload_validation import validate_image_upload
+from src.application.services.platform_kashier import platform_card_params
 from src.application.use_cases.billing.cancel_subscription import (
     CancelSubscriptionUseCase,
 )
+from src.application.use_cases.billing.create_instapay_payment import (
+    CreateSubscriptionPaymentIntentUseCase,
+)
 from src.application.use_cases.billing.subscribe import SubscribeUseCase
+from src.config.settings import get_settings
 from src.core.entities.subscription_payment import PLAN_PURPOSES
 from src.core.interfaces.services.storage_service import IStorageService
 from src.infrastructure.database.models.public.billing import (
@@ -232,6 +237,9 @@ class SubscriptionPaymentIntentResponse(BaseModel):
     expires_at: datetime | None
     rejection_reason: str | None = None
     created_at: datetime | None = None
+    # Card intents only: signed Direct API order ({endpoint, hash, body})
+    # the hub's card form completes with the card and POSTs to Kashier.
+    card_form: dict | None = None
 
 
 class CreateInstapayIntentRequest(BaseModel):
@@ -344,6 +352,11 @@ async def get_billing_plans(
             "plans": [p.model_dump() for p in plans],
             "current": current,
             "instapay_available": bool(admin.instapay_ipa),
+            # NUMU's own Kashier account: plans can be paid on the card page.
+            "card_available": bool(
+                get_settings().platform_kashier_mid
+                and get_settings().platform_kashier_api_key
+            ),
             "plan_intent": plan_intent,
         },
         message="Plans",
@@ -443,6 +456,46 @@ async def create_instapay_intent(
         ),
         message="Payment created",
     )
+
+
+@router.post(
+    "/billing/card-intents",
+    response_model=SuccessResponse[SubscriptionPaymentIntentResponse],
+    status_code=201,
+    summary="Start a card subscription payment",
+    operation_id="create_card_intent",
+)
+async def create_card_intent(
+    request: CreateInstapayIntentRequest,
+    tenant: Annotated[TenantModel, Depends(get_owner_tenant)],
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Plan payment through the hub's own card form (Kashier Direct API).
+
+    The browser posts the card straight to Kashier; the platform Kashier
+    webhook activates the plan. Poll ``GET /billing/instapay-intents/{id}``
+    for the outcome, as for InstaPay.
+    """
+    result = await CreateSubscriptionPaymentIntentUseCase(db).execute(
+        tenant=tenant,
+        user_id=user_id,
+        plan=request.plan,
+        billing_cycle=request.billing_cycle,
+        card=True,
+    )
+    intent = result.intent
+    card_form = platform_card_params(
+        reference=intent.special_reference,
+        amount_cents=intent.amount_cents,
+        description=f"NUMU {intent.plan_key} plan ({intent.billing_cycle})",
+        redirect_url=f"{get_settings().merchant_hub_url}/billing",
+    )
+    await db.commit()
+
+    response = _intent_response(intent)
+    response.card_form = card_form
+    return SuccessResponse(data=response, message="Payment created")
 
 
 @router.get(

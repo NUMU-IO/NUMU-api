@@ -105,6 +105,9 @@ class TopupResponse(BaseModel):
     # Manual-method payload (InstaPay / Vodafone Cash): destination,
     # reference, QR (InstaPay only), expiry.
     manual: dict | None = None
+    # Card: signed Direct API order ({endpoint, hash, body}) the hub's card
+    # form completes with the card and POSTs to Kashier from the browser.
+    card_form: dict | None = None
     expires_at: datetime | None = None
 
 
@@ -126,6 +129,7 @@ def _topup_response(
     *,
     checkout_url: str | None = None,
     manual: dict | None = None,
+    card_form: dict | None = None,
 ) -> TopupResponse:
     if manual is None and intent.method in MANUAL_TOPUP_METHODS:
         manual = {
@@ -150,6 +154,7 @@ def _topup_response(
             intent.gateway_payload if intent.method == TopupMethod.CARD.value else None
         ),
         manual=manual,
+        card_form=card_form,
         expires_at=intent.expires_at,
     )
 
@@ -352,6 +357,7 @@ async def create_wallet_topup(
             result.intent,
             checkout_url=result.checkout_url,
             manual=result.manual,
+            card_form=result.card_form,
         ),
         message="Top-up created",
     )
