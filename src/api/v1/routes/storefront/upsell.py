@@ -292,7 +292,13 @@ async def accept_upsell_offer(
                     KashierPaymentService,
                 )
 
-                kashier = KashierPaymentService(api_key=api_key)
+                kashier = KashierPaymentService(
+                    api_key=api_key,
+                    mode=(store.settings or {})
+                    .get("payment", {})
+                    .get("kashier", {})
+                    .get("mode"),
+                )
                 result = await kashier.charge_saved_token(
                     card_token=saved_method.card_token,
                     amount=discounted_price,

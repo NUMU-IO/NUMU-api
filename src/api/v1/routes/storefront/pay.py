@@ -560,6 +560,7 @@ async def _initiate_kashier(
             api_key=creds["api_key"],
             secret_key=creds.get("secret_key"),
             apple_pay_enabled=kashier_settings.get("apple_pay_enabled", False),
+            mode=kashier_settings.get("mode"),
         )
         intent = await kashier_service.create_payment_intent(
             amount=amount_due,

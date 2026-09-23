@@ -408,3 +408,17 @@ class TestKashierPaymentService:
             patcher.stop()
 
         assert status == "pending"
+
+
+def test_store_mode_picks_the_kashier_api_and_none_follows_server_default():
+    live = KashierPaymentService(mid="MID-1", api_key="k", mode="live")
+    test = KashierPaymentService(mid="MID-1", api_key="k", mode="test")
+    assert live._get_api_base() == "https://api.kashier.io"
+    assert test._get_api_base() == "https://test-api.kashier.io"
+
+    with patch(
+        "src.infrastructure.external_services.kashier.payment_service.settings"
+    ) as s:
+        s.kashier_mode = "live"
+        default = KashierPaymentService(mid="MID-1", api_key="k", mode=None)
+    assert default._get_api_base() == "https://api.kashier.io"
