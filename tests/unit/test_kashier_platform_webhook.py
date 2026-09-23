@@ -138,3 +138,82 @@ def test_a_failed_release_never_masks_the_original_error(
             {"nonce_key": "kashier:platform:processed:tx-9"},
         )
     ]
+
+
+class _IntentDb:
+    """Returns one subscription intent for the lookup; records commits."""
+
+    def __init__(self, intent):
+        self.intent = intent
+        self.commits = 0
+
+    async def execute(self, _stmt):
+        return SimpleNamespace(scalar_one_or_none=lambda: self.intent)
+
+    async def commit(self):
+        self.commits += 1
+
+
+def _sub_intent(status: str = "awaiting_proof"):
+    return SimpleNamespace(id="i-1", tenant_id="t-1", amount_cents=25000, status=status)
+
+
+def _run_sub(cache, monkeypatch, intent, *, status="SUCCESS", amount="250.00"):
+    activated = []
+
+    async def fake_activate(_db, *, intent):
+        activated.append(intent.status)
+        intent.status = "succeeded"
+        return SimpleNamespace(activated=True)
+
+    monkeypatch.setattr(hook, "activate_verified_subscription_payment", fake_activate)
+    raw, sig = _signed({
+        "merchantOrderId": "SUB-ABC123",
+        "transactionId": "tx-sub",
+        "status": status,
+        "amount": amount,
+    })
+    db = _IntentDb(intent)
+    result = asyncio.run(
+        hook.kashier_platform_callback(_Request(raw), db=db, x_kashier_signature=sig)
+    )
+    return result, activated
+
+
+def test_a_paid_card_subscription_activates_the_plan(cache, monkeypatch):
+    result, activated = _run_sub(cache, monkeypatch, _sub_intent())
+    assert result["status"] == "processed"
+    assert activated == ["awaiting_proof"]
+
+
+def test_a_late_payment_reopens_an_expired_intent(cache, monkeypatch):
+    _, activated = _run_sub(cache, monkeypatch, _sub_intent("expired"))
+    assert activated == ["awaiting_proof"]
+
+
+def test_a_declined_or_short_payment_never_activates(cache, monkeypatch):
+    _, declined = _run_sub(cache, monkeypatch, _sub_intent(), status="FAILURE")
+    _, short = _run_sub(cache, monkeypatch, _sub_intent(), amount="1.00")
+    assert declined == [] and short == []
+
+
+def test_direct_card_order_is_signed_like_kashiers_docs():
+    from src.infrastructure.external_services.kashier import KashierPaymentService
+
+    params = KashierPaymentService(
+        mid="MID-1-2", api_key=KEY, mode="live"
+    ).direct_payment_params(
+        reference="SUB-ABC123",
+        amount_cents=25000,
+        currency="EGP",
+        description="d",
+        webhook_url="https://w",
+        redirect_url="https://r",
+    )
+    expected = hmac.new(
+        KEY.encode(), b"/?payment=MID-1-2.SUB-ABC123.250.00.EGP", hashlib.sha256
+    ).hexdigest()
+    assert params["hash"] == expected
+    assert params["body"]["order"]["amount"] == "250.00"
+    assert params["endpoint"] == "https://fep.kashier.io/v3/orders/"
+    assert "paymentMethod" not in params["body"]

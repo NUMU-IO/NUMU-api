@@ -63,6 +63,19 @@ def classify_purpose(tenant: TenantModel, plan: str, billing_cycle: str) -> str:
     return SubscriptionPaymentPurpose.NEW_SUBSCRIPTION.value
 
 
+def _superseded(open_intent: SubscriptionPaymentIntentModel, *, card: bool) -> bool:
+    """An unpaid intent gives way when the merchant starts a new attempt.
+
+    Card: any intent still awaiting payment (a failed card try, or an
+    InstaPay transfer they never made); each card try needs a fresh Kashier
+    order reference. InstaPay: only a card intent, which has no destination
+    to resume. An intent with a receipt under review always blocks.
+    """
+    if open_intent.status != SubscriptionPaymentIntentStatus.AWAITING_PROOF.value:
+        return False
+    return card or open_intent.display_destination is None
+
+
 class CreateSubscriptionPaymentIntentUseCase:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -74,7 +87,11 @@ class CreateSubscriptionPaymentIntentUseCase:
         user_id: UUID,
         plan: str,
         billing_cycle: str,
+        card: bool = False,
     ) -> CreateSubscriptionPaymentResult:
+        """``card=True`` makes an intent the hub's Kashier card form pays: no
+        InstaPay destination or QR, settled by the platform Kashier webhook.
+        """
         from src.application.services.wallet_settings import get_wallet_settings
         from src.infrastructure.external_services.instapay.payment_service import (
             generate_reference_code,
@@ -114,8 +131,8 @@ class CreateSubscriptionPaymentIntentUseCase:
             )
 
         admin = await get_wallet_settings(self.db)
-        destination = admin.instapay_ipa
-        if not destination:
+        destination = None if card else admin.instapay_ipa
+        if not card and not destination:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="InstaPay payments are not configured.",
@@ -140,6 +157,9 @@ class CreateSubscriptionPaymentIntentUseCase:
                 )
             )
         ).scalar_one_or_none()
+        if open_intent is not None and _superseded(open_intent, card=card):
+            open_intent.status = SubscriptionPaymentIntentStatus.EXPIRED.value
+            open_intent = None
         if open_intent is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -164,11 +184,15 @@ class CreateSubscriptionPaymentIntentUseCase:
                 break
             reference = generate_reference_code(prefix="SUB")
 
-        qr_payload = build_qr_payload(
-            ipa=destination,
-            amount_cents=amount_cents,
-            reference_code=reference,
-            note=f"NUMU {features.display_name} {reference}",
+        qr_payload = (
+            None
+            if card
+            else build_qr_payload(
+                ipa=destination,
+                amount_cents=amount_cents,
+                reference_code=reference,
+                note=f"NUMU {features.display_name} {reference}",
+            )
         )
 
         expires_at = datetime.now(UTC) + timedelta(

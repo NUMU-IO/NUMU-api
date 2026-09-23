@@ -104,6 +104,24 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         "form-action 'self'"
     )
 
+    # The platform card page (/api/v1/platform-pay/): the one page where a
+    # merchant types a card, which goes from this page straight to Kashier.
+    # Own scripts only, network only to Kashier's card endpoint, and framable
+    # only by NUMU's own apps. frame-ancestors also overrides the edge's
+    # X-Frame-Options, which browsers ignore when it is present.
+    PAY_PATH_PREFIX = "/api/v1/platform-pay/"
+    PAY_CSP = (
+        "default-src 'none'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src https://fep.kashier.io https://test-fep.kashier.io; "
+        "frame-src https://*.kashier.io; "
+        "form-action 'none'; "
+        "base-uri 'none'; "
+        "frame-ancestors https://*.numueg.app http://localhost:*"
+    )
+
     async def dispatch(
         self,
         request: Request,
@@ -133,6 +151,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             use_admin_csp=is_admin_path,
             is_public_asset=is_uploads_path,
         )
+        if request.url.path.startswith(self.PAY_PATH_PREFIX):
+            response.headers["Content-Security-Policy"] = self.PAY_CSP
+            del response.headers["X-Frame-Options"]
 
         return response
 

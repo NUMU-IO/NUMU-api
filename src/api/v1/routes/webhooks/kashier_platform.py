@@ -6,7 +6,8 @@ Separate from the merchant Kashier webhook (order-first resolution with
 per-merchant credentials): platform payments have no order and exactly
 one secret, so the HMAC-SHA256 signature is verified against
 ``settings.platform_kashier_api_key`` and HARD-ENFORCED (401 on
-mismatch). Intents resolve by ``merchantOrderId`` prefix ``WTOP-``.
+mismatch). Intents resolve by ``merchantOrderId`` prefix: ``WTOP-`` wallet
+top-ups, ``SUB-`` plan subscriptions paid through the hub's card form.
 
 Idempotency is belt-and-braces (same as the Paymob platform route):
 Redis nonce on the transaction id, guarded intent-status transition,
@@ -19,15 +20,22 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.use_cases.billing.activate_instapay_subscription import (
+    activate_verified_subscription_payment,
+)
 from src.application.use_cases.wallet.credit_wallet import (
     credit_topup_intent,
     notify_topup_credited,
 )
 from src.config import settings
+from src.core.entities.subscription_payment import SubscriptionPaymentIntentStatus
 from src.core.entities.wallet import TopupIntentStatus
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.database.connection import get_admin_db_session
+from src.infrastructure.database.models.public.subscription_payment import (
+    SubscriptionPaymentIntentModel,
+)
 from src.infrastructure.database.models.public.wallet import (
     WalletTopupIntentModel,
 )
@@ -42,6 +50,8 @@ _cache_service: RedisCacheService | None = (
 
 NONCE_TTL_SECONDS = 86_400  # 24 hours
 _TOPUP_PREFIX = "WTOP-"
+_SUBSCRIPTION_PREFIX = "SUB-"
+_PAID_STATUSES = ("SUCCESS", "PAID", "CAPTURED")
 
 
 @router.post("/platform/callback", operation_id="kashier_platform_callback")
@@ -125,6 +135,11 @@ async def _handle_platform_callback(
             return {"status": "duplicate", "transaction_id": transaction_id}
         nonces.append(nonce_key)
 
+    if merchant_order_id.startswith(_SUBSCRIPTION_PREFIX):
+        return await _settle_subscription(
+            db, log, merchant_order_id, transaction_id, payment_status, amount_str
+        )
+
     # ── Resolve the top-up intent ────────────────────────────────────
     if not merchant_order_id.startswith(_TOPUP_PREFIX):
         log.info("platform_webhook_unknown_reference")
@@ -143,7 +158,7 @@ async def _handle_platform_callback(
 
     log = log.bind(intent_id=str(intent.id), tenant_id=str(intent.tenant_id))
 
-    if payment_status not in ("SUCCESS", "PAID", "CAPTURED"):
+    if payment_status not in _PAID_STATUSES:
         if intent.status == TopupIntentStatus.PENDING.value:
             intent.status = TopupIntentStatus.FAILED.value
             intent.gateway_transaction_id = (
@@ -166,11 +181,7 @@ async def _handle_platform_callback(
         log.info("platform_topup_intent_not_creditable", status=intent.status)
         return {"status": "received", "transaction_id": transaction_id}
 
-    # Kashier amounts are pound strings ("250.00") — compare in cents.
-    try:
-        paid_cents = int(round(float(amount_str) * 100))
-    except (TypeError, ValueError):
-        paid_cents = -1
+    paid_cents = _paid_cents(amount_str)
     if paid_cents != intent.amount_cents:
         log.error(
             "platform_topup_amount_mismatch",
@@ -196,4 +207,58 @@ async def _handle_platform_callback(
             balance_after_cents=tx.balance_after_cents,
         )
         log.info("platform_topup_credited")
+    return {"status": "processed", "transaction_id": transaction_id}
+
+
+def _paid_cents(amount_str: str) -> int:
+    # Kashier amounts are pound strings ("250.00"); compare in cents.
+    try:
+        return int(round(float(amount_str) * 100))
+    except (TypeError, ValueError):
+        return -1
+
+
+async def _settle_subscription(
+    db: AsyncSession,
+    log,
+    reference: str,
+    transaction_id,
+    payment_status: str,
+    amount_str: str,
+):
+    intent = (
+        await db.execute(
+            select(SubscriptionPaymentIntentModel)
+            .where(SubscriptionPaymentIntentModel.special_reference == reference)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if intent is None:
+        log.warning("platform_subscription_intent_not_found")
+        return {"status": "received", "transaction_id": transaction_id}
+    log = log.bind(intent_id=str(intent.id), tenant_id=str(intent.tenant_id))
+
+    if payment_status not in _PAID_STATUSES:
+        # The intent stays open: the merchant retries from the same dialog,
+        # which supersedes it with a fresh Kashier order reference.
+        log.info("platform_subscription_declined")
+        return {"status": "received", "transaction_id": transaction_id}
+
+    paid_cents = _paid_cents(amount_str)
+    if paid_cents != intent.amount_cents:
+        log.error(
+            "platform_subscription_amount_mismatch",
+            intent_amount_cents=intent.amount_cents,
+            paid_cents=paid_cents,
+        )
+        return {"status": "received", "transaction_id": transaction_id}
+
+    # The card was charged, so honour an intent the expiry sweep or a newer
+    # attempt closed in the meantime. Succeeded stays a no-op replay.
+    if intent.status == SubscriptionPaymentIntentStatus.EXPIRED.value:
+        intent.status = SubscriptionPaymentIntentStatus.AWAITING_PROOF.value
+
+    result = await activate_verified_subscription_payment(db, intent=intent)
+    await db.commit()
+    log.info("platform_subscription_settled", activated=result.activated)
     return {"status": "processed", "transaction_id": transaction_id}

@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 KASHIER_API_BASE = "https://api.kashier.io"
 KASHIER_TEST_API_BASE = "https://test-api.kashier.io"
+# Direct API (card form). The browser posts the card here itself, so card
+# data never reaches our servers; we only sign the order.
+KASHIER_FEP_BASE = "https://fep.kashier.io"
+KASHIER_TEST_FEP_BASE = "https://test-fep.kashier.io"
 
 # Kashier `allowedMethods` token that adds the Apple Pay button to a session.
 # ⚠️ VERIFY WITH KASHIER before production: their public docs list
@@ -306,6 +310,54 @@ class KashierPaymentService(IPaymentService):
 
         logger.warning("kashier_webhook_signature_mismatch")
         return None
+
+    def direct_payment_params(
+        self,
+        *,
+        reference: str,
+        amount_cents: int,
+        currency: str,
+        description: str,
+        webhook_url: str,
+        redirect_url: str,
+    ) -> dict:
+        """Signed Direct API order for a card form the browser submits.
+
+        Returns the endpoint, the ``Kashier-Hash`` header and the request body
+        minus ``paymentMethod``; the client adds the card and POSTs it to
+        Kashier. The hash covers ``mid.reference.amount.currency`` only, so it
+        never involves card data, and the amount string in the body must be
+        the exact string that was hashed.
+        """
+        amount = f"{amount_cents / 100:.2f}"
+        path = f"/?payment={self._mid}.{reference}.{amount}.{currency}"
+        signature = hmac.new(
+            self._api_key.encode(), path.encode(), hashlib.sha256
+        ).hexdigest()
+        base = KASHIER_TEST_FEP_BASE if self._mode == "test" else KASHIER_FEP_BASE
+        return {
+            "endpoint": f"{base}/v3/orders/",
+            "hash": signature,
+            "body": {
+                "apiOperation": "PAY",
+                "merchantId": self._mid,
+                "order": {
+                    "reference": reference,
+                    "amount": amount,
+                    "currency": currency,
+                    "description": description,
+                },
+                "interactionSource": "ECOMMERCE",
+                "reconciliation": {
+                    "webhookUrl": webhook_url,
+                    "merchantRedirect": redirect_url,
+                    # The 3DS iframe reports back by postMessage; a redirect
+                    # would navigate the iframe away from our page.
+                    "redirect": False,
+                },
+                "newPaymentUI": True,
+            },
+        }
 
     async def charge_saved_token(
         self,
