@@ -119,3 +119,16 @@ def test_the_envelope_names_the_event_and_when_it_was_built():
     assert envelope["event"] == "order.paid"
     assert envelope["data"] == {"order_id": "abc"}
     assert envelope["timestamp"]
+
+
+def test_a_delivery_names_its_store():
+    """A Partner App gets every store's events at one URL; without the store
+    in the payload it cannot tell whose order ``order.paid`` is."""
+    from uuid import uuid4
+
+    store_id = uuid4()
+    envelope = WebhookDeliveryService._build_envelope(
+        WebhookEventType.ORDER_PAID, {"order_id": "abc"}, store_id
+    )
+
+    assert envelope["data"] == {"store_id": str(store_id), "order_id": "abc"}

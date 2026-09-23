@@ -83,7 +83,14 @@ class WebhookDeliveryService:
         return f"t={timestamp},v1={mac.hexdigest()}"
 
     @staticmethod
-    def _build_envelope(event_type: WebhookEventType, event_data: dict) -> dict:
+    def _build_envelope(
+        event_type: WebhookEventType, event_data: dict, store_id: UUID | None = None
+    ) -> dict:
+        """``store_id`` leads ``data``: a Partner App receives every installed
+        store's events at the one URL its manifest names, so the payload must
+        say which store it is about."""
+        if store_id is not None:
+            event_data = {"store_id": str(store_id), **event_data}
         return {
             "event": event_type.value,
             "timestamp": datetime.now(UTC).isoformat(),
@@ -119,7 +126,7 @@ class WebhookDeliveryService:
             return
         session = getattr(self.subscription_repo, "session", None)
 
-        payload = self._build_envelope(event_type, event_data)
+        payload = self._build_envelope(event_type, event_data, store_id)
 
         for sub in subscriptions:
             log = WebhookDeliveryLog(
