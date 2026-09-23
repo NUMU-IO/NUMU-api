@@ -899,6 +899,7 @@ async def _send_event(
                 error="credential_missing",
                 attempt_count=row_attempts,
             )
+            await _notify_reconnect(store_id)
             return {"status": "skipped", "reason": "credential_missing"}
 
         secrets = get_secrets_manager()
@@ -1122,7 +1123,17 @@ async def _send_event(
         level="warning",
         fingerprint=["meta_capi", status_class, store_id, str(response_status)],
     )
+    if kind is policy.FailureKind.INVALID_CREDENTIALS:
+        await _notify_reconnect(store_id)
     return {"status": "failed", "fbtrace_id": fbtrace_id}
+
+
+async def _notify_reconnect(store_id: str) -> None:
+    from src.infrastructure.messaging.tasks.tiktok_capi import (
+        notify_tracking_reconnect,
+    )
+
+    await notify_tracking_reconnect(store_id, "Meta")
 
 
 def _redact_response(body: dict | None) -> dict | None:
@@ -1615,6 +1626,7 @@ async def _send_batch(
                 failure_kind=policy.FailureKind.INVALID_CREDENTIALS,
                 error="credential_missing",
             )
+            await _notify_reconnect(store_id)
             return {"status": "failed", "reason": "credential_missing", "sent": 0}
 
         payloads = [(row.id, _capi_entry(row)) for row in live]
@@ -1715,6 +1727,8 @@ async def _send_batch(
             response_body=_redact_response(body),
             fbtrace_id=fbtrace_id,
         )
+        if kind is policy.FailureKind.INVALID_CREDENTIALS:
+            await _notify_reconnect(store_id)
         sentry_sdk.set_tag("meta_capi.failure_kind", kind.value)
         sentry_sdk.capture_message(
             f"meta_capi.{kind.value} for store {store_id}: {status}",

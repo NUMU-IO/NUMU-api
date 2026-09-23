@@ -65,3 +65,23 @@ def test_reports_only_tracked_platforms_with_no_purchase(monkeypatch):
         (str(SILENT), "meta", 2),
         (str(SILENT), "tiktok", 2),
     ]
+
+
+def test_reconnect_notice_is_one_per_platform_per_day(monkeypatch):
+    sent = []
+
+    async def _emit(**kwargs):
+        sent.append(kwargs)
+
+    monkeypatch.setattr(
+        "src.application.services.notification_feed.emit_notification_standalone",
+        _emit,
+    )
+    store = str(uuid.uuid4())
+    asyncio.run(tiktok_capi.notify_tracking_reconnect(store, "Meta"))
+    asyncio.run(tiktok_capi.notify_tracking_reconnect(store, "TikTok"))
+
+    assert [n["kind"] for n in sent] == ["tracking.reconnect_required"] * 2
+    assert [n["data"]["details"] for n in sent] == ["Meta", "TikTok"]
+    assert sent[0]["dedupe_key"] != sent[1]["dedupe_key"]
+    assert sent[0]["dedupe_key"].startswith("tracking.reconnect:Meta:")
