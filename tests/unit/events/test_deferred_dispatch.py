@@ -81,3 +81,29 @@ async def test_rollback_discards_events(test_session):
         assert calls == [], "events for a rolled-back tx must be dropped"
     finally:
         conn._current_session.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_admin_session_is_registered_for_deferred_dispatch(monkeypatch):
+    # Payment webhooks run on the admin session. Their events must wait for
+    # its commit, or handlers save the pre-payment order over the paid one.
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, MagicMock
+
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.commit = AsyncMock()
+    session.close = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_session_local():
+        yield session
+
+    monkeypatch.setattr(conn, "AsyncSessionLocal", fake_session_local)
+
+    gen = conn.get_admin_db_session()
+    assert await gen.__anext__() is session
+    assert conn.get_current_session() is session
+    with pytest.raises(StopAsyncIteration):
+        await gen.__anext__()
+    assert conn.get_current_session() is None
