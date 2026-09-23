@@ -41,6 +41,8 @@ class CancelSubscriptionUseCase:
         # "cancel" means clearing the stored token and any provider
         # subscription id so the renewal Celery task skips this tenant.
         tenant.paymob_card_token_encrypted = None
+        tenant.kashier_card_token_encrypted = None
+        tenant.payment_method_last4 = None
         tenant.paymob_subscription_id = None
         tenant.renewal_retry_count = 0
         tenant.cancelled_at = datetime.now(UTC)

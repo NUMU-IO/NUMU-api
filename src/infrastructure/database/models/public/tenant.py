@@ -167,6 +167,12 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
 
     # ─── Recurring billing (backend-005) ──────────────────────────────────
     paymob_card_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Kashier saved card from NUMU's card page: encrypted JSON of the card
+    # token, recurring agreement id and customer reference (see
+    # platform_kashier.PlatformKashierRecurring). Charged by renewals first.
+    kashier_card_token_encrypted: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
     renewal_retry_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0", default=0
     )

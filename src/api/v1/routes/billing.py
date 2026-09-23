@@ -30,7 +30,14 @@ from src.api.dependencies.tenant_context import (
 )
 from src.api.responses import SuccessResponse
 from src.api.utils.upload_validation import validate_image_upload
-from src.application.services.platform_kashier import platform_card_params
+from src.application.services.paymob_recurring_billing_service import (
+    PaymobRecurringBillingService,
+)
+from src.application.services.platform_kashier import (
+    PlatformKashierRecurring,
+    platform_card_params,
+    saved_card_secret,
+)
 from src.application.use_cases.billing.cancel_subscription import (
     CancelSubscriptionUseCase,
 )
@@ -247,6 +254,18 @@ class CreateInstapayIntentRequest(BaseModel):
     billing_cycle: str = Field("monthly", description="monthly or annual")
 
 
+class CreateCardIntentRequest(CreateInstapayIntentRequest):
+    save_card: bool = Field(
+        False, description="Save the card and renew the plan automatically"
+    )
+
+
+class SaveCardRequest(BaseModel):
+    card_token: str = Field(min_length=8, max_length=128)
+    agreement_id: str | None = Field(None, max_length=128)
+    last4: str | None = Field(None, pattern=r"^\d{4}$")
+
+
 def _intent_response(
     intent: SubscriptionPaymentIntentModel,
     *,
@@ -332,6 +351,12 @@ async def get_billing_plans(
                 tenant.next_renewal_at.isoformat() if tenant.next_renewal_at else None
             ),
             "renewal_due": renewal_due,
+            # Card saved on NUMU's card page: renewals charge it automatically.
+            "saved_card": (
+                {"last4": tenant.payment_method_last4}
+                if tenant.kashier_card_token_encrypted
+                else None
+            ),
             "reminder": {
                 "days": tenant.renewal_reminder_days,
                 "emails_enabled": not tenant.renewal_reminder_optout,
@@ -466,7 +491,7 @@ async def create_instapay_intent(
     operation_id="create_card_intent",
 )
 async def create_card_intent(
-    request: CreateInstapayIntentRequest,
+    request: CreateCardIntentRequest,
     tenant: Annotated[TenantModel, Depends(get_owner_tenant)],
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -490,12 +515,73 @@ async def create_card_intent(
         amount_cents=intent.amount_cents,
         description=f"NUMU {intent.plan_key} plan ({intent.billing_cycle})",
         redirect_url=f"{get_settings().merchant_hub_url}/billing",
+        save_for=(str(tenant.id), intent.billing_cycle) if request.save_card else None,
     )
     await db.commit()
 
     response = _intent_response(intent)
     response.card_form = card_form
     return SuccessResponse(data=response, message="Payment created")
+
+
+@router.post(
+    "/billing/card-intents/{intent_id}/saved-card",
+    response_model=SuccessResponse[dict],
+    summary="Keep the card from a paid plan payment for automatic renewals",
+    operation_id="save_plan_card",
+)
+async def save_plan_card(
+    intent_id: UUID,
+    request: SaveCardRequest,
+    tenant: Annotated[TenantModel, Depends(get_owner_tenant)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """The card page hands the hub Kashier's card token; the hub stores it here.
+
+    Only after that card payment succeeded (the webhook confirmed it), so a
+    declined card is never kept. The token is bound to this tenant as the
+    Kashier customer reference, so it cannot charge another customer's card.
+    """
+    intent = (
+        await db.execute(
+            select(SubscriptionPaymentIntentModel).where(
+                SubscriptionPaymentIntentModel.id == intent_id,
+                SubscriptionPaymentIntentModel.tenant_id == tenant.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if intent is None:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if intent.display_destination is not None or intent.status != "succeeded":
+        raise HTTPException(
+            status_code=409, detail="Only a completed card payment can save a card."
+        )
+
+    recurring = PaymobRecurringBillingService(paymob_service=PlatformKashierRecurring())
+    tenant.kashier_card_token_encrypted = await recurring.encrypt_card_token(
+        saved_card_secret(request.card_token, request.agreement_id, str(tenant.id)),
+        # Same key id the renewal task decrypts with.
+        getattr(get_settings(), "credential_encryption_key_id", "v1"),
+    )
+    tenant.payment_method_last4 = request.last4
+    await db.commit()
+    return SuccessResponse(data={"last4": request.last4}, message="Card saved")
+
+
+@router.delete(
+    "/billing/saved-card",
+    response_model=SuccessResponse[dict],
+    summary="Stop automatic renewal with the saved card",
+    operation_id="remove_plan_card",
+)
+async def remove_plan_card(
+    tenant: Annotated[TenantModel, Depends(get_owner_tenant)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    tenant.kashier_card_token_encrypted = None
+    tenant.payment_method_last4 = None
+    await db.commit()
+    return SuccessResponse(data={}, message="Card removed")
 
 
 @router.get(
