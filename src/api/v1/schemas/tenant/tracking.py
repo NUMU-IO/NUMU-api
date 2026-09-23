@@ -364,6 +364,10 @@ class SaveTikTokTrackingRequest(BaseModel):
     # TikTok advertiser id — reserved for the Marketing API phase
     # (campaigns / catalog). Optional; stored verbatim.
     advertiser_id: str | None = Field(default=None, max_length=64)
+    # TikTok Offline Event Set that receives a Purchase when a COD order is
+    # delivered. TikTok cannot optimise on custom events, so this is the
+    # delivered signal campaigns can target. "" clears it.
+    offline_event_set_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("pixel_id")
     @classmethod
@@ -408,6 +412,7 @@ class TikTokTrackingResponse(BaseModel):
     purchase_trigger: PurchaseTrigger | None = None
     pixels: list[TikTokPixelEntry] | None = None
     advertiser_id: str | None = None
+    offline_event_set_id: str | None = None
 
 
 class SendTikTokTestEventRequest(BaseModel):

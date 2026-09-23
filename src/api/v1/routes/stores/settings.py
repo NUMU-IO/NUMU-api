@@ -5180,6 +5180,7 @@ async def _build_tiktok_response(
         last_validated_at=last_validated_dt,
         status=status_label,
         advertiser_id=cfg.get("advertiser_id"),
+        offline_event_set_id=cfg.get("offline_event_set_id"),
     )
 
 
@@ -5281,6 +5282,11 @@ async def save_tiktok_tracking(
             request.advertiser_id
             if request.advertiser_id is not None
             else tiktok_cfg.get("advertiser_id")
+        ),
+        "offline_event_set_id": (
+            request.offline_event_set_id.strip() or None
+            if request.offline_event_set_id is not None
+            else tiktok_cfg.get("offline_event_set_id")
         ),
     }
     tracking["tiktok"] = new_tiktok_cfg
