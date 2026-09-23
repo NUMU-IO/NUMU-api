@@ -202,6 +202,7 @@ def build_capi_payload(
     event_source_url: str | None = None,
     test_event_code: str | None = None,
     opt_out: bool = False,
+    event_source: str = "web",
 ) -> dict[str, Any]:
     """Build the exact body POSTed to ``v1.3/event/track/``.
 
@@ -212,6 +213,10 @@ def build_capi_payload(
 
     Note ``test_event_code`` sits at the ENVELOPE root, not inside the event.
     """
+    if event_source == "offline":
+        # Offline event sets accept contact keys only; click ids, browser
+        # cookies and external_id are web-only fields.
+        hashed_user = {k: v for k, v in hashed_user.items() if k in ("email", "phone")}
     event_obj: dict[str, Any] = {
         "event": event_name,
         "event_time": event_time,
@@ -227,7 +232,7 @@ def build_capi_payload(
         event_obj["limited_data_use"] = True
 
     payload: dict[str, Any] = {
-        "event_source": "web",
+        "event_source": event_source,
         "event_source_id": pixel_id,
         "data": [event_obj],
     }
@@ -571,6 +576,7 @@ async def _send_event(
         event_source_url=event_source_url,
         test_event_code=test_event_code,
         opt_out=opt_out,
+        event_source="offline" if action_source == "offline" else "web",
     )
 
     response_body: dict[str, Any] | None = None
@@ -986,6 +992,9 @@ async def _replay_event(log_id: UUID) -> dict[str, Any]:
             event_source_url=stored.get("event_source_url"),
             test_event_code=stored.get("test_event_code"),
             opt_out=bool(stored.get("limited_data_use")),
+            event_source=(
+                "offline" if stored.get("action_source") == "offline" else "web"
+            ),
         )
 
     with httpx.Client(timeout=httpx.Timeout(15.0, connect=5.0)) as client:

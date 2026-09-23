@@ -92,13 +92,9 @@ _VALID_FUNNEL_STEPS = _NAVIGATION_STEPS | {
     "remove_from_cart",
 }
 
-# Steps for which we attempt session-based identity resolution (see
-# ``_enrich_user_data_from_session``). Deliberately NOT every step: the
-# lookup is one extra query, and running it on page_view/product_view would
-# put it on the hottest path in the platform for a marginal gain. These are
-# the steps where the visitor has demonstrably reached checkout, so the
-# chance a contact record exists is high and the volume is order-scale rather
-# than pageview-scale.
+# Checkout steps always re-run the identity lookup (see
+# ``_resolve_session_identity``): the shopper may have just typed their
+# details. Every other step looks up at most once per miss window.
 _IDENTITY_RESOLUTION_STEPS = {
     "checkout_started",
     "add_shipping_info",
@@ -1222,11 +1218,13 @@ def _client_supplied_user_data(raw: dict | None) -> dict:
     return out
 
 
-# How long a resolved guest identity stays usable for later events in the
-# same visit. Long enough to cover a shopper who fills contact details, keeps
-# browsing, and comes back; short enough that a shared device does not inherit
-# a stranger's identity.
-_IDENTITY_CACHE_TTL_SECONDS = 2 * 60 * 60
+# How long a resolved guest identity stays attached to the browser. Matches
+# the `numu_sid` cookie's lifetime: once a shopper has given an email or phone,
+# every later visit from that browser carries it as a match key.
+_IDENTITY_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60
+# How long "nothing found" is remembered, so a browsing session costs one DB
+# lookup per window instead of one per page view.
+_IDENTITY_MISS_TTL_SECONDS = 30 * 60
 _IDENTITY_CACHE_PREFIX = "capi_identity:"
 
 # The fields worth caching — exactly what `_enrich_user_data_from_session`
@@ -1242,6 +1240,30 @@ _IDENTITY_CACHE_FIELDS = (
     "zip",
     "country_code",
 )
+
+
+async def remember_session_identity(
+    store_id: UUID, fingerprint: str | None, fields: dict
+) -> None:
+    """Attach identity a shopper just gave (e.g. a newsletter email) to every
+    later event from their browser, merged into what is already known."""
+    if not fingerprint:
+        return
+    from src.infrastructure.cache.redis_cache import RedisCacheService
+
+    cache = RedisCacheService()
+    key = f"{_IDENTITY_CACHE_PREFIX}{store_id}:{fingerprint}"
+    with contextlib.suppress(Exception):
+        cached = await cache.get(key)
+        merged = {
+            k: v
+            for k, v in (cached if isinstance(cached, dict) else {}).items()
+            if k in _IDENTITY_CACHE_FIELDS
+        }
+        merged.update({
+            k: v for k, v in fields.items() if v and k in _IDENTITY_CACHE_FIELDS
+        })
+        await cache.set(key, merged, expire=_IDENTITY_CACHE_TTL_SECONDS)
 
 
 async def _resolve_session_identity(
@@ -1285,15 +1307,14 @@ async def _resolve_session_identity(
             value = cached.get(field)
             if value and not user_data.get(field):
                 user_data[field] = value
-        # A cache hit means the checkout lookup already ran for this session;
+        # A cache hit means the lookup already ran for this browser;
         # re-querying would just confirm it.
         if user_data.get("email") or user_data.get("phone"):
             return
-
-    # Cache miss. Only the checkout steps pay for the DB lookup — a page view
-    # from a shopper who has never reached checkout has nothing to find.
-    if step not in _IDENTITY_RESOLUTION_STEPS:
-        return
+        # A remembered miss skips the lookup, except on the checkout steps,
+        # where the shopper may have just typed their details.
+        if cached.get("_none") and step not in _IDENTITY_RESOLUTION_STEPS:
+            return
 
     before = {f: user_data.get(f) for f in _IDENTITY_CACHE_FIELDS}
     await _enrich_user_data_from_session(user_data, fingerprint, store_id, session)
@@ -1303,9 +1324,11 @@ async def _resolve_session_identity(
         for f in _IDENTITY_CACHE_FIELDS
         if user_data.get(f) and user_data.get(f) != before.get(f)
     }
-    if resolved:
-        with contextlib.suppress(Exception):
+    with contextlib.suppress(Exception):
+        if resolved:
             await cache.set(key, resolved, expire=_IDENTITY_CACHE_TTL_SECONDS)
+        else:
+            await cache.set(key, {"_none": True}, expire=_IDENTITY_MISS_TTL_SECONDS)
 
 
 async def _apply_catalog_ids_to_custom_data(custom_data: dict, session) -> None:
