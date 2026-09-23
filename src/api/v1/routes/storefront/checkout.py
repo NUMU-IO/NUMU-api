@@ -814,15 +814,18 @@ async def checkout(
     # parser only strips RFC 6265 quoting — never percent-escapes — so
     # decode it here or TikTok gets a mangled click id it can't match.
     #
-    # All four are capped at 256 chars: this is attacker-controlled cookie
-    # input landing in unvalidated JSONB, and the cap mirrors the one on
-    # `TrackPageViewRequest.ttclid` (storefront/tracking.py).
-    _ttclid: str | None = (
-        unquote((http_request.cookies.get("ttclid") or "")[:256]) or None
-    )
+    # This is attacker-controlled cookie input landing in unvalidated JSONB,
+    # so every value is capped. Click ids are dropped rather than cut when too
+    # long: a truncated id matches nothing, and real TikTok ids run past 256
+    # characters. The caps mirror `TrackPageViewRequest` (storefront/tracking.py).
+    def _click_id(name: str) -> str | None:
+        value = unquote(http_request.cookies.get(name) or "")
+        return value if 0 < len(value) <= 2048 else None
+
+    _ttclid: str | None = _click_id("ttclid")
+    _fbc: str | None = _click_id("_fbc")
     _ttp: str | None = (http_request.cookies.get("_ttp") or "")[:256] or None
     _fbp: str | None = (http_request.cookies.get("_fbp") or "")[:256] or None
-    _fbc: str | None = (http_request.cookies.get("_fbc") or "")[:256] or None
 
     # Require email verification for registered (non-guest) customers
     if (
