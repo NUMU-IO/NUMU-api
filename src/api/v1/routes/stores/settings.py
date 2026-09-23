@@ -4921,6 +4921,39 @@ async def get_meta_match_quality(
     )
 
 
+@router.post(
+    "/tracking/meta/replay",
+    response_model=SuccessResponse[TikTokReplayResponse],
+    summary="Re-send failed Meta Conversions API deliveries",
+    operation_id="replay_meta_failed_events",
+)
+async def replay_meta_failed_events(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+    limit: int = 500,
+):
+    """Re-queue failed and dead-lettered deliveries, e.g. after reconnecting.
+
+    Rows are re-sent from their stored payload with the same ``event_id``, so
+    Meta merges a replay into the original event. Safe to call twice.
+    """
+    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_replay_failed
+
+    cred = await _get_capi_credential(db, store.tenant_id)
+    has_token = cred is not None and cred.is_active
+    if resolve_mode(_meta_cfg(store), has_token) in ("off", "pixel_only"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Meta Conversions API is not enabled for this store.",
+        )
+    limit = min(max(limit, 1), 1000)
+    meta_capi_replay_failed.delay(store_id=str(store.id), limit=limit)
+    return SuccessResponse(
+        data=TikTokReplayResponse(queued=limit, window_hours=48),
+        message="Replay queued",
+    )
+
+
 @router.get(
     "/tracking/meta/status",
     response_model=SuccessResponse[MetaTrackingStatusResponse],
