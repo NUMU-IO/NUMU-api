@@ -433,6 +433,11 @@ async def get_admin_db_session() -> AsyncGenerator[AsyncSession, None]:
     The session operates in the public schema with RLS bypass enabled.
     """
     async with AsyncSessionLocal() as session:
+        # Payment webhooks publish events on this session. Dispatching them
+        # before commit let handlers read the pre-payment order and save it
+        # back over the webhook's write, so paid orders stayed PENDING.
+        _session_token = _current_session.set(session)
+
         # Set search path to public for admin operations
         await session.execute(text("SET search_path TO public"))
 
@@ -447,6 +452,7 @@ async def get_admin_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         finally:
+            _current_session.reset(_session_token)
             # Disable bypass before closing
             await session.execute(
                 text("SELECT set_config('app.rls_bypass', 'false', true)")
