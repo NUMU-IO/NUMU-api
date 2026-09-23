@@ -37,6 +37,8 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.meta_capi_purchase_dispatcher import order_view
+
 
 def _build_user_data_from_order(order: Any) -> dict[str, Any]:
     """Extract TikTok Events API user_data from an Order.
@@ -62,8 +64,9 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
         canonicalize_country,
     )
 
-    shipping = order.shipping_address or {}
-    meta = getattr(order, "metadata", None) or {}
+    order = order_view(order)
+    shipping = order.shipping_address
+    meta = order.metadata
     raw_country = shipping.get("country_code") or shipping.get("country")
     return {
         # Resolved from the customer row by `fill_identity_from_customer`;
@@ -104,6 +107,7 @@ def _build_custom_data_from_order(
     not exist in the feed breaks TikTok's video shopping ads the same way
     it breaks Meta's dynamic ads.
     """
+    order = order_view(order)
     line_items = order.line_items or []
     catalog = catalog_ids or {}
 
