@@ -581,6 +581,11 @@ jobs:
             ACTIVE_IMAGE_REF=\$(sed -n 's/^ACTIVE_IMAGE_REF=//p' /opt/numu-api/.api-blue-green-state)
             docker pull "\$ACTIVE_IMAGE_REF" || true
             docker tag "\$ACTIVE_IMAGE_REF" ghcr.io/numu-io/numu-api:prod
+            # An interrupted recreate leaves the old container renamed to
+            # "<id>_numu-celery-*", and every later recreate then fails with a
+            # container-name conflict, leaving both workers stopped. Clear any
+            # such leftover first (single-quoted: this heredoc is unquoted).
+            docker ps -a --format '{{.Names}}' | grep -E '^[0-9a-f]{12}_numu-celery-' | xargs -r docker rm -f
             docker compose up -d --force-recreate celery-worker celery-beat
 
             echo "==> Migrations completed against the candidate image."
