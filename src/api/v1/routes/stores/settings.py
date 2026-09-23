@@ -107,6 +107,9 @@ from src.infrastructure.repositories import (
     ProductRepository,
     StoreRepository,
 )
+from src.infrastructure.repositories.meta_match_quality_repository import (
+    MetaMatchQualityRepository,
+)
 
 router = APIRouter(prefix="/{store_id}/settings")
 
@@ -4888,11 +4891,26 @@ async def get_meta_match_quality(
     service = MetaMatchQualityService()
     snapshots = await service.get_snapshots(store.id, pixel_id, session=db)
 
+    # "Did it improve?" — the score a week ago, from the poll history (every
+    # 6 hours, so 40 rows reach back about 10 days).
+    mq_repo = MetaMatchQualityRepository(db)
+    week_ago_cutoff = datetime.now(UTC) - timedelta(days=7)
+    week_ago: dict[str, float] = {}
+    for snap in snapshots:
+        with contextlib.suppress(Exception):
+            series = await mq_repo.history_for_event(
+                store.id, snap.pixel_id, snap.event_name, limit=40
+            )
+            older = [s for s in series if s.captured_at <= week_ago_cutoff]
+            if older:
+                week_ago[snap.event_name] = older[-1].emq_score
+
     events = [
         MetaMatchQualityEvent(
             event_name=snap.event_name,
             pixel_id=snap.pixel_id,
             emq_score=snap.emq_score,
+            emq_week_ago=week_ago.get(snap.event_name),
             total_events=snap.total_events,
             dedup_rate=snap.dedup_rate,
             event_coverage=snap.event_coverage,
@@ -4918,6 +4936,39 @@ async def get_meta_match_quality(
             low_score_threshold=MetaMatchQualityService.LOW_EMQ_THRESHOLD,
         ),
         message="Meta match quality retrieved",
+    )
+
+
+@router.post(
+    "/tracking/meta/replay",
+    response_model=SuccessResponse[TikTokReplayResponse],
+    summary="Re-send failed Meta Conversions API deliveries",
+    operation_id="replay_meta_failed_events",
+)
+async def replay_meta_failed_events(
+    store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[_AsyncSession, Depends(_get_db)],
+    limit: int = 500,
+):
+    """Re-queue failed and dead-lettered deliveries, e.g. after reconnecting.
+
+    Rows are re-sent from their stored payload with the same ``event_id``, so
+    Meta merges a replay into the original event. Safe to call twice.
+    """
+    from src.infrastructure.messaging.tasks.meta_capi import meta_capi_replay_failed
+
+    cred = await _get_capi_credential(db, store.tenant_id)
+    has_token = cred is not None and cred.is_active
+    if resolve_mode(_meta_cfg(store), has_token) in ("off", "pixel_only"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Meta Conversions API is not enabled for this store.",
+        )
+    limit = min(max(limit, 1), 1000)
+    meta_capi_replay_failed.delay(store_id=str(store.id), limit=limit)
+    return SuccessResponse(
+        data=TikTokReplayResponse(queued=limit, window_hours=48),
+        message="Replay queued",
     )
 
 
@@ -5147,6 +5198,7 @@ async def _build_tiktok_response(
         last_validated_at=last_validated_dt,
         status=status_label,
         advertiser_id=cfg.get("advertiser_id"),
+        offline_event_set_id=cfg.get("offline_event_set_id"),
     )
 
 
@@ -5248,6 +5300,11 @@ async def save_tiktok_tracking(
             request.advertiser_id
             if request.advertiser_id is not None
             else tiktok_cfg.get("advertiser_id")
+        ),
+        "offline_event_set_id": (
+            request.offline_event_set_id.strip() or None
+            if request.offline_event_set_id is not None
+            else tiktok_cfg.get("offline_event_set_id")
         ),
     }
     tracking["tiktok"] = new_tiktok_cfg

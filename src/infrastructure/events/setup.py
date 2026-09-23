@@ -143,6 +143,10 @@ from src.infrastructure.events.handlers.staff_event_handlers import (
 from src.infrastructure.events.handlers.tiktok_capi_status_event_handler import (
     handle_order_status_changed_for_tiktok_capi,
 )
+from src.infrastructure.events.handlers.tracking_purchase_event_handler import (
+    handle_order_created_purchase,
+    handle_payment_proof_approved_purchase,
+)
 from src.infrastructure.events.handlers.trust_kill_switch_notification_handler import (
     handle_trust_kill_switch_fired,
 )
@@ -210,6 +214,10 @@ def create_event_bus() -> EventBus:
     # TikTok P5 — fire Events API CompletePayment based on per-store
     # purchase_trigger config (COD-aware timing; parity with Meta above).
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_changed_for_tiktok_capi)
+    # One server Purchase per order: COD at creation, manual rails on proof
+    # approval. Card orders are sent by their payment webhooks.
+    bus.subscribe(OrderCreatedEvent, handle_order_created_purchase)
+    bus.subscribe(PaymentProofApprovedEvent, handle_payment_proof_approved_purchase)
 
     # Order lifecycle webhooks + merchant-visible activity stream
     bus.subscribe(OrderCreatedEvent, handle_webhook_order_created)

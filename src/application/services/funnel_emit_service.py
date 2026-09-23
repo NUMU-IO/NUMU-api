@@ -15,8 +15,14 @@ replay or a manual mark following an automated one doesn't double-count.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from src.application.services.meta_capi_purchase_dispatcher import (
+    enqueue_meta_capi_event_for_order,
+)
+from src.application.services.tiktok_capi_purchase_dispatcher import (
+    enqueue_tiktok_capi_event_for_order,
+)
 from src.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -112,9 +118,42 @@ async def emit_order_delivered(
         )
         order.metadata = {**metadata, _DELIVERED_FLAG: True}
         await order_repo.update(order)
+        await _send_delivered_conversion(funnel_repo.session, order)
     except Exception as exc:  # noqa: BLE001 — fail-open
         logger.warning(
             "funnel_order_delivered_emit_failed",
             order_id=str(order.id),
             error=str(exc),
+        )
+
+
+async def _send_delivered_conversion(session: Any, order: Order) -> None:
+    """Send the COD sale that actually happened: the delivery.
+
+    Its own ``event_id``, so it never deduplicates against the Purchase sent
+    at placement. Meta gets a custom ``OrderDelivered`` event (build a custom
+    conversion on it to optimise). TikTok cannot optimise on custom events,
+    so it gets a standard Purchase on the store's Offline Event Set, when one
+    is configured. Runs once per order, behind the delivered flag above.
+    """
+    event_id = f"delivered-{order.id}"
+    try:
+        await enqueue_meta_capi_event_for_order(
+            session,
+            order,
+            event_name="OrderDelivered",
+            event_id=event_id,
+            event_time_now=True,
+        )
+    except Exception:  # noqa: BLE001 — tracking must not block delivery
+        logger.warning(
+            "meta_delivered_enqueue_failed", order_id=str(order.id), exc_info=True
+        )
+    try:
+        await enqueue_tiktok_capi_event_for_order(
+            session, order, event_name="Purchase", event_id=event_id, offline=True
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "tiktok_delivered_enqueue_failed", order_id=str(order.id), exc_info=True
         )

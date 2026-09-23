@@ -80,11 +80,9 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
         "zip": shipping.get("postal_code") or shipping.get("zip"),
         "customer_id": str(order.customer_id) if order.customer_id else None,
         # The session fingerprint the mid-funnel events already sent as
-        # `external_id`. `_first_external_id` falls back to this key when
-        # there is no customer id, so without it a GUEST order — the majority
-        # of MENA COD checkouts — sent TikTok no external_id at all and the
-        # conversion could not be joined to the browsing session TikTok had
-        # already seen. Mirrors the Meta sibling.
+        # `external_id`. `_external_ids` sends it alongside the customer id,
+        # so the conversion joins the browsing session TikTok already saw.
+        # Mirrors the Meta sibling.
         "external_id": getattr(order, "session_fingerprint", None),
         "ip": meta.get("ip_address"),
         "user_agent": meta.get("user_agent"),
@@ -142,8 +140,13 @@ async def enqueue_tiktok_capi_event_for_order(
     *,
     event_name: str = "Purchase",
     event_id: str | None = None,
+    offline: bool = False,
 ) -> None:
     """Enqueue any TikTok Events API event for an order, gated on config.
+
+    ``offline=True`` sends to the store's Offline Event Set
+    (``tracking.tiktok.offline_event_set_id``) instead of its pixels, and is
+    a no-op when none is configured.
 
     Multi-pixel fan-out: one task per api-enabled pixel. Each pixel is a
     separate TikTok dedup namespace, so the SAME ``event_id`` is used
@@ -171,8 +174,12 @@ async def enqueue_tiktok_capi_event_for_order(
         return
     tiktok_cfg = ((store.settings or {}).get("tracking") or {}).get("tiktok") or {}
 
-    pixels = resolve_tiktok_pixels(tiktok_cfg, mode="api")
-    if not pixels:
+    if offline:
+        set_id = tiktok_cfg.get("offline_event_set_id")
+        targets = [set_id] if set_id and tiktok_cfg.get("api_enabled") else []
+    else:
+        targets = [p.pixel_id for p in resolve_tiktok_pixels(tiktok_cfg, mode="api")]
+    if not targets:
         return
 
     if event_id is None:
@@ -187,7 +194,7 @@ async def enqueue_tiktok_capi_event_for_order(
         resolve_catalog_ids,
     )
 
-    paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)
+    paid_at = (not offline and getattr(order, "paid_at", None)) or datetime.now(UTC)
     user_data = _build_user_data_from_order(order)
     # Same customer-record enrichment the Meta Purchase path runs. Reused
     # verbatim: it writes `email` / `phone` / `first_name` / `last_name`, which
@@ -206,20 +213,23 @@ async def enqueue_tiktok_capi_event_for_order(
     # which is worse than sending none.
     store_origin = getattr(store, "store_url", None)
     event_source_url = (
-        f"{store_origin}/checkout/{order.id}/thank-you" if store_origin else None
+        f"{store_origin}/checkout/{order.id}/thank-you"
+        if store_origin and not offline
+        else None
     )
 
-    for pixel in pixels:
+    for target in targets:
         tiktok_capi_send_event.delay(
             store_id=str(order.store_id),
-            pixel_id=pixel.pixel_id,
+            pixel_id=target,
             event_name=event_name,
             event_id=event_id,
             event_time=event_time,
             event_source_url=event_source_url,
             user_data=user_data,
             custom_data=custom_data,
-            action_source="web",
+            action_source="offline" if offline else "web",
+            opt_out=bool(order_view(order).metadata.get("opt_out")),
         )
 
 

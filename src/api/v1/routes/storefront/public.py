@@ -16,6 +16,7 @@ from uuid import UUID
 from fastapi import (
     APIRouter,
     Depends,
+    Header,
     HTTPException,
     Path,
     Query,
@@ -57,6 +58,7 @@ from src.api.utils.cookies import (
     set_customer_auth_cookies,
 )
 from src.api.v1.routes.storefront.theme_schemas import get_theme_schema
+from src.api.v1.routes.storefront.tracking import remember_session_identity
 from src.api.v1.schemas import (
     CursorPaginatedListResponse,
     PaginatedListResponse,
@@ -2080,6 +2082,9 @@ async def subscribe_newsletter(
     body_in: NewsletterSubscribeRequest,
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    session_id: Annotated[
+        str | None, Header(alias="X-Numu-Session", max_length=64)
+    ] = None,
 ):
     """Record a newsletter signup as a marketing-consenting customer.
 
@@ -2123,6 +2128,10 @@ async def subscribe_newsletter(
             customer.opt_in_marketing()
             customer.add_tag(NEWSLETTER_TAG)
             await customer_repo.update(customer)
+
+        # The shopper's later browsing events now carry this email as a
+        # Meta / TikTok match key.
+        await remember_session_identity(store_id, session_id, {"email": email.value})
 
     return SuccessResponse(
         data={"status": "subscribed"},

@@ -2,7 +2,40 @@
 
 **Date:** 2026-09-23
 **Supersedes:** the v1 investigation of 2026-09-21
-**Status:** investigation and plan. No code, configuration or data has been changed.
+**Status:** built, in review (2026-09-23). §0 lists what shipped and where the build departed from this plan.
+
+---
+
+## 0. Implementation status
+
+Each phase is a stacked PR per repo. Merge in phase order.
+
+| Phase | API | Storefront | Hub |
+| --- | --- | --- | --- |
+| 0 — stop the loss | #668 | #170 | — |
+| 1 — one Purchase per order | #670 | #172 | #349 |
+| 2 — identity | #671 | #173 | — |
+| 3 — COD delivered signal | `feat/tracking-phase3` | — | `feat/tracking-phase3` |
+| 4 — monitoring + cleanup | `feat/tracking-phase4` | — | `feat/tracking-phase4` |
+
+**Where the build departed from the plan**
+
+- **RC1 / G1: no `customer_touches` migration.** The attribution envelope keeps its 256-character click-id cap, because it must fit a 4 KB cookie. The full `ttclid` reaches TikTok through the dedicated `ttclid` cookie instead, and `/track` stops forwarding an envelope id cut at the cap. A test guards that schema caps fit their columns.
+- **RC2 is wider than written.** The `Order` entity path fails too (G4). The fix is one `order_view()` normaliser inside the builders, not a conversion to the entity.
+- **RC7: no outbox migration.** The TikTok rail already wrote the row before the POST and had replay tasks (`0f48c8f4`).
+- **RC9: TikTok `state` is not a field.** TikTok's `user` object has no `state` key; an existing test records this. That part of RC9 was wrong.
+- **RC10 / D1.** The order snapshot uses the first `X-Forwarded-For` hop (same rule as `/track`). COD fraud scoring keeps the connection IP. No new env var.
+- **RC13 not built.** The storefront cannot see hub or admin sessions, which live on other domains.
+- **D4 decided by the owner: no consent gate.** Phase 2 enrichment runs for every shopper. The existing per-store `consent_required` toggle (off by default) is untouched, and its opt-out is still honoured end to end. §10's legal exposure stands.
+- **Already existed, so not rebuilt:** Meta batch poison isolation, TikTok replay, Meta outbox counts in the status endpoint, and the Meta Dataset Quality poll with snapshot history.
+- **Skipped:** the synthetic canary (G-7). The daily gap alert plus the regression tests cover the same failures.
+- **Phase 3 routing.** The delivered conversion and the Meta Refund hook into the two shared, idempotent paths, `emit_order_delivered` and `try_restock_order`. Courier webhooks do not publish status events: that would re-trigger customer emails and WhatsApp messages.
+- **Purchase timing.** Purchase fires at placement (manual rails on approval). The per-store `purchase_trigger` has no remaining effect, so its hub selects were removed.
+
+**Merchant setup to use Phase 3**
+
+- Meta: create a custom conversion on the `OrderDelivered` event.
+- TikTok: create an Offline Event Set, paste its id in Settings → Tracking → TikTok, then optimise on its Purchase.
 
 ---
 

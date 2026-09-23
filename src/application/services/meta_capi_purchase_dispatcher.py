@@ -571,8 +571,12 @@ async def enqueue_meta_capi_event_for_order(
     *,
     event_name: str = "Purchase",
     event_id: str | None = None,
+    event_time_now: bool = False,
 ) -> None:
     """Enqueue any Meta CAPI event for an order, gated on store config.
+
+    ``event_time_now`` stamps the event at the moment it happens (e.g. a
+    delivery) instead of the payment time.
 
     Wave 2 Phase 12 generalization of ``enqueue_meta_capi_purchase``.
     Supports firing ``Lead`` and ``Purchase`` from the order-status
@@ -624,7 +628,9 @@ async def enqueue_meta_capi_event_for_order(
             else f"{event_name.lower()}-{order.id}"
         )
 
-    paid_at = getattr(order, "paid_at", None) or datetime.now(UTC)
+    paid_at = (not event_time_now and getattr(order, "paid_at", None)) or datetime.now(
+        UTC
+    )
     user_data = _build_user_data_from_order(order, host=_store_host(store))
     await fill_identity_from_customer(db, user_data, order)
     custom_data = _build_custom_data_from_order(
@@ -670,6 +676,7 @@ async def enqueue_meta_capi_event_for_order(
             user_data=user_data,
             custom_data=custom_data,
             action_source="website",
+            opt_out=bool(order_view(order).metadata.get("opt_out")),
         )
 
 
@@ -748,4 +755,5 @@ async def enqueue_meta_capi_refund(db: AsyncSession, order: Any) -> None:
             user_data=user_data,
             custom_data=custom_data,
             action_source="system_generated",
+            opt_out=bool(order_view(order).metadata.get("opt_out")),
         )

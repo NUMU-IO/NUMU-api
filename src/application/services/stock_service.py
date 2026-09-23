@@ -38,6 +38,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.meta_capi_purchase_dispatcher import (
+    enqueue_meta_capi_refund,
+)
 from src.core.logging import get_logger
 from src.infrastructure.database.models.tenant.inventory_level import (
     InventoryLevelModel,
@@ -322,7 +325,7 @@ async def try_restock_order(
     the repository update that persists the order, so the idempotency
     stamp rides the same write."""
     try:
-        return await restock_order(session, order, reason=reason)
+        restocked = await restock_order(session, order, reason=reason)
     except Exception as exc:  # noqa: BLE001 — fail-open by design
         logger.warning(
             "order_restock_failed",
@@ -331,6 +334,17 @@ async def try_restock_order(
             error=str(exc),
         )
         return False
+    if restocked:
+        # The order came back (cancelled or returned by the carrier), so take
+        # its value back out of Meta's reporting. Once per order: restocking
+        # is idempotent. TikTok has no refund event.
+        try:
+            await enqueue_meta_capi_refund(session, order)
+        except Exception:  # noqa: BLE001 — tracking must not block the return
+            logger.warning(
+                "meta_refund_enqueue_failed", order_id=str(getattr(order, "id", None))
+            )
+    return restocked
 
 
 def build_debit_manifest(lines: list[dict[str, Any]]) -> dict[str, Any]:

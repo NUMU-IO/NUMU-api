@@ -899,6 +899,7 @@ async def _send_event(
                 error="credential_missing",
                 attempt_count=row_attempts,
             )
+            await _notify_reconnect(store_id)
             return {"status": "skipped", "reason": "credential_missing"}
 
         secrets = get_secrets_manager()
@@ -1122,7 +1123,17 @@ async def _send_event(
         level="warning",
         fingerprint=["meta_capi", status_class, store_id, str(response_status)],
     )
+    if kind is policy.FailureKind.INVALID_CREDENTIALS:
+        await _notify_reconnect(store_id)
     return {"status": "failed", "fbtrace_id": fbtrace_id}
+
+
+async def _notify_reconnect(store_id: str) -> None:
+    from src.infrastructure.messaging.tasks.tiktok_capi import (
+        notify_tracking_reconnect,
+    )
+
+    await notify_tracking_reconnect(store_id, "Meta")
 
 
 def _redact_response(body: dict | None) -> dict | None:
@@ -1615,6 +1626,7 @@ async def _send_batch(
                 failure_kind=policy.FailureKind.INVALID_CREDENTIALS,
                 error="credential_missing",
             )
+            await _notify_reconnect(store_id)
             return {"status": "failed", "reason": "credential_missing", "sent": 0}
 
         payloads = [(row.id, _capi_entry(row)) for row in live]
@@ -1715,6 +1727,8 @@ async def _send_batch(
             response_body=_redact_response(body),
             fbtrace_id=fbtrace_id,
         )
+        if kind is policy.FailureKind.INVALID_CREDENTIALS:
+            await _notify_reconnect(store_id)
         sentry_sdk.set_tag("meta_capi.failure_kind", kind.value)
         sentry_sdk.capture_message(
             f"meta_capi.{kind.value} for store {store_id}: {status}",
@@ -2492,3 +2506,51 @@ async def _prune_tracking_rows() -> dict[str, int]:
     else:
         logger.info("meta_tracking_prune_done", **stats)
     return stats
+
+
+@celery_app.task(name="tasks.meta_capi_replay_failed")
+def meta_capi_replay_failed(store_id: str, limit: int = 500) -> dict[str, int]:
+    """Put a store's failed and dead-lettered events back on the delivery ladder.
+
+    For after a merchant reconnects Meta. Rows keep their stored payload and
+    ``event_id``, so Meta merges a replay into the original event. Rows past
+    the dedup window or Meta's 7-day limit are left alone.
+    """
+    return _run_async(_replay_failed(UUID(store_id), limit))
+
+
+async def _replay_failed(store_id: UUID, limit: int) -> dict[str, int]:
+    from sqlalchemy import select
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.meta_event_log import (
+        MetaEventLogModel,
+    )
+    from src.infrastructure.tenancy.rls import enable_rls_bypass
+
+    async with AsyncSessionLocal() as session:
+        await enable_rls_bypass(session)
+        rows = (
+            await session.execute(
+                select(MetaEventLogModel.id, MetaEventLogModel.event_time)
+                .where(MetaEventLogModel.store_id == store_id)
+                .where(
+                    MetaEventLogModel.status.in_([
+                        policy.DeliveryStatus.FAILED,
+                        policy.DeliveryStatus.DEAD_LETTER,
+                    ])
+                )
+                .order_by(MetaEventLogModel.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+        ids = [r.id for r in rows if not policy.is_expired(_as_utc(r.event_time))]
+        await _reschedule_many(
+            session,
+            ids,
+            kind=None,
+            error="replay requested",
+            retry_after=None,
+            due_now=True,
+        )
+    return {"requeued": len(ids)}
