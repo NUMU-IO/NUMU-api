@@ -420,14 +420,11 @@ async def paymob_callback_redirect(
     if internal_order:
         store = await store_repo.get_by_id(internal_order.store_id)
         if store:
-            # Also mark as paid via GET redirect (backup for webhook)
-            if success and internal_order.payment_status.value == "pending":
-                await narrow_to_tenant(db, internal_order.tenant_id)
-                internal_order.mark_as_paid(
-                    payment_id=str(order or merchant_order_id),
-                    payment_method="paymob",
-                )
-                await order_repo.update(internal_order)
+            # No "backup" mark-as-paid here. This GET is the shopper's browser
+            # and `success` is an unverified query param: anyone could open
+            # ?success=true&merchant_order_id=<id> and mark an order paid.
+            # Only the HMAC-verified POST callback confirms a payment (same
+            # rule as the Kashier redirect).
 
             # Land the shopper on the exact storefront they paid from (passed
             # as return_to, e.g. the v3 host), validated to *.numueg.app; else

@@ -25,6 +25,11 @@ class OrderStatus(StrEnum):
     # `deposit_expires_at` passes without confirmation, a background
     # task transitions it to CANCELLED.
     PENDING_DEPOSIT = "pending_deposit"
+    # A storefront card-gateway order the customer has not paid yet. Hidden
+    # from the merchant and silent (no emails, push, WhatsApp, shipment)
+    # until the gateway webhook marks it paid; an expiry sweep cancels and
+    # restocks it if payment never arrives.
+    AWAITING_PAYMENT = "awaiting_payment"
     PENDING = "pending"
     CONFIRMED = "confirmed"
     PROCESSING = "processing"
@@ -39,6 +44,11 @@ class OrderStatus(StrEnum):
     CANCELLED = "cancelled"
     REFUNDED = "refunded"
     PAYMENT_FAILED = "payment_failed"
+
+
+# Storefront payment methods that charge a card/wallet through a gateway
+# before the order is real. Orders paid this way start in AWAITING_PAYMENT.
+CARD_GATEWAY_PREFIXES: tuple[str, ...] = ("paymob", "kashier", "fawaterak", "moyasar")
 
 
 # Valid status transitions map
@@ -56,6 +66,11 @@ VALID_STATUS_TRANSITIONS: dict[OrderStatus, list[OrderStatus]] = {
         # Customer abandoned / TTL expired / merchant cancelled.
         OrderStatus.CANCELLED,
         # Gateway returned a hard failure (e.g., Paymob declined card).
+        OrderStatus.PAYMENT_FAILED,
+    ],
+    OrderStatus.AWAITING_PAYMENT: [
+        OrderStatus.PROCESSING,  # Gateway confirmed payment
+        OrderStatus.CANCELLED,  # Payment window expired
         OrderStatus.PAYMENT_FAILED,
     ],
     OrderStatus.PENDING: [
@@ -412,6 +427,7 @@ class Order(BaseEntity):
         """Check if order can be cancelled."""
         return self.status in (
             OrderStatus.PENDING_DEPOSIT,
+            OrderStatus.AWAITING_PAYMENT,
             OrderStatus.PENDING,
             OrderStatus.CONFIRMED,
             OrderStatus.PROCESSING,

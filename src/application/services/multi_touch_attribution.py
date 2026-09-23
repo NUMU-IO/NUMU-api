@@ -67,6 +67,7 @@ _NON_REVENUE_STATUSES_LC = (
     "returned",
     "draft",
     "payment_failed",
+    "awaiting_payment",
 )
 
 

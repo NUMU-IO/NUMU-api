@@ -61,6 +61,9 @@ from src.infrastructure.events.handlers.flow_trigger_handler import (
     handle_recovery_succeeded_for_flow_trigger,
     handle_risk_finalised_for_flow_trigger,
 )
+from src.infrastructure.events.handlers.held_order_handler import (
+    handle_held_order_paid,
+)
 from src.infrastructure.events.handlers.instapay_notification_handler import (
     handle_payment_proof_approved,
     handle_payment_proof_rejected,
@@ -234,6 +237,9 @@ def create_event_bus() -> EventBus:
     bus.subscribe(OrderCreatedEvent, handle_order_created_recovery)
     # backend-030 / US1 — WhatsApp order-confirmation on order creation
     bus.subscribe(OrderCreatedEvent, handle_order_created_whatsapp)
+    # Card-gateway orders skip OrderCreatedEvent at checkout; announce them
+    # once the webhook moves them out of AWAITING_PAYMENT.
+    bus.subscribe(OrderStatusChangedEvent, handle_held_order_paid)
     bus.subscribe(OrderPaidEvent, handle_webhook_order_paid)
     bus.subscribe(OrderPaidEvent, handle_order_paid_activity)
     # backend-030 / US1 — WhatsApp payment-received on order payment

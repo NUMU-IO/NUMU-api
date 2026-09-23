@@ -1397,6 +1397,7 @@ async def checkout(
     order_number = await order_repo.get_next_order_number(store_id)
 
     from src.core.entities.order import (
+        CARD_GATEWAY_PREFIXES,
         Order,
         OrderLineItem,
         OrderShippingAddress,
@@ -2260,6 +2261,15 @@ async def checkout(
         )
         _gateway_amount = _deposit_amount
 
+    # Card-gateway orders stay hidden and silent until the gateway webhook
+    # confirms payment; handle_held_order_paid replays OrderCreatedEvent then.
+    _held_for_payment = created_order.status == OrderStatus.PENDING and (
+        _dispatch_method or ""
+    ).startswith(CARD_GATEWAY_PREFIXES)
+    if _held_for_payment:
+        created_order.status = OrderStatus.AWAITING_PAYMENT
+        await order_repo.update(created_order)
+
     if _dispatch_method and _dispatch_method.startswith("paymob"):
         # Paymob payment initiation (per-merchant via store.settings)
         try:
@@ -2786,7 +2796,7 @@ async def checkout(
     # Dispatch order-confirmation notifications (non-blocking)
     customer_email = str(current_customer.email) if current_customer.email else None
 
-    if customer_email:
+    if customer_email and not _held_for_payment:
         try:
             import asyncio
 
@@ -2929,7 +2939,8 @@ async def checkout(
         # attribution never ran; only hub-created orders got them.
         # 2026-08-22: merchant reported "order arrived, no notification, no
         # push" — this was the root cause.
-        get_event_bus().publish(_order_created_event)
+        if not _held_for_payment:
+            get_event_bus().publish(_order_created_event)
     except Exception as e:
         logger.warning(f"Failed to dispatch new-order notifications: {e}")
 
@@ -2948,7 +2959,7 @@ async def checkout(
     # customer were stuck at 5/6 "waiting for first order" forever.
     try:
         total_orders = await order_repo.count_by_store(store_id)
-        if total_orders == 1:
+        if total_orders == 1 and not _held_for_payment:
             from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
                 send_first_order_email_task,
             )

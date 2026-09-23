@@ -670,7 +670,10 @@ async def list_orders(
     # WhatsApp draft doesn't muddy the merchant's fulfillment queue.
     from src.core.entities.order import OrderStatus as _OS
 
-    exclude_statuses = [_OS.DRAFT] if order_status is None else None
+    # Unpaid card-gateway orders stay out too until the payment lands.
+    exclude_statuses = (
+        [_OS.DRAFT, _OS.AWAITING_PAYMENT] if order_status is None else None
+    )
 
     result = await use_case.execute(
         store_id=store.id,
@@ -868,7 +871,7 @@ async def get_order_status_counts(
         date_to=date_to,
         search=search,
         customer_id=UUID(customer_id) if customer_id else None,
-        exclude_statuses=[_OS.DRAFT],
+        exclude_statuses=[_OS.DRAFT, _OS.AWAITING_PAYMENT],
     )
     return SuccessResponse(
         data=OrderStatusCountsResponse(

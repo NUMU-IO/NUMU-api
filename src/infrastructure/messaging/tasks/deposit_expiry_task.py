@@ -4,6 +4,8 @@ Runs every 60 seconds. Finds orders in ``PENDING_DEPOSIT`` whose
 ``deposit_expires_at`` has passed and transitions them to
 ``CANCELLED`` — the merchant's deposit policy ``ttl_minutes`` is what
 determines that expiry time, snapshotted on the order at checkout.
+It also cancels and restocks unpaid card-gateway orders
+(``AWAITING_PAYMENT``) older than ``AWAITING_PAYMENT_TTL_MINUTES``.
 
 The sweeper is the **only** writer for this transition. Read paths
 (merchant dashboard, customer order tracking) may briefly show an
@@ -54,10 +56,18 @@ def expire_pending_deposit_orders_task(self):
         raise self.retry(exc=exc)
 
 
-async def _sweep() -> dict:
-    from datetime import UTC, datetime
+# Unpaid card-gateway checkouts (AWAITING_PAYMENT) are cancelled and restocked
+# after this long. ponytail: a payment that lands after the sweep reopens the
+# order through mark_as_paid without the new-order notifications; the admin
+# reconciliation page shows it. Raise the TTL or release on late payment if
+# gateways start settling slower than this.
+AWAITING_PAYMENT_TTL_MINUTES = 120
 
-    from sqlalchemy import select
+
+async def _sweep() -> dict:
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import and_, or_, select
 
     from src.core.entities.order import OrderStatus
     from src.infrastructure.database.connection import AsyncSessionLocal
@@ -77,9 +87,18 @@ async def _sweep() -> dict:
         query = (
             select(OrderModel)
             .where(
-                OrderModel.status == OrderStatus.PENDING_DEPOSIT,
-                OrderModel.deposit_expires_at.isnot(None),
-                OrderModel.deposit_expires_at <= now,
+                or_(
+                    and_(
+                        OrderModel.status == OrderStatus.PENDING_DEPOSIT,
+                        OrderModel.deposit_expires_at.isnot(None),
+                        OrderModel.deposit_expires_at <= now,
+                    ),
+                    and_(
+                        OrderModel.status == OrderStatus.AWAITING_PAYMENT,
+                        OrderModel.created_at
+                        <= now - timedelta(minutes=AWAITING_PAYMENT_TTL_MINUTES),
+                    ),
+                )
             )
             # Bound the batch — if the sweeper ever falls behind for any
             # reason, we'd rather process chunks than hold one long txn.
@@ -102,14 +121,21 @@ async def _sweep() -> dict:
                     # Shouldn't happen — the scan just saw it — but
                     # stay defensive.
                     continue
-                if order.status != OrderStatus.PENDING_DEPOSIT:
+                if order.status not in (
+                    OrderStatus.PENDING_DEPOSIT,
+                    OrderStatus.AWAITING_PAYMENT,
+                ):
                     # Race: another path (merchant manual cancel,
                     # gateway webhook arriving just before we got to
                     # it) already moved the order. Nothing to do.
                     continue
                 if not order.can_be_cancelled:
                     continue
-                order.cancel(reason="COD deposit payment window expired")
+                order.cancel(
+                    reason="COD deposit payment window expired"
+                    if order.status == OrderStatus.PENDING_DEPOSIT
+                    else "Card payment not completed"
+                )
                 # Give the debited stock back (idempotent; stamps
                 # order.metadata, persisted by the update below).
                 try:

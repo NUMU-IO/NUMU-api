@@ -347,6 +347,7 @@ async def moyasar_redirect(
                 result = await svc.confirm_payment(ref) if ref else None
                 if result and result.success:
                     await narrow_to_tenant(db, order.tenant_id)
+                    old_status = getattr(order.status, "value", str(order.status))
                     order.mark_as_paid(
                         payment_id=str(
                             payment_id or invoice_id or order.payment_id or ""
@@ -371,6 +372,30 @@ async def moyasar_redirect(
                     )
                     await db.commit()
                     log.info("redirect_backup_marked_paid")
+
+                    # Same event the webhook sends: shipment booking,
+                    # notifications, and releasing a held AWAITING_PAYMENT
+                    # order. Without it a redirect that beats the webhook
+                    # leaves the order paid but never announced.
+                    from src.core.events.order_events import (
+                        OrderStatusChangedEvent,
+                    )
+                    from src.infrastructure.events.setup import get_event_bus
+
+                    get_event_bus().publish(
+                        OrderStatusChangedEvent(
+                            order_id=order.id,
+                            order_number=order.order_number,
+                            store_id=order.store_id,
+                            store_name=store.name,
+                            customer_id=order.customer_id,
+                            customer_name=order.shipping_address.full_name
+                            if order.shipping_address
+                            else None,
+                            previous_status=old_status,
+                            new_status="processing",
+                        )
+                    )
                 else:
                     log.info(
                         "redirect_backup_not_confirmed",

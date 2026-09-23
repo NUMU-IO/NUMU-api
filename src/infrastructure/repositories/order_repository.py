@@ -495,8 +495,14 @@ class OrderRepository(IOrderRepository):
         customer_id: UUID | None = None,
         exclude_statuses: list[OrderStatus] | None = None,
     ) -> int:
-        """Get total count of orders for a store with optional filters."""
+        """Get total count of orders for a store with optional filters.
+
+        Unpaid card-gateway orders (AWAITING_PAYMENT) are not orders yet and
+        are left out unless asked for by ``status``.
+        """
         query = select(func.count(OrderModel.id)).where(OrderModel.store_id == store_id)
+        if status != OrderStatus.AWAITING_PAYMENT:
+            query = query.where(OrderModel.status != OrderStatus.AWAITING_PAYMENT)
         if customer_id:
             query = query.where(OrderModel.customer_id == customer_id)
         if status:
