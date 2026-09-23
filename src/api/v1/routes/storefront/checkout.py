@@ -2359,6 +2359,7 @@ async def checkout(
                 api_key=creds["api_key"],
                 secret_key=creds.get("secret_key"),
                 apple_pay_enabled=kashier_settings.get("apple_pay_enabled", False),
+                mode=kashier_settings.get("mode"),
             )
 
             created_order.payment_id = str(created_order.id)

@@ -1336,6 +1336,7 @@ async def save_kashier_credentials(
         # Plain opt-in flag: surfaced at checkout + toggles Apple Pay in the
         # Kashier session. No secret, so it lives in the plain settings dict.
         "apple_pay_enabled": bool(request.apple_pay_enabled),
+        "mode": request.mode,
     }
 
     settings["payment"] = payment_settings
@@ -1354,6 +1355,7 @@ async def save_kashier_credentials(
             merchant_id=request.merchant_id,
             api_key_masked=secrets.mask_credential(request.api_key),
             apple_pay_enabled=request.apple_pay_enabled,
+            mode=request.mode,
             last_configured=payment_settings["kashier"]["last_configured"],
         ),
         message="Kashier credentials saved successfully",
@@ -1405,6 +1407,7 @@ async def get_kashier_credentials(
             merchant_id=creds["merchant_id"],
             api_key_masked=secrets.mask_credential(creds["api_key"]),
             apple_pay_enabled=kashier_settings.get("apple_pay_enabled", False),
+            mode=kashier_settings.get("mode"),
             last_configured=kashier_settings.get("last_configured"),
         ),
         message="Kashier credentials retrieved successfully",

@@ -454,6 +454,9 @@ class SaveKashierCredentialsRequest(BaseModel):
     # to be enabled on the merchant's Kashier account. No extra ID needed
     # (unlike Paymob) — a boolean opt-in is enough.
     apple_pay_enabled: bool = False
+    # Which Kashier API the keys belong to. None follows the server's
+    # KASHIER_MODE, so stores saved before this field keep working.
+    mode: Literal["live", "test"] | None = None
 
 
 class KashierCredentialsResponse(BaseModel):
@@ -463,6 +466,7 @@ class KashierCredentialsResponse(BaseModel):
     merchant_id: str | None = None
     api_key_masked: str | None = None
     apple_pay_enabled: bool = False
+    mode: Literal["live", "test"] | None = None
     last_configured: str | None = None
 
 
