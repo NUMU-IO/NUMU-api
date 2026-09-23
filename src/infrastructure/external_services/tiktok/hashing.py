@@ -63,17 +63,19 @@ def _hash_tiktok_phone(phone: str | None) -> str | None:
     return _h("+" + digits) if digits else None
 
 
-def _first_external_id(raw: dict) -> str | None:
-    """Hashed ``external_id`` — customer id when known, else session id.
+def _external_ids(raw: dict) -> str | list[str] | None:
+    """Hashed ``external_id``: the customer id and the session fingerprint.
 
-    Mirrors Meta's ``_external_ids`` but collapsed to one value, because
-    TikTok's Events API user object takes a single hashed string here.
+    TikTok accepts a string or an array here. Sending only the customer id
+    once it was known broke the join between a Purchase and the browsing
+    session that led to it, which carried only the fingerprint.
     """
-    for key in ("customer_id", "external_id"):
-        value = raw.get(key)
-        if value:
-            return _h(str(value))
-    return None
+    ids = list(
+        dict.fromkeys(
+            _h(str(raw[key])) for key in ("customer_id", "external_id") if raw.get(key)
+        )
+    )
+    return ids[0] if len(ids) == 1 else (ids or None)
 
 
 def hash_tiktok_user_data(raw: dict) -> dict[str, Any]:
@@ -92,12 +94,7 @@ def hash_tiktok_user_data(raw: dict) -> dict[str, Any]:
         # Hashed identifiers.
         "email": _h(raw["email"]) if raw.get("email") else None,
         "phone": _hash_tiktok_phone(raw.get("phone")),
-        # Customer id when authenticated, else the pseudonymous session
-        # fingerprint. TikTok's `external_id` is a single string (unlike
-        # Meta's array), so this is a preference order, not both. Reading
-        # `customer_id` alone meant guest checkouts — most MENA orders —
-        # sent no external_id on any mid-funnel event.
-        "external_id": _first_external_id(raw),
+        "external_id": _external_ids(raw),
         # Hashed location / name fields (TikTok supports these on the user
         # object for match-quality lift). Reuse Meta's Arabic-aware
         # normalizer, then collapse to the primary variant.

@@ -80,11 +80,9 @@ def _build_user_data_from_order(order: Any) -> dict[str, Any]:
         "zip": shipping.get("postal_code") or shipping.get("zip"),
         "customer_id": str(order.customer_id) if order.customer_id else None,
         # The session fingerprint the mid-funnel events already sent as
-        # `external_id`. `_first_external_id` falls back to this key when
-        # there is no customer id, so without it a GUEST order — the majority
-        # of MENA COD checkouts — sent TikTok no external_id at all and the
-        # conversion could not be joined to the browsing session TikTok had
-        # already seen. Mirrors the Meta sibling.
+        # `external_id`. `_external_ids` sends it alongside the customer id,
+        # so the conversion joins the browsing session TikTok already saw.
+        # Mirrors the Meta sibling.
         "external_id": getattr(order, "session_fingerprint", None),
         "ip": meta.get("ip_address"),
         "user_agent": meta.get("user_agent"),
