@@ -793,6 +793,15 @@ async def checkout(
         or http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         or (http_request.client.host if http_request.client else None)
     ) or None
+    # The shopper's IP for the Meta / TikTok snapshot. Checkout is reached
+    # through the storefront proxy, so X-Real-IP is the storefront server and
+    # every order claimed the same IP. The proxy forwards the shopper's IP as
+    # the first X-Forwarded-For hop, the same rule /track uses. Fraud scoring
+    # keeps `client_ip`: this first hop is client-settable on a direct call.
+    shopper_ip: str | None = (
+        http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or client_ip
+    )
 
     # User-Agent captured for Meta CAPI Purchase match-quality. Meta's
     # `client_user_agent` field is one of the two highest-signal match
@@ -1932,7 +1941,7 @@ async def checkout(
                 if stock_debit_lines
                 else {}
             ),
-            **({"ip_address": client_ip} if client_ip else {}),
+            **({"ip_address": shopper_ip} if shopper_ip else {}),
             **({"user_agent": client_user_agent} if client_user_agent else {}),
             # Read back by the Meta / TikTok CAPI purchase dispatchers to
             # attach Advanced Matching keys the webhook itself can't see.
