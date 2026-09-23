@@ -47,6 +47,46 @@ logger = get_logger(__name__)
 _ISO_4217_RE = re.compile(r"[A-Za-z]{3}")
 
 
+def _as_dict(value: Any) -> dict:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return value if isinstance(value, dict) else {}
+
+
+class _OrderView:
+    """The dict-shaped order every Meta / TikTok payload builder reads.
+
+    Callers hand the builders three different shapes: the ORM ``OrderModel``
+    (sweeps, status handlers, ``/track`` enrichment, Fawry), the domain
+    ``Order`` entity (payment and courier webhooks) and ad-hoc namespaces.
+    The builders read ``metadata`` / ``shipping_address`` / ``line_items`` as
+    plain dicts, which only the raw JSONB columns are: on the model
+    ``metadata`` is SQLAlchemy's ``MetaData`` registry (the column is
+    ``extra_data``), and on the entity the address and lines are Pydantic
+    objects. Either way ``.get`` raised and every caller swallowed it, so no
+    order-based Purchase reached Meta or TikTok. Everything else is read
+    through to the wrapped order.
+    """
+
+    def __init__(self, order: Any) -> None:
+        self._order = order
+        meta = getattr(order, "extra_data", None)
+        if meta is None:
+            meta = getattr(order, "metadata", None)
+        self.metadata = meta if isinstance(meta, dict) else {}
+        self.shipping_address = _as_dict(getattr(order, "shipping_address", None))
+        self.line_items = [
+            _as_dict(li) for li in (getattr(order, "line_items", None) or [])
+        ]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._order, name)
+
+
+def order_view(order: Any) -> Any:
+    return order if isinstance(order, _OrderView) else _OrderView(order)
+
+
 def _store_host(store: Any) -> str | None:
     """Canonical storefront host for ``store`` — the domain the Pixel set its
     cookies on, and therefore the domain Meta's ``fbc`` subdomain index is
@@ -88,8 +128,9 @@ def _build_user_data_from_order(
         canonicalize_country,
     )
 
-    shipping = order.shipping_address or {}
-    meta = getattr(order, "metadata", None) or {}
+    order = order_view(order)
+    shipping = order.shipping_address
+    meta = order.metadata
     # Country is free-form on the address ("Egypt", "EG", "مصر"). Meta
     # only indexes the hash of the lowercase ISO-2 code, so non-canonical
     # values would silently miss — run them through the mapper and drop
@@ -292,6 +333,7 @@ async def resolve_catalog_ids(db: AsyncSession, order: Any) -> dict[str, str]:
 
     from src.infrastructure.database.models.tenant.product import ProductModel
 
+    order = order_view(order)
     ids = {
         str(li.get("product_id"))
         for li in (order.line_items or [])
@@ -472,6 +514,7 @@ def _build_custom_data_from_order(
     window, but the campaign signal is now visible alongside the ad
     signal for cross-channel reconciliation).
     """
+    order = order_view(order)
     line_items = order.line_items or []
     catalog = catalog_ids or {}
 

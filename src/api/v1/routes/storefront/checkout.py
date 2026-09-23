@@ -793,6 +793,15 @@ async def checkout(
         or http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
         or (http_request.client.host if http_request.client else None)
     ) or None
+    # The shopper's IP for the Meta / TikTok snapshot. Checkout is reached
+    # through the storefront proxy, so X-Real-IP is the storefront server and
+    # every order claimed the same IP. The proxy forwards the shopper's IP as
+    # the first X-Forwarded-For hop, the same rule /track uses. Fraud scoring
+    # keeps `client_ip`: this first hop is client-settable on a direct call.
+    shopper_ip: str | None = (
+        http_request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or client_ip
+    )
 
     # User-Agent captured for Meta CAPI Purchase match-quality. Meta's
     # `client_user_agent` field is one of the two highest-signal match
@@ -814,15 +823,18 @@ async def checkout(
     # parser only strips RFC 6265 quoting — never percent-escapes — so
     # decode it here or TikTok gets a mangled click id it can't match.
     #
-    # All four are capped at 256 chars: this is attacker-controlled cookie
-    # input landing in unvalidated JSONB, and the cap mirrors the one on
-    # `TrackPageViewRequest.ttclid` (storefront/tracking.py).
-    _ttclid: str | None = (
-        unquote((http_request.cookies.get("ttclid") or "")[:256]) or None
-    )
+    # This is attacker-controlled cookie input landing in unvalidated JSONB,
+    # so every value is capped. Click ids are dropped rather than cut when too
+    # long: a truncated id matches nothing, and real TikTok ids run past 256
+    # characters. The caps mirror `TrackPageViewRequest` (storefront/tracking.py).
+    def _click_id(name: str) -> str | None:
+        value = unquote(http_request.cookies.get(name) or "")
+        return value if 0 < len(value) <= 2048 else None
+
+    _ttclid: str | None = _click_id("ttclid")
+    _fbc: str | None = _click_id("_fbc")
     _ttp: str | None = (http_request.cookies.get("_ttp") or "")[:256] or None
     _fbp: str | None = (http_request.cookies.get("_fbp") or "")[:256] or None
-    _fbc: str | None = (http_request.cookies.get("_fbc") or "")[:256] or None
 
     # Require email verification for registered (non-guest) customers
     if (
@@ -1929,7 +1941,7 @@ async def checkout(
                 if stock_debit_lines
                 else {}
             ),
-            **({"ip_address": client_ip} if client_ip else {}),
+            **({"ip_address": shopper_ip} if shopper_ip else {}),
             **({"user_agent": client_user_agent} if client_user_agent else {}),
             # Read back by the Meta / TikTok CAPI purchase dispatchers to
             # attach Advanced Matching keys the webhook itself can't see.

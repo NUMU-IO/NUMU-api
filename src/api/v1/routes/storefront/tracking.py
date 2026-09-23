@@ -19,7 +19,7 @@ from urllib.parse import unquote, urlparse
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Path, Request, Response
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from src.api.dependencies.repositories import (
     get_funnel_event_repository,
@@ -362,6 +362,17 @@ def _anonymize_ip(raw: str | None) -> str | None:
     return str(net.network_address)
 
 
+# TikTok documents no maximum for ``ttclid`` and real ones run past 256
+# characters. A click id is only useful byte-for-byte, so it is never
+# truncated: over this cap it is dropped.
+_CLICK_ID_MAX = 2048
+# Optional fields that must never reject a whole event. Descriptive ones
+# are truncated; identifiers are dropped, since a cut identifier matches
+# nothing.
+_TRUNCATE_OPTIONAL = {"referrer": 500, "page_url": 2000}
+_DROP_OPTIONAL = {"fbc": _CLICK_ID_MAX, "ttclid": _CLICK_ID_MAX, "fbp": 128, "ttp": 128}
+
+
 class TrackPageViewRequest(BaseModel):
     """Request body for ``POST /storefront/store/{id}/track``.
 
@@ -387,15 +398,34 @@ class TrackPageViewRequest(BaseModel):
     event_time: datetime | None = None
     page_url: str | None = Field(None, max_length=2000)
     fbp: str | None = Field(None, max_length=128)
-    fbc: str | None = Field(None, max_length=256)
+    fbc: str | None = Field(None, max_length=_CLICK_ID_MAX)
     # ── TikTok Events API fan-out fields ────────────────────────────────
     # ``ttclid`` is TikTok's click id (captured from the URL / ttclid
     # cookie); ``ttp`` is the TikTok-SDK browser cookie. Both are passed
     # verbatim (not hashed) to the Events API for match quality. The same
     # single /track POST carries both the Meta (fbp/fbc) and TikTok signals
     # so there is one round-trip per storefront event, fanned server-side.
-    ttclid: str | None = Field(None, max_length=256)
+    ttclid: str | None = Field(None, max_length=_CLICK_ID_MAX)
     ttp: str | None = Field(None, max_length=128)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate_oversized_optionals(cls, data):
+        # One oversized optional field used to 422 the whole event, and the
+        # storefront proxy hid it: every browser event from a TikTok-ad
+        # visitor was lost because their ttclid ran past 256 characters.
+        if not isinstance(data, dict):
+            return data
+        for key, cap in _TRUNCATE_OPTIONAL.items():
+            value = data.get(key)
+            if isinstance(value, str) and len(value) > cap:
+                data[key] = value[:cap]
+        for key, cap in _DROP_OPTIONAL.items():
+            value = data.get(key)
+            if isinstance(value, str) and len(value) > cap:
+                data[key] = None
+        return data
+
     # PII for CAPI matching — Meta hashes nothing on its end; we hash
     # in the Celery task before transmission via meta/hashing.py.
     user_data: dict | None = None
@@ -1678,6 +1708,10 @@ async def _maybe_enqueue_tiktok_capi(
     # visitors. The allowlist admits the eight PII fields a page may
     # legitimately contribute and drops everything else.
     user_data = _client_supplied_user_data(body.user_data)
+    # The attribution envelope caps click ids at 256 characters to fit its
+    # cookie, so a value that long was cut and matches nothing at TikTok.
+    if landing_ttclid and len(landing_ttclid) >= 256:
+        landing_ttclid = None
     if body.ttclid or landing_ttclid:
         user_data["ttclid"] = body.ttclid or landing_ttclid
     if body.ttp:

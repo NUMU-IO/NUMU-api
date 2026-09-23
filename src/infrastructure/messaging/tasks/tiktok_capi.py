@@ -1150,3 +1150,91 @@ async def _purge_event_log(retention_days: int | None, limit: int) -> dict[str, 
             "tiktok_capi_purged_event_log", deleted=deleted, retention_days=days
         )
     return {"deleted": deleted, "retention_days": days}
+
+
+@celery_app.task(name="tasks.tracking_purchase_gap_alert")
+def tracking_purchase_gap_alert() -> dict[str, int]:
+    """Alert when a store took orders but sent no server Purchase, per platform.
+
+    Covers Meta and TikTok. Both the 256-character ttclid rejection and the
+    order-shape crash in the purchase builders ran silently for weeks; either
+    shows up here within a day. Orders are read from a window that ended 24h
+    ago, so a Purchase that fires late (manual payment approval, the hourly
+    sweeps) is not reported as a gap.
+    """
+    gaps = _run_async(_find_purchase_gaps())
+    for gap in gaps:
+        logger.alert("tracking_purchase_gap", **gap)
+    return {"gaps": len(gaps)}
+
+
+async def _find_purchase_gaps() -> list[dict[str, Any]]:
+    from sqlalchemy import func, select
+
+    from src.application.services.meta_pixel_resolver import resolve_pixels
+    from src.application.services.tiktok_pixel_resolver import resolve_tiktok_pixels
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.meta_event_log import (
+        MetaEventLogModel,
+    )
+    from src.infrastructure.database.models.tenant.order import OrderModel
+    from src.infrastructure.database.models.tenant.store import StoreModel
+    from src.infrastructure.database.models.tenant.tiktok_event_log import (
+        TikTokEventLogModel,
+    )
+    from src.infrastructure.tenancy.rls import enable_rls_bypass
+
+    now = datetime.now(UTC)
+    window_start, window_end = now - timedelta(hours=48), now - timedelta(hours=24)
+
+    async with AsyncSessionLocal() as session:
+        await enable_rls_bypass(session)
+        orders = dict(
+            (
+                await session.execute(
+                    select(OrderModel.store_id, func.count())
+                    .where(OrderModel.created_at >= window_start)
+                    .where(OrderModel.created_at < window_end)
+                    .group_by(OrderModel.store_id)
+                )
+            ).all()
+        )
+        if not orders:
+            return []
+
+        async def purchases(model: Any, names: tuple[str, ...]) -> dict[Any, int]:
+            rows = await session.execute(
+                select(model.store_id, func.count())
+                .where(model.store_id.in_(orders))
+                .where(model.event_name.in_(names))
+                .where(model.created_at >= window_start)
+                .group_by(model.store_id)
+            )
+            return dict(rows.all())
+
+        meta_sent = await purchases(MetaEventLogModel, ("Purchase",))
+        tiktok_sent = await purchases(TikTokEventLogModel, PURCHASE_EVENT_NAMES)
+        stores = (
+            (await session.execute(select(StoreModel).where(StoreModel.id.in_(orders))))
+            .scalars()
+            .all()
+        )
+
+    gaps = []
+    for store in stores:
+        tracking = (store.settings or {}).get("tracking") or {}
+        for platform, pixels, sent in (
+            ("meta", resolve_pixels(tracking.get("meta") or {}, mode="api"), meta_sent),
+            (
+                "tiktok",
+                resolve_tiktok_pixels(tracking.get("tiktok") or {}, mode="api"),
+                tiktok_sent,
+            ),
+        ):
+            if pixels and not sent.get(store.id):
+                gaps.append({
+                    "store_id": str(store.id),
+                    "platform": platform,
+                    "orders": orders[store.id],
+                })
+    return gaps

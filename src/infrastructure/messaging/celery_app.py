@@ -616,6 +616,12 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.tiktok_capi_purge_event_log",
         "schedule": crontab(hour=4, minute=10),
     },
+    # Daily: stores that took orders but sent Meta or TikTok no server
+    # Purchase. 06:00 UTC (08:00 Cairo), after the nightly purges.
+    "tracking-purchase-gap-alert": {
+        "task": "tasks.tracking_purchase_gap_alert",
+        "schedule": crontab(hour=6, minute=0),
+    },
     # ─── offers-v2: promotion lifecycle ─────────────────────────────────
     # Sweeping the promotion table every 5 min keeps the storefront and
     # the merchant list in sync with `starts_at` / `ends_at` without

@@ -1929,8 +1929,6 @@ def meta_capi_sweep_orphaned_purchases(
 
 
 async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
-    from types import SimpleNamespace
-
     from sqlalchemy import or_, select
 
     from src.application.services.meta_capi_purchase_dispatcher import (
@@ -1939,6 +1937,9 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
         _guard_conversion_payload,
         fill_identity_from_customer,
         resolve_catalog_ids,
+    )
+    from src.application.services.meta_capi_purchase_dispatcher import (
+        order_view as _order_view,
     )
     from src.application.services.meta_pixel_resolver import resolve_pixels
     from src.infrastructure.database.connection import AsyncSessionLocal
@@ -2072,35 +2073,8 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             # Meta hard-rejects events with zero customer information
             # parameters (400, error_subcode 2804050), so a minimal
             # payload isn't degraded match quality, it's a guaranteed
-            # failure. OrderModel stores the entity's ``metadata`` under
-            # ``extra_data`` — adapt before handing to the shared
-            # builders (their ``getattr(order, "metadata")`` on an ORM
-            # model would resolve to SQLAlchemy's MetaData registry).
-            order_view = SimpleNamespace(
-                id=order_full.id,
-                store_id=order_full.store_id,
-                customer_id=order_full.customer_id,
-                shipping_address=order_full.shipping_address,
-                metadata=order_full.extra_data or {},
-                line_items=order_full.line_items,
-                total=order_full.total,
-                currency=order_full.currency,
-                utm_source=order_full.utm_source,
-                utm_medium=order_full.utm_medium,
-                utm_campaign=order_full.utm_campaign,
-                utm_term=order_full.utm_term,
-                utm_content=order_full.utm_content,
-                campaign_id=getattr(order_full, "campaign_id", None),
-                # A swept Purchase must be identical to the one the webhook
-                # would have sent — same match keys, same catalog ids. These
-                # three were missing, so recovered conversions silently
-                # carried a weaker identity than the ones that worked:
-                #   session_fingerprint → external_id (guest session stitch)
-                #   attribution         → fbc rebuilt from the stored fbclid
-                #   store_id            → scopes the customer/email lookup
-                session_fingerprint=getattr(order_full, "session_fingerprint", None),
-                attribution=getattr(order_full, "attribution", None),
-            )
+            # failure.
+            order_view = _order_view(order_full)
             user_data = _build_user_data_from_order(order_view)
             await fill_identity_from_customer(session, user_data, order_view)
             # Same catalog-id resolution as the webhook path — otherwise a
