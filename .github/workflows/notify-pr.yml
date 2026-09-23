@@ -50,8 +50,12 @@ jobs:
               emoji = "♻️"
 
           # Get details
-          title = pr['title']
+          # Slack rejects a header over 150 characters and a section over
+          # 3000, which failed this job for every long PR description.
+          title = pr['title'][:140]
           body = pr.get('body') or "No description provided"
+          if len(body) > 2900:
+              body = body[:2900] + "…"
           author = pr['user']['login']
           head_ref = pr['head']['ref']
           base_ref = pr['base']['ref']
