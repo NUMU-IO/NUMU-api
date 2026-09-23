@@ -140,7 +140,11 @@ async def _collect_warning_targets(session, cfg, now):  # noqa: ANN001
     # card token AND no completed InstaPay payment were never charged
     # before this rollout and won't be now — don't suddenly email
     # existing merchants about renewals that will never be collected.
-    no_token_ids = [t.id for t in renewal_rows if not t.paymob_card_token_encrypted]
+    no_token_ids = [
+        t.id
+        for t in renewal_rows
+        if not (t.paymob_card_token_encrypted or t.kashier_card_token_encrypted)
+    ]
     instapay_payers: set = set()
     if no_token_ids:
         from src.core.entities.subscription_payment import PLAN_PURPOSES
@@ -182,7 +186,11 @@ async def _collect_warning_targets(session, cfg, now):  # noqa: ANN001
     targets.extend(
         (t, "renewal", t.next_renewal_at)
         for t in renewal_rows
-        if (t.paymob_card_token_encrypted or t.id in instapay_payers)
+        if (
+            t.paymob_card_token_encrypted
+            or t.kashier_card_token_encrypted
+            or t.id in instapay_payers
+        )
         and _in_window(t)
         and _armed(t.renewal_warning_sent_at, t.next_renewal_at, _tenant_window(t))
     )

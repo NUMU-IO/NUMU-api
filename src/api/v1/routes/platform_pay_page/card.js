@@ -94,6 +94,10 @@
   var csc = $("cc-csc");
   var name = $("cc-name");
   var payBtn = $("pay");
+  // Set when the API signed the order to save the card (plan auto-renew):
+  // Kashier returns the card token in its response, and the hub stores it
+  // through our API once the payment is confirmed.
+  var saved = null;
   payBtn.textContent = t.pay + (cfg.amount || "");
 
   function parts() {
@@ -137,7 +141,7 @@
     if (!data || data.message !== "merchantStoreRedirect") return;
     if (data.params && data.params.status === "SUCCESS") {
       show(t.processing, false);
-      post({ status: "submitted" });
+      post({ status: "submitted", saved: saved });
     } else {
       fail(t.declined);
     }
@@ -159,6 +163,11 @@
         enable3DS: true,
       },
     };
+    var cardExtra = cfg.params.card_extra;
+    if (cardExtra) {
+      Object.keys(cardExtra).forEach(function (k) { body.paymentMethod.card[k] = cardExtra[k]; });
+    }
+    var last4 = digits(number.value).slice(-4);
     // The card is not kept in the page once it is sent.
     number.value = "";
     csc.value = "";
@@ -178,6 +187,14 @@
       .then(function (out) {
         var json = out.json || {};
         var r = json.response || json;
+        var card = (r.paymentMethod && r.paymentMethod.card) || r.card || {};
+        if (cardExtra && card.cardToken) {
+          saved = {
+            card_token: String(card.cardToken),
+            agreement_id: (card.agreement && card.agreement.id) || r.agreementId || null,
+            last4: last4,
+          };
+        }
         var redirectUrl = r.authentication && r.authentication.redirectUrl;
         if (redirectUrl) {
           var frameHost = "";
@@ -202,7 +219,7 @@
         // sandboxed handler if Kashier starts returning only that.
         var status = String(r.status || json.status || "").toUpperCase();
         if (out.ok && ["SUCCESS", "CAPTURED", "PAID"].indexOf(status) !== -1) {
-          post({ status: "submitted" });
+          post({ status: "submitted", saved: saved });
           return;
         }
         var msg = (json.messages && json.messages[cfg.lang === "ar" ? "ar" : "en"]) || r.message;

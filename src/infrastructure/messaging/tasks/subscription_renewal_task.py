@@ -85,6 +85,12 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
         ),
     )
     recurring = PaymobRecurringBillingService(paymob_service=paymob_service)
+    # Cards saved on NUMU's card page (Kashier recurring agreement).
+    from src.application.services.platform_kashier import PlatformKashierRecurring
+
+    kashier_recurring = PaymobRecurringBillingService(
+        paymob_service=PlatformKashierRecurring()
+    )
 
     encryption_key_id = getattr(settings, "credential_encryption_key_id", "v1")
 
@@ -145,9 +151,10 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                 # InstaPay payment flow; only tenants who actually paid
                 # via InstaPay (a succeeded intent exists) opt in to
                 # dunning-by-InstaPay when their period lapses.
-                if not tenant.paymob_card_token_encrypted and not (
-                    await _has_succeeded_instapay_payment(session, tenant.id)
-                ):
+                if (
+                    not tenant.paymob_card_token_encrypted
+                    and not tenant.kashier_card_token_encrypted
+                ) and not (await _has_succeeded_instapay_payment(session, tenant.id)):
                     skipped += 1
                     logger.warning(
                         "renewal_skipped_no_token",
@@ -161,7 +168,22 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                 paymob_tx_id: str | None = None
                 charged = False
                 failure_reason = "no_card_token"
-                if tenant.paymob_card_token_encrypted:
+                result = None
+                if tenant.kashier_card_token_encrypted:
+                    # Kashier order references must be unique per attempt; the
+                    # retry count keeps a dunning retry from reusing a failed one.
+                    result = await kashier_recurring.charge_subscription(
+                        tenant_id=tenant.id,
+                        amount_cents=amount,
+                        currency="EGP",
+                        encrypted_card_token=tenant.kashier_card_token_encrypted,
+                        key_id=encryption_key_id,
+                        idempotency_ref=(
+                            f"REN-{tenant.id.hex[:12]}-{period_start:%Y%m%d}"
+                            f"-{tenant.renewal_retry_count or 0}"
+                        ),
+                    )
+                elif tenant.paymob_card_token_encrypted:
                     idem_ref = f"renewal-{tenant.id}-{period_start.isoformat()}"
                     result = await recurring.charge_subscription(
                         tenant_id=tenant.id,
@@ -171,6 +193,7 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                         key_id=encryption_key_id,
                         idempotency_ref=idem_ref,
                     )
+                if result is not None:
                     if isinstance(result, RecurringChargeSuccess):
                         charged = True
                         paymob_tx_id = result.transaction_id

@@ -320,8 +320,14 @@ class KashierPaymentService(IPaymentService):
         description: str,
         webhook_url: str,
         redirect_url: str,
+        customer_reference: str | None = None,
+        card_extra: dict | None = None,
     ) -> dict:
         """Signed Direct API order for a card form the browser submits.
+
+        ``customer_reference`` + ``card_extra`` (``save`` / ``agreement``)
+        save the card for merchant-initiated renewals; Kashier then requires
+        the customer reference appended to the signed string.
 
         Returns the endpoint, the ``Kashier-Hash`` header and the request body
         minus ``paymentMethod``; the client adds the card and POSTs it to
@@ -330,34 +336,118 @@ class KashierPaymentService(IPaymentService):
         the exact string that was hashed.
         """
         amount = f"{amount_cents / 100:.2f}"
+        body = {
+            "apiOperation": "PAY",
+            "merchantId": self._mid,
+            "order": {
+                "reference": reference,
+                "amount": amount,
+                "currency": currency,
+                "description": description,
+            },
+            "interactionSource": "ECOMMERCE",
+            "reconciliation": {
+                "webhookUrl": webhook_url,
+                "merchantRedirect": redirect_url,
+                # The 3DS iframe reports back by postMessage; a redirect
+                # would navigate the iframe away from our page.
+                "redirect": False,
+            },
+            "newPaymentUI": True,
+        }
+        params = {
+            "endpoint": f"{self._fep_base()}/v3/orders/",
+            "hash": self._order_hash(reference, amount, currency, customer_reference),
+            "body": body,
+        }
+        if customer_reference:
+            body["customer"] = {"reference": customer_reference}
+            # Kashier's value for the first payment of a saved-card agreement.
+            body["interactionSource"] = "RECURRING"
+            params["card_extra"] = card_extra or {"save": True}
+        return params
+
+    def _fep_base(self) -> str:
+        return KASHIER_TEST_FEP_BASE if self._mode == "test" else KASHIER_FEP_BASE
+
+    def _order_hash(
+        self,
+        reference: str,
+        amount: str,
+        currency: str,
+        customer_reference: str | None = None,
+    ) -> str:
+        """Kashier-Hash: HMAC-SHA256 of the order path, plus the customer
+        reference whenever the card is saved or charged by token."""
         path = f"/?payment={self._mid}.{reference}.{amount}.{currency}"
-        signature = hmac.new(
+        if customer_reference:
+            path += f".{customer_reference}"
+        return hmac.new(
             self._api_key.encode(), path.encode(), hashlib.sha256
         ).hexdigest()
-        base = KASHIER_TEST_FEP_BASE if self._mode == "test" else KASHIER_FEP_BASE
-        return {
-            "endpoint": f"{base}/v3/orders/",
-            "hash": signature,
-            "body": {
-                "apiOperation": "PAY",
-                "merchantId": self._mid,
-                "order": {
-                    "reference": reference,
-                    "amount": amount,
-                    "currency": currency,
-                    "description": description,
-                },
-                "interactionSource": "ECOMMERCE",
-                "reconciliation": {
-                    "webhookUrl": webhook_url,
-                    "merchantRedirect": redirect_url,
-                    # The 3DS iframe reports back by postMessage; a redirect
-                    # would navigate the iframe away from our page.
-                    "redirect": False,
-                },
-                "newPaymentUI": True,
-            },
+
+    async def charge_recurring_token(
+        self,
+        *,
+        card_token: str,
+        agreement_id: str | None,
+        customer_reference: str,
+        reference: str,
+        amount_cents: int,
+        currency: str,
+        webhook_url: str,
+    ) -> PaymentResult:
+        """Merchant-initiated charge of a saved card (Kashier ``CONTAUTH``).
+
+        No customer present and no 3-D Secure; the recurring agreement set up
+        with the first payment authorises it.
+        """
+        amount = f"{amount_cents / 100:.2f}"
+        card: dict = {"cardToken": card_token, "enable3DS": False}
+        if agreement_id:
+            card["agreement"] = {"id": agreement_id}
+        body = {
+            "apiOperation": "PAY",
+            "merchantId": self._mid,
+            "paymentMethod": {"type": "CARD", "card": card},
+            "order": {"reference": reference, "amount": amount, "currency": currency},
+            "customer": {"reference": customer_reference},
+            "interactionSource": "CONTAUTH",
+            "reconciliation": {"webhookUrl": webhook_url, "redirect": False},
         }
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(
+                    f"{self._fep_base()}/v3/orders/",
+                    json=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Kashier-Hash": self._order_hash(
+                            reference, amount, currency, customer_reference
+                        ),
+                    },
+                    timeout=30.0,
+                )
+            data = res.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            return PaymentResult(
+                success=False, error_message=f"kashier_unreachable: {exc}"
+            )
+
+        response = data.get("response") or data
+        status = str(response.get("status") or data.get("status") or "").upper()
+        if res.status_code < 400 and status in ("SUCCESS", "CAPTURED"):
+            tx = response.get("transactionId") or response.get("orderId") or reference
+            return PaymentResult(success=True, payment_id=str(tx))
+        messages = data.get("messages") or {}
+        return PaymentResult(
+            success=False,
+            error_message=messages.get("en")
+            or response.get("message")
+            or status
+            or "declined",
+            error_code=str(response.get("responseCode") or res.status_code),
+        )
 
     async def charge_saved_token(
         self,
