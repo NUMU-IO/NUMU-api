@@ -107,6 +107,9 @@ from src.infrastructure.repositories import (
     ProductRepository,
     StoreRepository,
 )
+from src.infrastructure.repositories.meta_match_quality_repository import (
+    MetaMatchQualityRepository,
+)
 
 router = APIRouter(prefix="/{store_id}/settings")
 
@@ -4888,11 +4891,26 @@ async def get_meta_match_quality(
     service = MetaMatchQualityService()
     snapshots = await service.get_snapshots(store.id, pixel_id, session=db)
 
+    # "Did it improve?" — the score a week ago, from the poll history (every
+    # 6 hours, so 40 rows reach back about 10 days).
+    mq_repo = MetaMatchQualityRepository(db)
+    week_ago_cutoff = datetime.now(UTC) - timedelta(days=7)
+    week_ago: dict[str, float] = {}
+    for snap in snapshots:
+        with contextlib.suppress(Exception):
+            series = await mq_repo.history_for_event(
+                store.id, snap.pixel_id, snap.event_name, limit=40
+            )
+            older = [s for s in series if s.captured_at <= week_ago_cutoff]
+            if older:
+                week_ago[snap.event_name] = older[-1].emq_score
+
     events = [
         MetaMatchQualityEvent(
             event_name=snap.event_name,
             pixel_id=snap.pixel_id,
             emq_score=snap.emq_score,
+            emq_week_ago=week_ago.get(snap.event_name),
             total_events=snap.total_events,
             dedup_rate=snap.dedup_rate,
             event_coverage=snap.event_coverage,

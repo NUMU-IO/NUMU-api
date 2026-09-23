@@ -645,6 +645,10 @@ class MetaMatchQualityEvent(BaseModel):
     event_name: str
     pixel_id: str
     emq_score: float = Field(..., description="Meta's composite_score, 0.0-10.0")
+    emq_week_ago: float | None = Field(
+        default=None,
+        description="The score from the newest snapshot at least 7 days old",
+    )
     total_events: int = 0
     dedup_rate: float | None = None
     event_coverage: float | None = Field(
