@@ -12,7 +12,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.api.dependencies import get_current_user_id
 from src.api.dependencies.partners import require_approved_partner
 from src.api.dependencies.repositories import get_marketplace_repository
 from src.api.responses import SuccessResponse
@@ -53,7 +52,7 @@ def _svc(
 async def create_listing(
     body: CreateListingRequest,
     svc: Annotated[MarketplaceService, Depends(_svc)],
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
 ):
     """Create a new marketplace theme listing (status=draft)."""
     try:
@@ -69,7 +68,7 @@ async def create_listing(
 )
 async def list_my_themes(
     svc: Annotated[MarketplaceService, Depends(_svc)],
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
 ):
     """List theme listings owned by the authenticated developer."""
     items = await svc.list_my_themes(user_id)
@@ -84,7 +83,7 @@ async def update_listing(
     theme_id: UUID,
     body: UpdateListingRequest,
     svc: Annotated[MarketplaceService, Depends(_svc)],
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
 ):
     """Update a marketplace theme listing (developer-owned only)."""
     fields = body.model_dump(exclude_unset=True)
@@ -106,7 +105,7 @@ async def submit_version(
     theme_id: UUID,
     body: SubmitVersionRequest,
     svc: Annotated[MarketplaceService, Depends(_svc)],
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
 ):
     """Submit a new version for build & review.
 
@@ -133,7 +132,7 @@ async def submit_version(
 async def list_versions(
     theme_id: UUID,
     svc: Annotated[MarketplaceService, Depends(_svc)],
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
 ):
     """List all versions of a theme owned by the developer."""
     try:
@@ -150,11 +149,30 @@ async def list_versions(
 async def check_build_status(
     version_id: UUID,
     svc: Annotated[MarketplaceService, Depends(_svc)],
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
 ):
     """Poll the build/review status of a submitted version."""
     try:
         data = await svc.get_version_status(developer_id=user_id, version_id=version_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return SuccessResponse(data=VersionStatusResponse(**data))
+
+
+@router.post(
+    "/versions/{version_id}/publish",
+    response_model=SuccessResponse[VersionStatusResponse],
+)
+async def publish_version(
+    version_id: UUID,
+    svc: Annotated[MarketplaceService, Depends(_svc)],
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
+):
+    """Publish an approved version so merchants can install it."""
+    try:
+        data = await svc.publish_version(developer_id=user_id, version_id=version_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     return SuccessResponse(data=VersionStatusResponse(**data))

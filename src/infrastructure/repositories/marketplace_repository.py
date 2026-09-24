@@ -89,8 +89,10 @@ class MarketplaceRepository:
             updated_at=m.updated_at,
             developer_id=m.developer_id,
             name=m.name,
+            name_ar=getattr(m, "name_ar", None),
             slug=m.slug,
             description=m.description,
+            description_ar=getattr(m, "description_ar", None),
             short_description=m.short_description,
             price_cents=m.price_cents,
             currency=m.currency,
@@ -135,6 +137,9 @@ class MarketplaceRepository:
             source_zip_path=m.source_zip_path,
             review_notes=m.review_notes,
             reviewed_by=m.reviewed_by,
+            lint_status=m.lint_status,
+            lint_issues=copy.deepcopy(m.lint_issues),
+            certification_tier=m.certification_tier,
         )
 
     def _installation_to_entity(
