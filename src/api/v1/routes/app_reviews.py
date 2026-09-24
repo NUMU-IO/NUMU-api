@@ -41,7 +41,7 @@ from src.core.logging import get_logger
 from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
     AppModel,
-    AppReviewModel,
+    AppRatingModel,
     AppUninstallEventModel,
 )
 from src.infrastructure.database.models.tenant.store import StoreModel
@@ -114,7 +114,7 @@ class ReviewPage(BaseModel):
     can_review: bool = False
 
 
-def _out(review: AppReviewModel, store_name, app_name=None, *, staff=False):
+def _out(review: AppRatingModel, store_name, app_name=None, *, staff=False):
     return ReviewOut(
         id=review.id,
         app_id=review.app_id,
@@ -140,12 +140,12 @@ async def rating_summaries(
         return {}
     rows = await db.execute(
         select(
-            AppReviewModel.app_id,
-            func.avg(AppReviewModel.rating),
-            func.count(AppReviewModel.id),
+            AppRatingModel.app_id,
+            func.avg(AppRatingModel.rating),
+            func.count(AppRatingModel.id),
         )
-        .where(AppReviewModel.app_id.in_(app_ids), AppReviewModel.is_hidden.is_(False))
-        .group_by(AppReviewModel.app_id)
+        .where(AppRatingModel.app_id.in_(app_ids), AppRatingModel.is_hidden.is_(False))
+        .group_by(AppRatingModel.app_id)
     )
     return {a: (round(float(avg), 2), n) for a, avg, n in rows.all()}
 
@@ -153,9 +153,9 @@ async def rating_summaries(
 async def _summary(db: AsyncSession, app_filter) -> RatingSummary:
     rows = (
         await db.execute(
-            select(AppReviewModel.rating, func.count(AppReviewModel.id))
-            .where(app_filter, AppReviewModel.is_hidden.is_(False))
-            .group_by(AppReviewModel.rating)
+            select(AppRatingModel.rating, func.count(AppRatingModel.id))
+            .where(app_filter, AppRatingModel.is_hidden.is_(False))
+            .group_by(AppRatingModel.rating)
         )
     ).all()
     dist = dict.fromkeys(range(1, 6), 0) | dict(rows)
@@ -173,17 +173,17 @@ async def _page(
     db: AsyncSession, where: list, *, rating, page, page_size, staff=False
 ) -> tuple[list[ReviewOut], int]:
     q = (
-        select(AppReviewModel, StoreModel.name, AppModel.name)
-        .join(AppModel, AppModel.id == AppReviewModel.app_id)
-        .outerjoin(StoreModel, StoreModel.id == AppReviewModel.store_id)
+        select(AppRatingModel, StoreModel.name, AppModel.name)
+        .join(AppModel, AppModel.id == AppRatingModel.app_id)
+        .outerjoin(StoreModel, StoreModel.id == AppRatingModel.store_id)
         .where(*where)
     )
     if rating:
-        q = q.where(AppReviewModel.rating == rating)
+        q = q.where(AppRatingModel.rating == rating)
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
     rows = (
         await db.execute(
-            q.order_by(AppReviewModel.created_at.desc(), AppReviewModel.id)
+            q.order_by(AppRatingModel.created_at.desc(), AppRatingModel.id)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -227,13 +227,13 @@ async def _app(db: AsyncSession, slug: str) -> AppModel:
 
 async def _mine(db: AsyncSession, app_id: UUID, store_id: UUID):
     return await db.scalar(
-        select(AppReviewModel).where(
-            AppReviewModel.app_id == app_id, AppReviewModel.store_id == store_id
+        select(AppRatingModel).where(
+            AppRatingModel.app_id == app_id, AppRatingModel.store_id == store_id
         )
     )
 
 
-def _reported(db: AsyncSession, review: AppReviewModel, reason: str, app_name: str):
+def _reported(db: AsyncSession, review: AppRatingModel, reason: str, app_name: str):
     review.reported_at = datetime.now(UTC)
     review.report_reason = reason.strip()
     admin_notifications.notify(
@@ -260,10 +260,10 @@ async def merchant_list(
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
 ):
     app = await _app(db, slug)
-    of_app = AppReviewModel.app_id == app.id
+    of_app = AppRatingModel.app_id == app.id
     items, total = await _page(
         db,
-        [of_app, AppReviewModel.is_hidden.is_(False)],
+        [of_app, AppRatingModel.is_hidden.is_(False)],
         rating=rating,
         page=page,
         page_size=page_size,
@@ -305,7 +305,7 @@ async def merchant_upsert(
     text = (body.body or "").strip() or None
     created = review is None
     if created:
-        review = AppReviewModel(
+        review = AppRatingModel(
             app_id=app.id, store_id=store.id, is_hidden=False, user_id=user_id
         )
         db.add(review)
@@ -362,7 +362,7 @@ async def merchant_report(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     app = await _app(db, slug)
-    review = await db.get(AppReviewModel, review_id)
+    review = await db.get(AppRatingModel, review_id)
     if review is None or review.app_id != app.id or review.is_hidden:
         raise HTTPException(status_code=404, detail="Review not found")
     await write_budget(user_id, "app_review_write", WRITES_PER_HOUR)
@@ -377,9 +377,9 @@ async def merchant_report(
 async def _owned(db: AsyncSession, owner_id: UUID, review_id: UUID):
     row = (
         await db.execute(
-            select(AppReviewModel, AppModel)
-            .join(AppModel, AppModel.id == AppReviewModel.app_id)
-            .where(AppReviewModel.id == review_id, AppModel.developer_id == owner_id)
+            select(AppRatingModel, AppModel)
+            .join(AppModel, AppModel.id == AppRatingModel.app_id)
+            .where(AppRatingModel.id == review_id, AppModel.developer_id == owner_id)
         )
     ).first()
     if row is None:
@@ -403,7 +403,7 @@ async def partner_list(
     apps = select(AppModel.id).where(AppModel.developer_id == owner_id)
     if app_id:
         apps = apps.where(AppModel.id == app_id)
-    of_apps = AppReviewModel.app_id.in_(apps)
+    of_apps = AppRatingModel.app_id.in_(apps)
     items, total = await _page(
         db, [of_apps], rating=rating, page=page, page_size=page_size
     )
@@ -474,8 +474,8 @@ async def admin_list(
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
 ):
     where = {
-        "reported": [AppReviewModel.reported_at.is_not(None)],
-        "hidden": [AppReviewModel.is_hidden.is_(True)],
+        "reported": [AppRatingModel.reported_at.is_not(None)],
+        "hidden": [AppRatingModel.is_hidden.is_(True)],
         "all": [],
     }[queue]
     items, total = await _page(
@@ -501,7 +501,7 @@ async def admin_moderate(
 ):
     """``hide`` / ``unhide`` set visibility; each also clears the report, as
     does ``dismiss`` (the report was unfounded)."""
-    review = await db.get(AppReviewModel, review_id)
+    review = await db.get(AppRatingModel, review_id)
     if review is None:
         raise HTTPException(status_code=404, detail="Review not found")
     if body.action != "dismiss":

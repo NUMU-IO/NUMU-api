@@ -176,18 +176,18 @@ class AppUninstallEventModel(Base, UUIDMixin, TimestampMixin):
     )
 
 
-class AppReviewModel(Base, UUIDMixin, TimestampMixin):
+class AppRatingModel(Base, UUIDMixin, TimestampMixin):
     """One merchant's rating of an app: one per store, with at most one
     public reply from the app's partner. Hidden reviews leave the listing and
     the aggregate; ``reported_at`` puts a review in the admin queue."""
 
-    __tablename__ = "app_reviews"
+    __tablename__ = "app_ratings"
     __table_args__ = (
-        UniqueConstraint("app_id", "store_id", name="uq_app_reviews_app_store"),
-        CheckConstraint("rating BETWEEN 1 AND 5", name="ck_app_reviews_rating"),
-        Index("ix_app_reviews_app_created", "app_id", "created_at"),
+        UniqueConstraint("app_id", "store_id", name="uq_app_ratings_app_store"),
+        CheckConstraint("rating BETWEEN 1 AND 5", name="ck_app_ratings_rating"),
+        Index("ix_app_ratings_app_created", "app_id", "created_at"),
         Index(
-            "ix_app_reviews_reported",
+            "ix_app_ratings_reported",
             "reported_at",
             postgresql_where="reported_at IS NOT NULL",
         ),

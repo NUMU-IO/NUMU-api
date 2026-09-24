@@ -6,7 +6,7 @@ Create Date: 2026-09-24
 
 Additive, public tables with no RLS (like ``partner_members``: every read is
 scoped in the route by store, partner or admin):
-- ``app_reviews``: one rating per store per app, the partner's reply and
+- ``app_ratings``: one rating per store per app, the partner's reply and
   the moderation state;
 - ``support_tickets`` / ``support_messages``: merchant to partner and
   partner to NUMU threads;
@@ -33,7 +33,7 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE TABLE IF NOT EXISTS public.app_reviews (
+        CREATE TABLE IF NOT EXISTS public.app_ratings (
             id UUID PRIMARY KEY,
             app_id UUID NOT NULL REFERENCES public.apps(id) ON DELETE CASCADE,
             store_id UUID NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
@@ -47,18 +47,18 @@ def upgrade() -> None:
             report_reason VARCHAR(500),
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT uq_app_reviews_app_store UNIQUE (app_id, store_id),
-            CONSTRAINT ck_app_reviews_rating CHECK (rating BETWEEN 1 AND 5)
+            CONSTRAINT uq_app_ratings_app_store UNIQUE (app_id, store_id),
+            CONSTRAINT ck_app_ratings_rating CHECK (rating BETWEEN 1 AND 5)
         )
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_app_reviews_app_created "
-        "ON public.app_reviews (app_id, created_at)"
+        "CREATE INDEX IF NOT EXISTS ix_app_ratings_app_created "
+        "ON public.app_ratings (app_id, created_at)"
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_app_reviews_reported "
-        "ON public.app_reviews (reported_at) WHERE reported_at IS NOT NULL"
+        "CREATE INDEX IF NOT EXISTS ix_app_ratings_reported "
+        "ON public.app_ratings (reported_at) WHERE reported_at IS NOT NULL"
     )
     op.execute(
         """
@@ -118,7 +118,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS public.support_messages")
     op.execute("DROP TABLE IF EXISTS public.support_tickets")
-    op.execute("DROP TABLE IF EXISTS public.app_reviews")
+    op.execute("DROP TABLE IF EXISTS public.app_ratings")
     op.execute(
         "ALTER TABLE public.app_uninstall_events DROP COLUMN IF EXISTS installed_at"
     )
