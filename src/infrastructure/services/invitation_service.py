@@ -8,12 +8,14 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.entitlement_service import EntitlementService, aware
 from src.infrastructure.database.models.public.membership_override import (
     MembershipRoleModel,
 )
 from src.infrastructure.database.models.public.staff_invitation import (
     StaffInvitationModel,
 )
+from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.tenant_membership import (
     MembershipStatus,
     TenantMembershipModel,
@@ -54,6 +56,13 @@ class InvitationService:
         """Generate secure invitation token."""
         return secrets.token_urlsafe(32)
 
+    async def _take_seat(self, tenant_id: UUID) -> None:
+        """A new or revived invitation holds a staff seat from the moment it
+        is sent, so it must fit the plan's staff limit now."""
+        tenant = await self.session.get(TenantModel, tenant_id)
+        if tenant is not None:
+            await EntitlementService(self.session).check_quota(tenant, "staff_accounts")
+
     async def create_invitation(
         self,
         tenant_id: UUID,
@@ -69,7 +78,14 @@ class InvitationService:
             Raw token is only returned once and must be sent to user.
         """
         existing = await self.invite_repo.get_by_email(email, tenant_id)
-        if existing and existing.accepted_at is None and existing.revoked_at is None:
+        pending = (
+            existing is not None
+            and existing.accepted_at is None
+            and existing.revoked_at is None
+        )
+        if not pending or aware(existing.expires_at) <= datetime.now(UTC):
+            await self._take_seat(tenant_id)
+        if pending:
             if existing.resent_count >= self.MAX_RESEND_COUNT:
                 raise ValueError("Maximum resend count reached")
             token = self._generate_token()

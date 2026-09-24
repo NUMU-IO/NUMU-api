@@ -1,5 +1,5 @@
 """Partner portal (partners.numueg.app): dashboard, webhook deliveries, team,
-subscriptions and app coupons.
+subscriptions, app coupons and referrals.
 
 URL: /api/v1/partners. Hidden while the Partner program is closed, like the
 rest of the portal. Every read is scoped to the caller's partner through
@@ -43,6 +43,11 @@ from src.application.services.app_billing import (
     redemption_count,
 )
 from src.application.services.partner_program import partner_membership
+from src.application.services.partner_referrals import (
+    SIGNUP_LINK,
+    ensure_code,
+    referred_stores,
+)
 from src.config import settings
 from src.core.entities.webhook import WebhookDeliveryStatus
 from src.core.logging import get_logger
@@ -795,4 +800,62 @@ async def list_redemptions(
             }
             for r, store_name in rows
         ]
+    )
+
+
+# ─── Referrals ────────────────────────────────────────────────────
+
+
+class ReferredStore(BaseModel):
+    tenant_id: UUID
+    store_name: str
+    signed_up_at: datetime
+    plan: str
+    status: str
+    first_paid_at: datetime | None
+    earned_cents: int
+
+
+class PartnerReferrals(BaseModel):
+    code: str | None
+    link: str | None
+    referral_bps: int
+    referral_months: int
+    earned_cents: int
+    stores: list[ReferredStore]
+
+
+@router.get(
+    "/me/referrals",
+    response_model=SuccessResponse[PartnerReferrals],
+    operation_id="get_partner_referrals",
+)
+async def referrals(
+    ctx: Annotated[PartnerContext, Depends(partner_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Your referral link and the merchants it brought: you earn a share of
+    each one's NUMU plan payments for a set period after their first."""
+    if ctx.account is None:
+        return SuccessResponse(
+            data=PartnerReferrals(
+                code=None,
+                link=None,
+                referral_bps=0,
+                referral_months=0,
+                earned_cents=0,
+                stores=[],
+            )
+        )
+    code = await ensure_code(db, ctx.account)
+    stores = [ReferredStore(**r) for r in await referred_stores(db, ctx.account.id)]
+    return SuccessResponse(
+        data=PartnerReferrals(
+            code=code,
+            link=SIGNUP_LINK + code,
+            referral_bps=ctx.account.referral_bps,
+            referral_months=ctx.account.referral_months,
+            earned_cents=sum(r.earned_cents for r in stores),
+            stores=stores,
+        )
     )

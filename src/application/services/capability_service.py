@@ -13,35 +13,24 @@ A capability is resolved from three things, in order:
      which is worse than no flag at all.
   2. an explicit per-store override in ``stores.settings["capabilities"]``
      (what a sector preset writes, and what the merchant can toggle);
-  3. the plan floor — some capabilities are only sold above a tier.
+  3. the entitlement — some capabilities are sold, so the entitlement
+     catalog decides (``EntitlementService``), not a plan name.
 
 Deliberately NOT a new table. Per-store overrides ride on the existing
-``stores.settings`` JSONB and the plan floor reads the existing
-``PLAN_LIMITS``; a ``store_capabilities`` table would be a third place for
-entitlement truth to disagree with itself.
+``stores.settings`` JSONB and the sold ones ask the entitlement catalog;
+a ``store_capabilities`` table would be a third place for entitlement truth
+to disagree with itself.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.entitlement_service import EntitlementService
 from src.core.entities.store import Store
-from src.infrastructure.tenancy.repository import TenantRepository
-
-_PLAN_RANK: dict[str, int] = {
-    "demo": 0,
-    "free": 0,
-    "trial": 1,
-    "payg": 1,
-    "starter": 1,
-    "pro": 2,
-    # A partner's dev store tests what Pro merchants get.
-    "developer": 2,
-    "enterprise": 3,
-}
+from src.infrastructure.database.models.public.tenant import TenantModel
 
 
 @dataclass(frozen=True)
@@ -53,7 +42,8 @@ class Capability:
     name_ar: str
     implemented: bool
     default_on: bool
-    min_plan: str = "free"
+    #: The entitlement that sells it; None when every store may turn it on.
+    entitlement: str | None = None
 
 
 CAPABILITIES: dict[str, Capability] = {
@@ -70,7 +60,7 @@ CAPABILITIES: dict[str, Capability] = {
             "فروع متعددة",
             True,
             False,
-            min_plan="pro",
+            entitlement="multi_warehouse",
         ),
         Capability(
             "subscriptions",
@@ -78,7 +68,7 @@ CAPABILITIES: dict[str, Capability] = {
             "الاشتراكات",
             True,
             False,
-            min_plan="pro",
+            entitlement="product_subscriptions",
         ),
         Capability("gift_cards", "Gift cards", "كروت الهدايا", True, False),
         # Not built yet — see docs/omnichannel/… and the donations module
@@ -94,30 +84,33 @@ CAPABILITIES: dict[str, Capability] = {
 
 
 class CapabilityService:
-    """Resolves capabilities for a store against its plan and overrides."""
+    """Resolves capabilities for a store against its entitlements and overrides."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self._plan_cache: dict[UUID, str] = {}
+        self.entitlements = EntitlementService(session)
 
-    async def _plan_name(self, tenant_id: UUID | None) -> str:
-        if tenant_id is None:
-            return "free"
-        if tenant_id not in self._plan_cache:
-            tenant = await TenantRepository(self.session).get_by_id(tenant_id)
-            self._plan_cache[tenant_id] = (tenant.plan if tenant else "free") or "free"
-        return self._plan_cache[tenant_id]
+    async def _entitled(self, store: Store) -> frozenset[str]:
+        """The sold capabilities' entitlements this store's tenant holds."""
+        tenant = (
+            await self.session.get(TenantModel, store.tenant_id)
+            if store.tenant_id
+            else None
+        )
+        if tenant is None:
+            return frozenset()
+        return frozenset([
+            key for key in _SOLD if await self.entitlements.has(tenant, key)
+        ])
 
     @staticmethod
-    def resolve(store: Store, plan_name: str, key: str) -> bool:
+    def resolve(store: Store, entitled: frozenset[str], key: str) -> bool:
         """Resolve one capability without touching the database."""
         capability = CAPABILITIES.get(key)
         if capability is None or not capability.implemented:
             return False
 
-        if _PLAN_RANK.get(plan_name.lower(), 0) < _PLAN_RANK.get(
-            capability.min_plan, 0
-        ):
+        if capability.entitlement and capability.entitlement not in entitled:
             return False
 
         overrides = (store.settings or {}).get("capabilities") or {}
@@ -128,19 +121,27 @@ class CapabilityService:
         return capability.default_on
 
     @staticmethod
-    def resolve_all(store: Store, plan_name: str) -> dict[str, bool]:
+    def resolve_all(store: Store, entitled: frozenset[str]) -> dict[str, bool]:
         """Resolve every known capability for the store."""
         return {
-            key: CapabilityService.resolve(store, plan_name, key)
-            for key in CAPABILITIES
+            key: CapabilityService.resolve(store, entitled, key) for key in CAPABILITIES
         }
 
     async def has(self, store: Store, key: str) -> bool:
-        """Resolve one capability, loading the store's plan as needed."""
-        plan_name = await self._plan_name(store.tenant_id)
-        return self.resolve(store, plan_name, key)
+        """Resolve one capability, loading the store's entitlements."""
+        return self.resolve(store, await self._entitled(store), key)
 
     async def all_for(self, store: Store) -> dict[str, bool]:
-        """Resolve every capability, loading the store's plan as needed."""
-        plan_name = await self._plan_name(store.tenant_id)
-        return self.resolve_all(store, plan_name)
+        """Resolve every capability, loading the store's entitlements."""
+        return self.resolve_all(store, await self._entitled(store))
+
+    async def min_plan(self, capability: Capability) -> str:
+        """The cheapest plan that sells it, for "Requires the Pro plan" copy;
+        "free" when it is not sold."""
+        if not capability.entitlement:
+            return "free"
+        plans = await self.entitlements.available_via(capability.entitlement)
+        return next((p for p in plans if not p.startswith("addon:")), "free")
+
+
+_SOLD = frozenset(c.entitlement for c in CAPABILITIES.values() if c.entitlement)

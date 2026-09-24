@@ -12,6 +12,11 @@ plus the cart shape, and emits the available options. Identical input
     * safe to call twice (once at `/shipping/options`, once at
       `/checkout` to close the trust gap — results must match).
 
+The one exception is a ``carrier_api`` rate on a partner shipping app:
+its price comes from the app's ``rates_url`` (``partner_carriers``),
+cached briefly per cart shape so both calls still agree, and omitted when
+the app is slow or wrong.
+
 The resolver is the **only** component allowed to price shipping in
 MVP. Checkout never trusts a client-supplied `shipping_cost`.
 """
@@ -19,6 +24,11 @@ MVP. Checkout never trusts a client-supplied `shipping_cost`.
 from dataclasses import dataclass
 from uuid import UUID
 
+from src.application.services.partner_carriers import (
+    RateQuote,
+    is_app_carrier,
+    quote_rates,
+)
 from src.core.entities.shipping_rate import (
     RateConfigCarrierApi,
     RateConfigFlat,
@@ -32,6 +42,9 @@ from src.core.entities.shipping_zone import ShippingZone
 from src.core.interfaces.repositories.shipping_zone_repository import (
     IShippingZoneRepository,
 )
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -146,6 +159,14 @@ class ShippingResolver:
         )
         options: list[ResolvedOption] = []
         lowest_free_over_threshold: int | None = None
+        quotes = await self._live_quotes(
+            store_id,
+            rates,
+            governorate_code,
+            cart_subtotal_cents,
+            cart_weight_g,
+            cod_requested,
+        )
 
         for rate in rates:
             # Respect per-zone COD policy when the customer has asked for COD.
@@ -157,6 +178,7 @@ class ShippingResolver:
                 cart_subtotal_cents=cart_subtotal_cents,
                 cart_weight_g=cart_weight_g,
                 cod_requested=cod_requested,
+                quote=quotes.get(rate.id),
             )
             if evaluated is None:
                 continue
@@ -197,7 +219,17 @@ class ShippingResolver:
             cod_requested and zone is not None and not zone.cod_enabled
         )
 
-        if not options and not restrict_to_zones and not cod_blocked_by_zone:
+        # Exception 3 — a zone priced by a shipping app whose quote was
+        # omitted must not turn into free shipping. Keep a flat rate beside
+        # it as the fallback.
+        priced_by_app = any(r.rate_type == RateType.CARRIER_API for r in rates)
+
+        if (
+            not options
+            and not restrict_to_zones
+            and not cod_blocked_by_zone
+            and not priced_by_app
+        ):
             options.append(self._default_ships_everywhere_option())
 
         unavailable_reason: str | None = None
@@ -274,13 +306,65 @@ class ShippingResolver:
         # Honour zone COD policy.
         if cod_requested and not zone.cod_enabled:
             return None
+        quotes = await self._live_quotes(
+            store_id,
+            [rate],
+            governorate_code,
+            cart_subtotal_cents,
+            cart_weight_g,
+            cod_requested,
+        )
         return self._evaluate_rate(
             rate=rate,
             zone=zone,
             cart_subtotal_cents=cart_subtotal_cents,
             cart_weight_g=cart_weight_g,
             cod_requested=cod_requested,
+            quote=quotes.get(rate.id),
         )
+
+    async def _live_quotes(
+        self,
+        store_id: UUID,
+        rates: list[ShippingRate],
+        governorate_code: str,
+        cart_subtotal_cents: int,
+        cart_weight_g: int,
+        cod_requested: bool,
+    ) -> dict[UUID, RateQuote]:
+        """Partner-app quotes for the ``carrier_api`` rates, keyed by rate id.
+
+        A rate whose carrier did not quote its service is simply absent,
+        which omits the option. Never raises: a partner cannot break checkout.
+        """
+        wanted: dict[UUID, RateConfigCarrierApi] = {}
+        for rate in rates:
+            if rate.rate_type != RateType.CARRIER_API:
+                continue
+            cfg = parse_rate_config(rate.rate_type, rate.config)
+            if isinstance(cfg, RateConfigCarrierApi) and is_app_carrier(cfg.carrier):
+                wanted[rate.id] = cfg
+        if not wanted:
+            return {}
+        try:
+            by_carrier = await quote_rates(
+                getattr(self.repository, "session", None),
+                store_id,
+                sorted({cfg.carrier for cfg in wanted.values()}),
+                governorate_code=governorate_code,
+                subtotal_cents=cart_subtotal_cents,
+                weight_g=cart_weight_g,
+                cod=cod_requested,
+            )
+        except Exception as exc:  # noqa: BLE001 — checkout must never break
+            logger.warning("partner_rates_failed", error=type(exc).__name__)
+            return {}
+        out: dict[UUID, RateQuote] = {}
+        for rate_id, cfg in wanted.items():
+            quote = by_carrier.get(cfg.carrier, {}).get(cfg.service_code)
+            if quote is not None and quote.currency == self.currency:
+                out[rate_id] = quote
+        return out
 
     # ─── Evaluation (pure, testable) ──────────────────────────────
 
@@ -292,6 +376,7 @@ class ShippingResolver:
         cart_subtotal_cents: int,
         cart_weight_g: int,
         cod_requested: bool,
+        quote: RateQuote | None = None,
     ) -> ResolvedOption | None:
         """Return a priced option for the given rate, or None if N/A.
 
@@ -299,6 +384,8 @@ class ShippingResolver:
         """
         cfg = parse_rate_config(rate.rate_type, rate.config)
         amount_cents: int
+        days_min, days_max = zone.estimated_days_min, zone.estimated_days_max
+        cod_supported = zone.cod_enabled
 
         if isinstance(cfg, RateConfigFlat):
             amount_cents = cfg.amount_cents
@@ -313,11 +400,13 @@ class ShippingResolver:
             amount_cents = self._evaluate_weight_band(cfg, cart_weight_g)
 
         elif isinstance(cfg, RateConfigCarrierApi):
-            # Post-MVP: call IShippingService.get_rates() here.
-            # In MVP we simply skip — the rate is schema-present but
-            # not wired, so a merchant who creates one won't crash
-            # checkout, but the option also won't surface.
-            return None
+            # Priced by a partner shipping app (``_live_quotes``). No quote,
+            # or a first-party carrier (not wired), omits the option.
+            if quote is None or (cod_requested and not quote.cod_supported):
+                return None
+            amount_cents = quote.amount_cents
+            days_min, days_max = quote.days_min, max(quote.days_min, quote.days_max)
+            cod_supported = zone.cod_enabled and quote.cod_supported
         else:  # pragma: no cover — validator covers unknowns
             return None
 
@@ -332,9 +421,9 @@ class ShippingResolver:
             label_ar=rate.label_ar,
             amount_cents=amount_cents,
             currency=self.currency,
-            estimated_days_min=zone.estimated_days_min,
-            estimated_days_max=zone.estimated_days_max,
-            cod_supported=zone.cod_enabled,
+            estimated_days_min=days_min,
+            estimated_days_max=days_max,
+            cod_supported=cod_supported,
             rate_type=rate.rate_type,
         )
 

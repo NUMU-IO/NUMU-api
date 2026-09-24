@@ -241,6 +241,23 @@ class ShipmentRepository(IShipmentRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def get_for_carrier_for_update(
+        self, store_id: UUID, carrier: str, tracking_number: str
+    ) -> Shipment | None:
+        query = (
+            select(ShipmentModel)
+            .where(
+                ShipmentModel.store_id == store_id,
+                ShipmentModel.carrier == carrier,
+                ShipmentModel.tracking_number == tracking_number,
+            )
+            .order_by(ShipmentModel.created_at.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        model = (await self.session.execute(query)).scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
     async def get_by_carrier_shipment_id(
         self, carrier_shipment_id: str
     ) -> Shipment | None:

@@ -13,6 +13,7 @@ from src.api.dependencies import (
     get_store_repository,
     verify_store_ownership,
 )
+from src.api.dependencies.entitlements import require_feature
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
     CouponResponse,
@@ -72,6 +73,7 @@ def _coupon_response(result) -> CouponResponse:
     status_code=status.HTTP_201_CREATED,
     summary="Create new coupon",
     operation_id="create_coupon",
+    dependencies=[require_feature("discount_codes")],
 )
 async def create_coupon(
     request: CreateCouponRequest,
