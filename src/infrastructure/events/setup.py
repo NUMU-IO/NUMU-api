@@ -4,6 +4,15 @@ Called once at application startup to register all event handlers.
 """
 
 from src.core.events.base import EventBus
+from src.core.events.commerce_events import (
+    CustomerCreatedEvent,
+    CustomerUpdatedEvent,
+    InventoryLevelChangedEvent,
+    RefundCompletedEvent,
+    RefundCreatedEvent,
+    ShipmentCreatedEvent,
+    ShipmentStatusChangedEvent,
+)
 from src.core.events.order_events import (
     OrderCreatedEvent,
     OrderPaidEvent,
@@ -49,6 +58,7 @@ from src.core.events.staff_events import (
     TemporaryAccessGrantedEvent,
     TemporaryAccessRevokedEvent,
 )
+from src.infrastructure.events.commit_watch import install as install_commit_watch
 from src.infrastructure.events.handlers.abandoned_recovery_handler import (
     handle_order_created_recovery,
 )
@@ -91,6 +101,7 @@ from src.infrastructure.events.handlers.meta_capi_status_event_handler import (
 from src.infrastructure.events.handlers.notification_feed_handler import (
     handle_kill_switch_notification,
     handle_order_created_notification,
+    handle_order_limit_notice,
     handle_order_paid_notification,
     handle_order_status_notification,
     handle_payment_proof_submitted_notification,
@@ -158,12 +169,19 @@ from src.infrastructure.events.handlers.wallet_commission_handler import (
     handle_commission_reversal_on_refund,
 )
 from src.infrastructure.events.handlers.webhook_handler import (
+    handle_webhook_customer_created,
+    handle_webhook_customer_updated,
+    handle_webhook_inventory_level_changed,
     handle_webhook_order_created,
     handle_webhook_order_paid,
     handle_webhook_order_status_changed,
     handle_webhook_product_created,
     handle_webhook_product_deleted,
     handle_webhook_product_updated,
+    handle_webhook_refund_completed,
+    handle_webhook_refund_created,
+    handle_webhook_shipment_created,
+    handle_webhook_shipment_status_changed,
 )
 from src.infrastructure.events.handlers.whatsapp_notification_handler import (
     handle_order_created_whatsapp,
@@ -225,6 +243,7 @@ def create_event_bus() -> EventBus:
     # Merchant notification feed (hub bell + Notifications page). Sibling
     # of the order-activity timeline — store-wide, categorised, read-state.
     bus.subscribe(OrderCreatedEvent, handle_order_created_notification)
+    bus.subscribe(OrderCreatedEvent, handle_order_limit_notice)
     bus.subscribe(OrderPaidEvent, handle_order_paid_notification)
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_notification)
     bus.subscribe(TrustKillSwitchFiredEvent, handle_kill_switch_notification)
@@ -295,6 +314,17 @@ def create_event_bus() -> EventBus:
     bus.subscribe(ProductCreatedEvent, handle_lead_first_product)
     bus.subscribe(ProductUpdatedEvent, handle_webhook_product_updated)
     bus.subscribe(ProductDeletedEvent, handle_webhook_product_deleted)
+
+    # Customer, refund, shipment and stock webhooks: commit_watch publishes
+    # them from every committed ORM write.
+    bus.subscribe(CustomerCreatedEvent, handle_webhook_customer_created)
+    bus.subscribe(CustomerUpdatedEvent, handle_webhook_customer_updated)
+    bus.subscribe(RefundCreatedEvent, handle_webhook_refund_created)
+    bus.subscribe(RefundCompletedEvent, handle_webhook_refund_completed)
+    bus.subscribe(ShipmentCreatedEvent, handle_webhook_shipment_created)
+    bus.subscribe(ShipmentStatusChangedEvent, handle_webhook_shipment_status_changed)
+    bus.subscribe(InventoryLevelChangedEvent, handle_webhook_inventory_level_changed)
+    install_commit_watch(bus)
 
     # Recovery flow (backend-021): risk-finalised → spawn flow; flow-started →
     # schedule first Celery send-step; flow-succeeded → outbox the Shopify

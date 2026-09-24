@@ -30,6 +30,11 @@ from src.application.services.partner_program import (
     program_enabled,
     set_program_enabled,
 )
+from src.application.services.partner_referrals import (
+    assign,
+    ensure_code,
+    referred_stores,
+)
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
 )
@@ -506,3 +511,148 @@ async def admin_statement_csv(
             )
         },
     )
+
+
+# ─── Referrals and the public directory ───────────────────────────
+
+
+class ReferralTermsRequest(BaseModel):
+    referral_bps: int = Field(ge=0, le=10_000)
+    referral_months: int = Field(ge=1, le=60)
+
+
+class AssignReferralRequest(BaseModel):
+    subdomain: str = Field(min_length=1, max_length=63)
+
+
+class DirectoryFlagsRequest(BaseModel):
+    verified: bool | None = None
+    directory_hidden: bool | None = None
+
+
+async def _audit_change(
+    db: AsyncSession, admin_id: UUID, action: str, a: PartnerAccountModel, old, new
+) -> None:
+    await AuditService(db).log(
+        event_type="admin.partner_program",
+        action=action,
+        resource_type="partner_account",
+        resource_id=str(a.id),
+        user_id=admin_id,
+        old_value=old,
+        new_value=new,
+    )
+
+
+@router.get("/{partner_id}/referrals", response_model=SuccessResponse[dict])
+async def list_referrals(
+    partner_id: UUID, db: Annotated[AsyncSession, Depends(get_db)]
+):
+    a = await _load(db, partner_id)
+    return SuccessResponse(
+        data={
+            "code": await ensure_code(db, a),
+            "referral_bps": a.referral_bps,
+            "referral_months": a.referral_months,
+            "stores": await referred_stores(db, a.id),
+        }
+    )
+
+
+@router.put(
+    "/{partner_id}/referral-terms",
+    response_model=SuccessResponse[AdminPartner],
+    dependencies=_STEP_UP,
+)
+async def put_referral_terms(
+    partner_id: UUID,
+    body: ReferralTermsRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """This partner's referral share and window. Applies to invoices paid
+    from now on; credits already written stay."""
+    a = await _load(db, partner_id)
+    old = {"referral_bps": a.referral_bps, "referral_months": a.referral_months}
+    a.referral_bps, a.referral_months = body.referral_bps, body.referral_months
+    await _audit_change(
+        db, admin_id, "partner_referral_terms", a, old, body.model_dump()
+    )
+    await db.flush()
+    return SuccessResponse(data=await _admin_view(db, a))
+
+
+@router.post(
+    "/{partner_id}/referrals",
+    response_model=SuccessResponse[dict],
+    dependencies=_STEP_UP,
+)
+async def assign_referral(
+    partner_id: UUID,
+    body: AssignReferralRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Attribute a store to this partner, replacing any earlier referrer."""
+    a = await _load(db, partner_id)
+    tenant_id = await db.scalar(
+        select(TenantModel.id).where(
+            TenantModel.subdomain == body.subdomain.strip().lower()
+        )
+    )
+    if tenant_id is None:
+        raise HTTPException(status_code=404, detail="Store not found")
+    await assign(db, tenant_id=tenant_id, partner_id=a.id)
+    await _audit_change(
+        db,
+        admin_id,
+        "partner_referral_assigned",
+        a,
+        None,
+        {"tenant_id": str(tenant_id)},
+    )
+    return SuccessResponse(data={"stores": await referred_stores(db, a.id)})
+
+
+@router.delete(
+    "/{partner_id}/referrals/{tenant_id}",
+    response_model=SuccessResponse[dict],
+    dependencies=_STEP_UP,
+)
+async def remove_referral(
+    partner_id: UUID,
+    tenant_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Detach a store from this partner. Credits already written stay."""
+    a = await _load(db, partner_id)
+    if not any(r["tenant_id"] == tenant_id for r in await referred_stores(db, a.id)):
+        raise HTTPException(status_code=404, detail="Referral not found")
+    await assign(db, tenant_id=tenant_id, partner_id=None)
+    await _audit_change(
+        db, admin_id, "partner_referral_removed", a, {"tenant_id": str(tenant_id)}, None
+    )
+    return SuccessResponse(data={"stores": await referred_stores(db, a.id)})
+
+
+@router.put(
+    "/{partner_id}/directory",
+    response_model=SuccessResponse[AdminPartner],
+    dependencies=_STEP_UP,
+)
+async def put_directory_flags(
+    partner_id: UUID,
+    body: DirectoryFlagsRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Grant or revoke the Verified badge; hide or restore the public profile."""
+    a = await _load(db, partner_id)
+    old = {"verified": a.verified, "directory_hidden": a.directory_hidden}
+    changes = body.model_dump(exclude_none=True)
+    for key, value in changes.items():
+        setattr(a, key, value)
+    await _audit_change(db, admin_id, "partner_directory_flags", a, old, changes)
+    await db.flush()
+    return SuccessResponse(data=await _admin_view(db, a))

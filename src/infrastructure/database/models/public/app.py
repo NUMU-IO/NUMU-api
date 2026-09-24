@@ -79,6 +79,13 @@ class AppModel(Base, UUIDMixin, TimestampMixin):
         JSONB, nullable=False, default=dict
     )
     category: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    #: A private (custom) app: installs on this one store only, never listed,
+    #: never reviewed, never billed by NUMU.
+    private_store_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
+        nullable=True,
+    )
 
 
 class AppInstallationModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
@@ -150,6 +157,24 @@ class AppUninstallModel(Base, UUIDMixin, TimestampMixin):
     purge_after: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class AppUninstallEventModel(Base, UUIDMixin, TimestampMixin):
+    """One uninstall of a Partner App. The installation row is deleted at
+    uninstall, so this is the only record the partner dashboard can count."""
+
+    __tablename__ = "app_uninstall_events"
+    __table_args__ = (
+        Index("ix_app_uninstall_events_app_created", "app_id", "created_at"),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    store_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
 
 
 class AppVersionModel(Base, UUIDMixin, TimestampMixin):

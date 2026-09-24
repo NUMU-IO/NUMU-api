@@ -61,6 +61,7 @@ from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
 )
 from src.infrastructure.database.models.public.wallet import WalletTransactionModel
+from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = get_logger(__name__)
 
@@ -203,15 +204,24 @@ def paid_through(sub: AppSubscriptionModel | None, now: datetime) -> bool:
     )
 
 
-def covers(sub: AppSubscriptionModel | None, now: datetime) -> bool:
-    """Whether the store may use the app at ``now``: a paid period, plus the
-    3-day grace after a lapse. A merchant who cancelled gets no grace."""
+def coverage_end(sub: AppSubscriptionModel | None) -> datetime | None:
+    """When the store stops being covered: the paid period's end plus the
+    3-day grace, or the bare period end once the merchant cancelled. None
+    when nothing is live. The entitlement resolver reads this too, so the
+    two can never disagree about the grace."""
     if sub is None or sub.status not in ("active", "past_due"):
-        return False
+        return None
     end = _aware(sub.current_period_end)
     if not (sub.status == "active" and sub.cancel_at_period_end):
         end += GRACE
-    return end > now
+    return end
+
+
+def covers(sub: AppSubscriptionModel | None, now: datetime) -> bool:
+    """Whether the store may use the app at ``now``: a paid period, plus the
+    3-day grace after a lapse. A merchant who cancelled gets no grace."""
+    end = coverage_end(sub)
+    return end is not None and end > now
 
 
 async def is_entitled(
@@ -258,6 +268,7 @@ async def subscribe(
     if paid_through(sub, now):
         if sub.cancel_at_period_end:
             sub.cancel_at_period_end = False  # "resume", free until the period ends
+            await TenantRepository(db).bump_entitlements_version(sub.tenant_id)
         return sub, False
 
     end = now + timedelta(days=CYCLE_DAYS[price.cycle])
@@ -295,6 +306,7 @@ async def subscribe(
     sub.usage_cap_cents = price.usage["cap_cents"] if price.usage else None
     sub.usage_unit_cents = price.usage.get("price_cents") if price.usage else None
     await db.flush()
+    await TenantRepository(db).bump_entitlements_version(installation.tenant_id)
     if charged:
         await _credit_partner(db, app, sub, price.price_cents, price.currency, key, now)
     logger.info(
@@ -379,6 +391,7 @@ async def cancel(
     if sub is not None and sub.status == "active":
         sub.cancel_at_period_end = True
         await db.flush()
+        await TenantRepository(db).bump_entitlements_version(sub.tenant_id)
     return sub
 
 
@@ -400,6 +413,7 @@ async def renew_due(
     """
     now = now or _now()
     stats = {"renewed": 0, "cancelled": 0, "past_due": 0}
+    changed: set[UUID] = set()
     rows = (
         (
             await db.execute(
@@ -417,6 +431,7 @@ async def renew_due(
         .all()
     )
     for sub in rows:
+        changed.add(sub.tenant_id)
         install = await db.get(AppInstallationModel, sub.installation_id)
         app = await db.get(AppModel, sub.app_id)
         live = (
@@ -476,6 +491,8 @@ async def renew_due(
                         period_end=_aware(sub.current_period_end).isoformat(),
                     )
                 )
+    for tenant_id in changed:
+        await TenantRepository(db).bump_entitlements_version(tenant_id)
     await db.flush()
     return stats
 
@@ -757,8 +774,8 @@ async def partner_balance(db: AsyncSession, partner_id: UUID) -> int:
 async def partner_payable(
     db: AsyncSession, partner_id: UUID, *, now: datetime | None = None
 ) -> int:
-    """What may be paid out now: the balance, minus sales still inside the
-    30-day hold. Never more than the balance."""
+    """What may be paid out now: the balance, minus sales and referral
+    credits still inside the 30-day hold. Never more than the balance."""
     cutoff = (now or _now()) - HOLD
     held = int(
         await db.scalar(
@@ -766,7 +783,7 @@ async def partner_payable(
                 func.coalesce(func.sum(PartnerLedgerEntryModel.amount_cents), 0)
             ).where(
                 PartnerLedgerEntryModel.partner_id == partner_id,
-                PartnerLedgerEntryModel.kind == "sale",
+                PartnerLedgerEntryModel.kind.in_(("sale", "referral")),
                 PartnerLedgerEntryModel.created_at > cutoff,
             )
         )
@@ -880,8 +897,8 @@ async def partner_statement(
     db: AsyncSession, partner_id: UUID, month: str
 ) -> dict[str, Any]:
     """One month of a partner's ledger. Every figure is signed as it moves
-    the balance, so ``closing = opening + net_sales + refunds + adjustments
-    + payouts``. Sales: what merchants paid (gross), NUMU's 20% (fees) and
+    the balance, so ``closing = opening + net_sales + referrals + refunds
+    + adjustments + payouts``. Sales: what merchants paid (gross), NUMU's 20% (fees) and
     the partner's 80% (net). Refunds reverse a sale's share."""
     start, end = month_bounds(month)
     opening = int(
@@ -914,6 +931,7 @@ async def partner_statement(
     refunds = [e for e in entries if is_refund(e)]
     others = [e for e in entries if e.kind == "adjustment" and not is_refund(e)]
     payouts = [e for e in entries if e.kind == "payout"]
+    referrals = [e for e in entries if e.kind == "referral"]
     apps = await app_labels(db, [e.app_id for e in entries])
     return {
         "month": month,
@@ -922,6 +940,7 @@ async def partner_statement(
         "gross_sales_cents": sum(e.gross_cents or 0 for e in sales),
         "platform_fees_cents": sum(e.platform_fee_cents or 0 for e in sales),
         "net_sales_cents": sum(e.amount_cents for e in sales),
+        "referrals_cents": sum(e.amount_cents for e in referrals),
         "refunds_cents": sum(e.amount_cents for e in refunds),
         "adjustments_cents": sum(e.amount_cents for e in others),
         "payouts_cents": sum(e.amount_cents for e in payouts),
@@ -948,6 +967,7 @@ STATEMENT_TOTALS = (
     "gross_sales_cents",
     "platform_fees_cents",
     "net_sales_cents",
+    "referrals_cents",
     "refunds_cents",
     "adjustments_cents",
     "payouts_cents",

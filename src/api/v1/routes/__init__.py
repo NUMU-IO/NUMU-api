@@ -80,6 +80,7 @@ from src.api.v1.routes.omnichannel import (
     threads_router,
 )
 from src.api.v1.routes.partner_apps import router as partner_apps_router
+from src.api.v1.routes.partner_portal import router as partner_portal_router
 from src.api.v1.routes.partners import router as partners_router
 from src.api.v1.routes.permissions.routes import router as permissions_router
 
@@ -260,6 +261,7 @@ api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 # Partner portal (apps plan Phase 2); 404 while the program is closed.
 api_router.include_router(partners_router)
 api_router.include_router(partner_apps_router)
+api_router.include_router(partner_portal_router)
 # Partner App OAuth (apps plan Phase 4).
 api_router.include_router(app_oauth_router)
 api_router.include_router(app_usage_router)

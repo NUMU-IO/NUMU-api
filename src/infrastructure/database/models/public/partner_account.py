@@ -14,7 +14,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID as PyUUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +32,7 @@ from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 PARTNER_STATUSES = ("pending", "approved", "rejected", "suspended")
 PARTNER_KINDS = ("individual", "company")
+PARTNER_ROLES = ("owner", "admin", "developer")
 
 
 class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
@@ -36,6 +46,7 @@ class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
             "kind IN ('individual', 'company')", name="ck_partner_accounts_kind"
         ),
         Index("ix_partner_accounts_status", "status"),
+        Index("uq_partner_accounts_referral_code", "referral_code", unique=True),
         {"schema": "public"},
     )
 
@@ -68,3 +79,91 @@ class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    #: What a referral link carries (``numueg.app/signup?ref=``). Minted on
+    #: first use; 10 characters, so it never collides with a lead's 8.
+    referral_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: Share of a referred merchant's plan payments, in basis points, for
+    #: ``referral_months`` after that merchant's first paid invoice.
+    referral_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    referral_months: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
+    #: Public "Hire an expert" profile, opt-in by the partner.
+    directory_listed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    #: logo_url, bio {ar, en}, services, languages, city.
+    directory_profile: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    #: Admin-granted badge, and the admin's override to hide a listing.
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    directory_hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+
+
+class PartnerReferralModel(Base, UUIDMixin, TimestampMixin):
+    """The partner that brought a merchant. One per tenant, first touch;
+    only an admin changes it afterwards. ``first_paid_at`` starts the
+    commission window."""
+
+    __tablename__ = "partner_referrals"
+    __table_args__ = (
+        Index("ix_partner_referrals_partner", "partner_id"),
+        {"schema": "public"},
+    )
+
+    partner_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.partner_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tenant_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    first_paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class PartnerMemberModel(Base, UUIDMixin, TimestampMixin):
+    """A teammate on a partner account. The account's own ``user_id`` is the
+    owner and has no row here. ``user_id`` stays null until the invite is
+    accepted; a user belongs to at most one partner."""
+
+    __tablename__ = "partner_members"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('owner', 'admin', 'developer')", name="ck_partner_members_role"
+        ),
+        CheckConstraint(
+            "status IN ('invited', 'active')", name="ck_partner_members_status"
+        ),
+        UniqueConstraint(
+            "partner_id", "email", name="uq_partner_members_partner_email"
+        ),
+        Index("ix_partner_members_email", "email"),
+        {"schema": "public"},
+    )
+
+    partner_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.partner_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    invited_by: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="invited")

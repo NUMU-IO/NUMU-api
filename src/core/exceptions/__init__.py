@@ -9,6 +9,9 @@ from src.core.exceptions.base import (
     EntityAlreadyExistsError,
     EntityNotFoundError,
     ExternalServiceError,
+    FeatureDisabledError,
+    FeatureNotAvailableError,
+    FeatureNotReleasedError,
     InsufficientStockError,
     InvalidCredentialsError,
     InvalidTokenError,
@@ -33,5 +36,8 @@ __all__ = [
     "InsufficientStockError",
     "PaymentError",
     "PlanLimitExceededError",
+    "FeatureNotAvailableError",
+    "FeatureDisabledError",
+    "FeatureNotReleasedError",
     "ExternalServiceError",
 ]

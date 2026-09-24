@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.partner_referrals import credit_invoice
 from src.core.entities.subscription_payment import (
     SubscriptionPaymentIntentStatus,
     SubscriptionPaymentPurpose,
@@ -140,18 +141,18 @@ async def activate_verified_subscription_payment(
         # the old one ended (mirrors the renewal task's period math).
         period_start = tenant.next_renewal_at or now
         period_end = period_start + _period_delta(intent.billing_cycle)
-        db.add(
-            BillingInvoiceModel(
-                tenant_id=tenant.id,
-                period_start=period_start,
-                period_end=period_end,
-                amount_cents=intent.amount_cents,
-                currency=intent.currency,
-                status="paid",
-                subscription_payment_intent_id=intent.id,
-                paid_at=now,
-            )
+        invoice = BillingInvoiceModel(
+            tenant_id=tenant.id,
+            period_start=period_start,
+            period_end=period_end,
+            amount_cents=intent.amount_cents,
+            currency=intent.currency,
+            status="paid",
+            subscription_payment_intent_id=intent.id,
+            paid_at=now,
         )
+        db.add(invoice)
+        await credit_invoice(db, invoice)
         tenant.plan = intent.plan_key
         tenant.billing_cycle = intent.billing_cycle
         tenant.next_renewal_at = period_end

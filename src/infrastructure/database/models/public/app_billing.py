@@ -166,7 +166,7 @@ class PartnerLedgerEntryModel(Base, UUIDMixin):
         ForeignKey("public.partner_accounts.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    #: sale (+ the partner's share) | payout (-) | adjustment (+/-)
+    #: sale (+ the partner's share) | referral (+) | payout (-) | adjustment (+/-)
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     #: sale only: what the merchant paid, and NUMU's fee out of it.
@@ -181,6 +181,12 @@ class PartnerLedgerEntryModel(Base, UUIDMixin):
     subscription_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("public.app_subscriptions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    #: referral only: the referred merchant whose plan payment earned it.
+    tenant_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="SET NULL"),
         nullable=True,
     )
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)

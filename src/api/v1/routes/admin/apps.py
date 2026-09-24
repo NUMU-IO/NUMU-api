@@ -140,6 +140,8 @@ class CatalogRow(BaseModel):
     #: The listing's price block (``plan``, localized label, and for
     #: ``recurring`` ``price_cents`` / ``cycle`` / ``currency``).
     pricing: dict[str, Any] | None = None
+    #: A private (custom) app: the one store it installs on.
+    private_store_id: UUID | None = None
 
 
 class ListingFlags(BaseModel):
@@ -334,6 +336,7 @@ async def catalog(db: Annotated[AsyncSession, Depends(get_db)]):
                 installs_active=active,
                 installs_total=total,
                 pricing=(a.manifest or {}).get("pricing"),
+                private_store_id=a.private_store_id,
             )
         )
     return SuccessResponse(data=rows)
@@ -349,6 +352,10 @@ async def set_listing_flags(
     app = await db.get(AppModel, app_id)
     if app is None:
         raise HTTPException(status_code=404, detail="App not found")
+    if app.private_store_id and body.catalog_visible:
+        raise HTTPException(
+            status_code=409, detail="A private app is never listed in the App Store."
+        )
     old = dict(app.listing_flags or {})
     app.listing_flags = {**old, **body.model_dump(exclude_none=True)}
     await AuditService(db).log(

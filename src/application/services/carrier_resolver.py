@@ -33,7 +33,12 @@ from src.application.services.carrier_registry import (
     default_carrier,
     get_spec,
 )
+from src.application.services.partner_carriers import (
+    is_app_carrier,
+    load_partner_carrier,
+)
 from src.core.exceptions import DomainException, ValidationError
+from src.infrastructure.database.connection import get_current_session
 
 # Backwards-compatible aliases. These are now *derived from* the
 # registry rather than hand-maintained — adding a carrier there is
@@ -186,12 +191,28 @@ def map_carrier_status(carrier: str, raw_status: str | None) -> Any:
     return spec.map_status(raw_status)
 
 
-async def service_for_carrier(carrier: str, store_settings: dict | None) -> Any:
+async def service_for_carrier(
+    carrier: str,
+    store_settings: dict | None,
+    *,
+    store_id: Any = None,
+    db: Any = None,
+) -> Any:
     """Resolve the provider for a carrier slug.
 
+    ``app:<slug>`` resolves to the store's installed shipping app, which
+    needs ``store_id`` (and a session, the request's by default).
+
     Raises:
-        UnknownCarrierError: the slug has no registry entry.
+        UnknownCarrierError: the slug has no registry entry or installed app.
     """
+    if is_app_carrier(carrier):
+        partner = await load_partner_carrier(
+            db or get_current_session(), store_id, carrier
+        )
+        if partner is None:
+            raise UnknownCarrierError(carrier)
+        return partner
     spec = spec_for(carrier)
     return await spec.factory(store_settings or {})
 
@@ -202,7 +223,9 @@ async def service_for_shipment(shipment: Any, store_settings: dict | None) -> An
     This is the fix for the P0 bug: every carrier action must dispatch on
     ``shipment.carrier``, never on a default.
     """
-    return await service_for_carrier(shipment.carrier, store_settings)
+    return await service_for_carrier(
+        shipment.carrier, store_settings, store_id=getattr(shipment, "store_id", None)
+    )
 
 
 def supports(carrier: str, operation: str) -> bool:
@@ -251,7 +274,12 @@ def capability(service: Any, operation: str, carrier: str) -> Any:
     method but hasn't been verified against the live API is still gated.
     The attribute check stays as a backstop for the base contract.
     """
-    if not supports(carrier, operation):
+    allowed = (
+        service.supports(operation)
+        if is_app_carrier(carrier)
+        else supports(carrier, operation)
+    )
+    if not allowed:
         raise CarrierCapabilityError(carrier, operation)
     fn = getattr(service, operation, None)
     if fn is None or not callable(fn):

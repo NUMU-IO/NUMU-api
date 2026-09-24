@@ -30,12 +30,15 @@ from src.api.responses import SuccessResponse
 from src.application.services.app_billing import partner_statement, statement_csv
 from src.application.services.partner_program import (
     AGREEMENT_VERSION,
+    MANAGER_ROLES,
     MAX_DEV_STORES,
     partner_for_user,
+    partner_membership,
 )
 from src.core.logging import get_logger
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
+    PartnerMemberModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.user import UserModel
@@ -71,10 +74,26 @@ class PartnerAccountOut(BaseModel):
     review_notes: dict | None
     reviewed_at: datetime | None
     created_at: datetime
+    referral_bps: int
+    referral_months: int
+    directory_listed: bool
+    directory_profile: dict | None
+    verified: bool
+    directory_hidden: bool
+
+
+class PartnerInvitationOut(BaseModel):
+    id: UUID
+    partner_name: str
+    role: str
 
 
 class PartnerMe(BaseModel):
     account: PartnerAccountOut | None
+    #: The caller's role on ``account``: owner, admin or developer.
+    role: str | None = None
+    #: Pending team invites addressed to the caller's email.
+    invitations: list[PartnerInvitationOut] = []
     #: The agreement a new application accepts. An approved partner on an
     #: older version must accept again (``needs_agreement``).
     agreement_version: str
@@ -91,6 +110,22 @@ class _Profile(BaseModel):
     support_phone: str | None = Field(default=None, max_length=40)
 
 
+class DirectoryProfile(BaseModel):
+    """What the public "Hire an expert" profile shows, besides the display
+    name, website and the partner's published apps and themes."""
+
+    logo_url: str | None = Field(default=None, max_length=2048, pattern=r"^https://")
+    bio_ar: str | None = Field(default=None, max_length=600)
+    bio_en: str | None = Field(default=None, max_length=600)
+    services: list[Literal["apps", "themes", "setup", "marketing"]] = Field(
+        default_factory=list, max_length=4
+    )
+    languages: list[Literal["ar", "en", "fr"]] = Field(
+        default_factory=list, max_length=3
+    )
+    city: str | None = Field(default=None, max_length=80)
+
+
 class ApplyRequest(_Profile):
     kind: Literal["individual", "company"]
     #: Must be the current AGREEMENT_VERSION, accepted explicitly.
@@ -100,7 +135,12 @@ class ApplyRequest(_Profile):
 
 #: Profile fields a partner can change but not clear (NOT NULL columns). An
 #: explicit null on any other field clears it (e.g. ``website_url``).
-_REQUIRED_PROFILE = frozenset({"display_name", "country", "support_email"})
+_REQUIRED_PROFILE = frozenset({
+    "display_name",
+    "country",
+    "support_email",
+    "directory_listed",
+})
 
 
 class UpdateProfileRequest(BaseModel):
@@ -112,6 +152,9 @@ class UpdateProfileRequest(BaseModel):
     support_phone: str | None = Field(default=None, max_length=40)
     #: Re-accept a newer agreement.
     accept_agreement_version: str | None = None
+    #: Opt in to (or out of) the public partner directory.
+    directory_listed: bool | None = None
+    directory_profile: DirectoryProfile | None = None
 
 
 class DevStoreOut(BaseModel):
@@ -172,10 +215,34 @@ async def get_me(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    account = await partner_for_user(db, user_id)
+    found = await partner_membership(db, user_id)
+    account, role = found if found else (None, None)
+    email = await db.scalar(select(UserModel.email).where(UserModel.id == user_id))
+    invites = (
+        (
+            await db.execute(
+                select(PartnerMemberModel, PartnerAccountModel.display_name)
+                .join(
+                    PartnerAccountModel,
+                    PartnerAccountModel.id == PartnerMemberModel.partner_id,
+                )
+                .where(
+                    func.lower(PartnerMemberModel.email) == (email or "").lower(),
+                    PartnerMemberModel.status == "invited",
+                )
+            )
+        ).all()
+        if email and found is None
+        else []
+    )
     return SuccessResponse(
         data=PartnerMe(
             account=_out(account) if account else None,
+            role=role,
+            invitations=[
+                PartnerInvitationOut(id=m.id, partner_name=name, role=m.role)
+                for m, name in invites
+            ],
             agreement_version=AGREEMENT_VERSION,
             needs_agreement=account is not None
             and account.agreement_version != AGREEMENT_VERSION,
@@ -251,9 +318,17 @@ async def update_me(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    account = await partner_for_user(db, user_id)
-    if account is None:
+    found = await partner_membership(db, user_id)
+    if found is None:
         raise HTTPException(status_code=404, detail="No partner account")
+    account, role = found
+    if role not in MANAGER_ROLES or (
+        body.accept_agreement_version is not None and role != "owner"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the partner's owner or an admin can do this.",
+        )
     changes = body.model_dump(exclude_unset=True, exclude={"accept_agreement_version"})
     for key, value in changes.items():
         if value is None and key in _REQUIRED_PROFILE:
