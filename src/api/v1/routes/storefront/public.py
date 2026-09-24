@@ -863,37 +863,13 @@ async def _read_installed_apps(session, *, store_id) -> list[dict]:
     hiccup must degrade to "no apps installed" — themes then render their own
     markup — rather than take down the storefront.
     """
-    from sqlalchemy import select as _select
-
-    from src.api.v1.routes.storefront.app_public import public_settings
-    from src.core.entities.app import AppStatus
-    from src.infrastructure.database.models.public.app import (
-        AppInstallationModel,
-        AppModel,
+    from src.api.v1.routes.storefront.app_public import (
+        public_settings,
+        visible_installs,
     )
 
     try:
-        from src.application.services.numu_apps import NUMU_APPS
-        from src.application.services.partner_program import partner_apps_enabled
-
-        stmt = (
-            _select(AppModel, AppInstallationModel)
-            .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
-            .where(
-                AppInstallationModel.store_id == store_id,
-                AppInstallationModel.is_enabled.is_(True),
-                # A Partner App mid-consent has no token yet: not live.
-                AppInstallationModel.status == "active",
-                AppModel.status != AppStatus.SUSPENDED,
-            )
-        )
-        if not await partner_apps_enabled(session):
-            # The Partner-apps kill switch: only NUMU Apps stay on storefronts.
-            stmt = stmt.where(AppModel.developer_id.is_(None))
-        # WhatsApp and the Inbox are hub-only NUMU Apps: nothing on a storefront
-        # renders them, and listing them here would tell every visitor which
-        # tools the merchant uses (and ignore the ff_numu_apps rollout flag).
-        stmt = stmt.where(AppModel.slug.notin_(NUMU_APPS))
+        stmt = await visible_installs(session, store_id)
         rows = (await session.execute(stmt)).all()
     except Exception:  # pragma: no cover - defensive; see docstring
         from src.core.logging import get_logger
