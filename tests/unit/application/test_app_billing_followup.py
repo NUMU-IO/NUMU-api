@@ -47,7 +47,7 @@ async def _subscribe(session, install, app, now=NOW, code=None):
 
 
 async def _coupon(session, partner, app, **kw):
-    body = portal.CouponCreate(app_id=app.id, code=kw.pop("code", "launch"), **kw)
+    body = portal.AppCouponCreate(app_id=app.id, code=kw.pop("code", "launch"), **kw)
     return (await portal.create_coupon(body, _ctx(partner), session)).data
 
 
@@ -289,7 +289,7 @@ async def test_a_partner_manages_and_sees_only_their_own(test_session):
     with pytest.raises(HTTPException) as exc:
         await portal.update_coupon(
             UUID(created["id"]),
-            portal.CouponUpdate(active=False),
+            portal.AppCouponUpdate(active=False),
             _ctx(partner_b),
             test_session,
         )

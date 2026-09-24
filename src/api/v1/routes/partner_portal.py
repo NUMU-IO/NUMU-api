@@ -632,7 +632,7 @@ async def list_subscriptions(
 # ─── Coupons ──────────────────────────────────────────────────────
 
 
-class CouponCreate(BaseModel):
+class AppCouponCreate(BaseModel):
     app_id: UUID
     code: str = Field(min_length=3, max_length=40)
     percent_off: int | None = Field(default=None, ge=1, le=100)
@@ -652,7 +652,7 @@ class CouponCreate(BaseModel):
         return self
 
 
-class CouponUpdate(BaseModel):
+class AppCouponUpdate(BaseModel):
     active: bool
 
 
@@ -710,7 +710,7 @@ async def list_coupons(
     operation_id="create_partner_coupon",
 )
 async def create_coupon(
-    body: CouponCreate,
+    body: AppCouponCreate,
     ctx: Annotated[PartnerContext, Depends(require_partner_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
@@ -750,7 +750,7 @@ async def create_coupon(
 )
 async def update_coupon(
     coupon_id: UUID,
-    body: CouponUpdate,
+    body: AppCouponUpdate,
     ctx: Annotated[PartnerContext, Depends(require_partner_manager)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
