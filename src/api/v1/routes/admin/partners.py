@@ -32,6 +32,10 @@ from src.application.services.app_billing import (
     statement_csv,
 )
 from src.application.services.audit_service import AuditService
+from src.application.services.partner_notifications import (
+    emit_partner_notification,
+    post_platform_notice,
+)
 from src.application.services.partner_program import (
     program_enabled,
     set_program_enabled,
@@ -45,6 +49,7 @@ from src.infrastructure.database.models.public.app import AppModel
 from src.infrastructure.database.models.public.app_billing import AppCouponModel
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
+    PartnerNotificationModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.user import UserModel
@@ -221,6 +226,81 @@ async def put_partner_billing(
 
 
 # ─── Queue ────────────────────────────────────────────────────────
+
+
+# ─── Platform notices (changelog, deprecations) ───────────────────
+
+
+class NoticeRequest(BaseModel):
+    notice_kind: Literal["changelog", "deprecation"]
+    title_ar: str = Field(min_length=3, max_length=200)
+    title_en: str = Field(min_length=3, max_length=200)
+    body_ar: str = Field(min_length=3, max_length=4000)
+    body_en: str = Field(min_length=3, max_length=4000)
+    link: str | None = Field(default=None, max_length=512)
+
+    @model_validator(mode="after")
+    def _https_link(self):
+        if self.link and not self.link.startswith("https://"):
+            raise ValueError("link must be an https:// URL")
+        return self
+
+
+@router.get("/notices", response_model=SuccessResponse[list[dict]])
+async def list_notices(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+):
+    """Notices posted to every partner, newest first, with their reach."""
+    rows = (
+        await db.scalars(
+            select(PartnerNotificationModel)
+            .where(PartnerNotificationModel.kind == "platform_notice")
+            .order_by(PartnerNotificationModel.created_at.desc())
+        )
+    ).all()
+    notices: dict[str, dict] = {}
+    # ponytail: groups every notice row in Python (rows = notices x partners);
+    # fine at today's partner count, move to a notices table if it grows.
+    for r in rows:
+        key = r.data.get("notice_id")
+        if key in notices:
+            notices[key]["recipients"] += 1
+        elif len(notices) < limit:
+            notices[key] = {
+                **{
+                    k: r.data.get(k)
+                    for k in ("notice_id", "notice_kind", "title", "body", "link")
+                },
+                "created_at": r.created_at,
+                "recipients": 1,
+            }
+    return SuccessResponse(data=list(notices.values()))
+
+
+@router.post("/notices", response_model=SuccessResponse[dict], dependencies=_STEP_UP)
+async def post_notice(
+    body: NoticeRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Post a changelog or API deprecation notice to every approved partner."""
+    notice_id, recipients = await post_platform_notice(
+        db,
+        notice_kind=body.notice_kind,
+        title={"ar": body.title_ar, "en": body.title_en},
+        body={"ar": body.body_ar, "en": body.body_en},
+        link=body.link,
+    )
+    await AuditService(db).log(
+        event_type="admin.partner_program",
+        action="partner_notice_posted",
+        resource_type="partner_notice",
+        resource_id=str(notice_id),
+        user_id=admin_id,
+        new_value={"notice_kind": body.notice_kind, "recipients": recipients},
+    )
+    return SuccessResponse(data={"notice_id": str(notice_id), "recipients": recipients})
 
 
 @router.get("", response_model=SuccessResponse[list[AdminPartner]])
@@ -445,6 +525,16 @@ async def payout(
         resource_id=str(a.id),
         user_id=admin_id,
         new_value={"amount_cents": body.amount_cents, "reference": entry.reference},
+    )
+    await emit_partner_notification(
+        db,
+        partner_id=a.id,
+        kind="payout_recorded",
+        data={
+            "amount_cents": body.amount_cents,
+            "currency": entry.currency,
+            "reference": entry.reference,
+        },
     )
     await db.flush()
     return SuccessResponse(

@@ -33,6 +33,7 @@ from src.api.dependencies import get_current_user_id, verify_store_ownership
 from src.api.dependencies.feature_flags import _read_feature_flags, is_flag_enabled
 from src.api.dependencies.repositories import get_store_repository
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.app_reviews import rating_summaries
 from src.application.services.app_billing import (
     CouponError,
     app_price,
@@ -107,6 +108,10 @@ class AppListing(BaseModel):
     pricing: dict[str, Any] | None = None
     languages: list[str] = []
     compatibility: dict[str, Any] | None = None
+    #: A Partner App's reviewed listing: a YouTube/Vimeo link and search
+    #: keywords per language.
+    video_url: str | None = None
+    keywords: dict[str, list[str]] = {}
     #: Partner App opted in to render inside the hub (``/apps/<slug>/app``).
     embedded: bool = False
 
@@ -129,6 +134,8 @@ def _listing(manifest: dict | None) -> AppListing:
         compatibility=(
             m.get("compatibility") if isinstance(m.get("compatibility"), dict) else None
         ),
+        video_url=m.get("video_url") if isinstance(m.get("video_url"), str) else None,
+        keywords=m.get("keywords") if isinstance(m.get("keywords"), dict) else {},
         embedded=bool((m.get("app") or {}).get("embedded")),
     )
 
@@ -144,6 +151,8 @@ class AppCatalogEntry(BaseModel):
     #: Partner Apps install through consent: what the hub needs to open it
     #: (``client_id``, the first registered ``redirect_uri``, the scopes).
     connect: dict[str, Any] | None = None
+    rating: float | None = None
+    reviews_count: int = 0
 
 
 class AppInstallation(BaseModel):
@@ -309,6 +318,7 @@ async def list_catalog(store_id: UUID):
             or_(AppModel.developer_id.is_(None), partner_listed),
         )
         rows = (await session.execute(stmt)).scalars().all()
+        ratings = await rating_summaries(session, [a.id for a in rows])
         client_ids = dict(
             (
                 await session.execute(
@@ -338,6 +348,8 @@ async def list_catalog(store_id: UUID):
                 blocks=(a.manifest or {}).get("blocks", []) or [],
                 listing=_listing(a.manifest),
                 connect=connect(a),
+                rating=ratings.get(a.id, (None, 0))[0],
+                reviews_count=ratings.get(a.id, (None, 0))[1],
             )
             for a in rows
         ],

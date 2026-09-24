@@ -19,12 +19,15 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
     Index,
+    Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -184,6 +187,52 @@ class AppUninstallEventModel(Base, UUIDMixin, TimestampMixin):
     reason_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
+class AppRatingModel(Base, UUIDMixin, TimestampMixin):
+    """One merchant's rating of an app: one per store, with at most one
+    public reply from the app's partner. Hidden reviews leave the listing and
+    the aggregate; ``reported_at`` puts a review in the admin queue."""
+
+    __tablename__ = "app_ratings"
+    __table_args__ = (
+        UniqueConstraint("app_id", "store_id", name="uq_app_ratings_app_store"),
+        CheckConstraint("rating BETWEEN 1 AND 5", name="ck_app_ratings_rating"),
+        Index("ix_app_ratings_app_created", "app_id", "created_at"),
+        Index(
+            "ix_app_ratings_reported",
+            "reported_at",
+            postgresql_where="reported_at IS NOT NULL",
+        ),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    store_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reply_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    replied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    report_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
 class AppVersionModel(Base, UUIDMixin, TimestampMixin):
     """One uploaded version of a Partner App: a validated ``numu.app.json``.
 
@@ -301,4 +350,83 @@ class AppAccessTokenModel(Base, UUIDMixin):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AppListingModel(Base, UUIDMixin, TimestampMixin):
+    """A Partner App's store listing, reviewed apart from its manifest.
+
+    ``content`` is ``ListingContent`` (name, tagline, description,
+    screenshots, video_url, category, keywords). ``draft → submitted →
+    in_review → approved | changes_requested | rejected → live →
+    superseded``. A listing submitted with a version (``version_id``) goes
+    live when that version is published; one submitted on its own goes live
+    when approved.
+    """
+
+    __tablename__ = "app_listings"
+    __table_args__ = (
+        Index("ix_app_listings_app_status", "app_id", "status"),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    version_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AppReviewModel(Base, UUIDMixin, TimestampMixin):
+    """One review round of a Partner App: a version, a listing, or both.
+
+    Every submission opens a new round, so a resubmission after
+    ``changes_requested`` keeps the earlier rounds as history. ``notes`` are
+    shown to the partner ({"ar", "en"}); ``internal_note`` never is.
+    """
+
+    __tablename__ = "app_reviews"
+    __table_args__ = (
+        Index("ix_app_reviews_status_submitted", "status", "submitted_at"),
+        Index("ix_app_reviews_app", "app_id"),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_versions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    listing_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_listings.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    round: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    #: submitted | in_review | approved | changes_requested | rejected
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="submitted")
+    checklist: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    notes: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    internal_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewer_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )

@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.app_reviews import rating_summaries
 from src.application.services.app_billing import app_price, quote_for, trial_available
 from src.application.services.app_manifest import app_subscriptions
 from src.application.services.app_tokens import (
@@ -92,6 +93,8 @@ class ConsentApp(BaseModel):
     #: ``trial_available`` (this store has not had the app's free trial).
     pricing: dict | None
     privacy_policy_url: str | None
+    rating: float | None = None
+    reviews_count: int = 0
     #: A custom app a partner built for this one store.
     private: bool = False
 
@@ -231,6 +234,9 @@ async def authorize(
     )
     price = app_price(app)
     vat = (await quote_for(db, app, price.price_cents, None)).vat_cents if price else 0
+    rating, reviews_count = (await rating_summaries(db, [app.id])).get(
+        app.id, (None, 0)
+    )
     return SuccessResponse(
         data=Consent(
             app=ConsentApp(
@@ -248,6 +254,8 @@ async def authorize(
                     "trial_available": await trial_available(db, store.id, app),
                 },
                 privacy_policy_url=(m.get("app") or {}).get("privacy_policy_url"),
+                rating=rating,
+                reviews_count=reviews_count,
                 private=app.private_store_id is not None,
             ),
             store_id=store.id,
