@@ -5,7 +5,7 @@ Status: V1 built 2026-09-24 (NUMU-api `feat/entitlements-v1`, numo-merchant-hub 
 Where V1 differs from this design:
 
 - Phases 0 and 1 of §14 shipped together, without the shadow week. `tests/unit/test_entitlements_seed.py` pins the seed to `PLAN_LIMITS` instead, so the only intended behaviour change is D1.
-- D1 is decided and D6 applied (§22). D2 to D5 are still open, so the order cap stays on the hub routes and webhooks still read `PLAN_LIMITS`.
+- D1 is decided; D2 and D6 are applied (§22). D3 to D5 are still open, so webhooks still read `PLAN_LIMITS`.
 - The hub opens the upgrade dialog from `showError` as well as from the mutation cache, so a caller with its own `onError` still gets it.
 
 What was run while designing (Appendix A has the details):
@@ -2851,7 +2851,7 @@ def downgrade() -> None:
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | Which Starter is true: your prompt (unlimited products, 100 orders a month) or the code (100 products, unlimited orders)? | **Decided 2026-09-24:** unlimited products; orders stay unlimited. Seeded that way, and editable per plan in the admin (Features & plans, or the old Plan limits page, which now writes the catalog) |
-| D2 | What does "over the order limit" mean? | Never block checkout. Soft everywhere, notify once, and bill overage from the wallet in V2 |
+| D2 | What does "over the order limit" mean? | **Applied 2026-09-24:** no order is refused for the monthly limit, including in the hub. The first order past it in a month writes one important `plan.orders_over_limit` notification. Overage billing from the wallet is V2 |
 | D3 | Webhooks on Starter: deliver them, or fold them into `api_access`? | Fold them in. That is today's actual delivery behaviour, so no merchant loses anything |
 | D4 | Enforce the fields that are never enforced (staff, custom domain, discount codes, multi-warehouse, product subscriptions)? | Yes, one at a time, each with a grandfather query and a count first |
 | D5 | Abandoned-cart recovery as Pro-only? Everyone has it today | If yes, grandfather every current user |

@@ -46,24 +46,6 @@ def require_product_limit():
     return _check
 
 
-def require_order_limit():
-    """Refuse a hub-created order past the monthly order limit.
-
-    Hub routes only, as before: storefront checkout, imports and TikTok are
-    not blocked, and whether they should be is decision D2.
-    """
-
-    async def _check(
-        store_id: UUID,
-        session: Annotated[AsyncSession, Depends(get_db)],
-    ) -> None:
-        tenant = await _store_tenant(store_id, session)
-        if tenant is not None:
-            await EntitlementService(session).check_quota(tenant, "orders_per_month")
-
-    return _check
-
-
 def require_webhook_feature():
     """Block webhook creation on plans without ``webhooks_enabled``.
 

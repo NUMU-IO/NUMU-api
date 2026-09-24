@@ -28,7 +28,6 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
-from src.api.dependencies.plan import require_order_limit
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_network_reputation_repository,
@@ -421,7 +420,6 @@ async def mark_abandoned_checkout_recovered(
     response_model=SuccessResponse[AbandonedCheckoutResponse],
     summary="Turn an abandoned checkout into a real COD order",
     operation_id="convert_abandoned_checkout",
-    dependencies=[Depends(require_order_limit())],
 )
 async def convert_abandoned_checkout(
     checkout_id: Annotated[UUID, Path(description="Abandoned-checkout ID")],
