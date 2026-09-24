@@ -1,7 +1,7 @@
 """Partner analytics: uninstall reasons and install date on uninstall events.
 
 Revision ID: partner_analytics_20260924
-Revises: partner_members_20260924
+Revises: merge_heads_20260925
 Create Date: 2026-09-24
 
 Additive, three nullable columns on ``app_uninstall_events``:
@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "partner_analytics_20260924"
-down_revision: str | Sequence[str] | None = "partner_members_20260924"
+down_revision: str | Sequence[str] | None = "merge_heads_20260925"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
