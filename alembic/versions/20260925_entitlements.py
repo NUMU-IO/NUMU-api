@@ -2,7 +2,7 @@
 
 Revision ID: entitlements_20260925
 Revises: kashier_card_token_20260923
-Create Date: 2026-09-25
+Create Date: 2026-09-24
 
 Replaces the feature half of PLAN_LIMITS with a catalog the resolver reads
 (docs/entitlements-design.md). The seed is a literal snapshot of PLAN_LIMITS
@@ -12,7 +12,7 @@ day that code changes. Admin edits made through /admin/plan-limits
 it runs with today, except where a decision below changes them.
 
 Decisions applied here:
-  D1 (2026-09-25): Starter gets unlimited products; orders stay unlimited.
+  D1 (2026-09-24): Starter gets unlimited products; orders stay unlimited.
   D6: ``beta`` (written by public/beta.py, defined nowhere) gets trial's
       grants, which is what it silently got before.
 """
@@ -28,146 +28,6 @@ revision: str = "entitlements_20260925"
 down_revision: str | None = "kashier_card_token_20260923"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
-
-VALUE_SHAPE = """CASE jsonb_typeof({col})
-            WHEN 'boolean' THEN true
-            WHEN 'number'  THEN {col}::numeric >= 0
-                            AND {col}::numeric = trunc({col}::numeric)
-            WHEN 'string'  THEN {col} = '"unlimited"'::jsonb
-            ELSE false
-        END"""
-
-DDL = [
-    f"""
-CREATE TABLE IF NOT EXISTS public.features (
-    key             varchar(64)  PRIMARY KEY CHECK (key ~ '^[a-z][a-z0-9_]*$'),
-    name            varchar(120) NOT NULL,
-    name_ar         varchar(120) NOT NULL,
-    description     text,
-    category        varchar(40),
-    kind            varchar(10)  NOT NULL CHECK (kind IN ('boolean', 'limit')),
-    default_value   jsonb        NOT NULL,
-    usage           varchar(10)  CHECK (usage IN ('count', 'counter')),
-    period          varchar(10)  CHECK (period IN ('day', 'month')),
-    enforcement     varchar(10)  NOT NULL DEFAULT 'hard'
-                                 CHECK (enforcement IN ('hard', 'soft')),
-    unit            varchar(20),
-    is_enabled      boolean      NOT NULL DEFAULT true,
-    disabled_reason text,
-    created_at      timestamptz  NOT NULL DEFAULT now(),
-    updated_at      timestamptz  NOT NULL DEFAULT now(),
-    CONSTRAINT ck_features_default_value CHECK (
-        {VALUE_SHAPE.format(col="default_value")}),
-    CONSTRAINT ck_features_usage_only_on_limits
-        CHECK (kind = 'limit' OR (usage IS NULL AND period IS NULL)),
-    CONSTRAINT ck_features_period_needs_usage
-        CHECK (period IS NULL OR usage IS NOT NULL)
-)
-""",
-    f"""
-CREATE TABLE IF NOT EXISTS public.plan_entitlements (
-    plan_key    varchar(64) NOT NULL,
-    feature_key varchar(64) NOT NULL
-                REFERENCES public.features (key) ON DELETE CASCADE,
-    value       jsonb       NOT NULL,
-    updated_by  uuid        REFERENCES public.users (id) ON DELETE SET NULL,
-    updated_at  timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (plan_key, feature_key),
-    CONSTRAINT ck_plan_entitlements_value CHECK (
-        {VALUE_SHAPE.format(col="value")})
-)
-""",
-    f"""
-CREATE TABLE IF NOT EXISTS public.entitlement_overrides (
-    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   uuid        NOT NULL
-                REFERENCES public.tenants (id) ON DELETE CASCADE,
-    feature_key varchar(64) NOT NULL
-                REFERENCES public.features (key) ON DELETE CASCADE,
-    value       jsonb       NOT NULL,
-    starts_at   timestamptz NOT NULL DEFAULT now(),
-    expires_at  timestamptz,
-    source      varchar(20) NOT NULL CHECK (source IN
-                ('support', 'sales', 'promotion', 'beta', 'contract',
-                 'testing', 'migration')),
-    reason      text        NOT NULL CHECK (length(btrim(reason)) >= 3),
-    created_by  uuid        REFERENCES public.users (id) ON DELETE SET NULL,
-    created_at  timestamptz NOT NULL DEFAULT now(),
-    revoked_at  timestamptz,
-    revoked_by  uuid        REFERENCES public.users (id) ON DELETE SET NULL,
-    CONSTRAINT ck_entitlement_overrides_window
-        CHECK (expires_at IS NULL OR expires_at > starts_at),
-    CONSTRAINT ck_entitlement_overrides_value CHECK (
-        {VALUE_SHAPE.format(col="value")})
-)
-""",
-    """
-CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlement_overrides_live
-    ON public.entitlement_overrides (tenant_id, feature_key)
-    WHERE revoked_at IS NULL
-""",
-    """
-CREATE TABLE IF NOT EXISTS public.feature_flags (
-    key             varchar(64) PRIMARY KEY CHECK (key ~ '^[a-z][a-z0-9_]*$'),
-    description     text        NOT NULL,
-    owner           varchar(120),
-    feature_key     varchar(64)
-                    REFERENCES public.features (key) ON DELETE SET NULL,
-    enabled         boolean     NOT NULL DEFAULT false,
-    rollout_percent smallint    NOT NULL DEFAULT 0
-                    CHECK (rollout_percent BETWEEN 0 AND 100),
-    created_at      timestamptz NOT NULL DEFAULT now(),
-    updated_at      timestamptz NOT NULL DEFAULT now()
-)
-""",
-    """
-CREATE TABLE IF NOT EXISTS public.feature_flag_targets (
-    flag_key   varchar(64) NOT NULL
-               REFERENCES public.feature_flags (key) ON DELETE CASCADE,
-    tenant_id  uuid        NOT NULL
-               REFERENCES public.tenants (id) ON DELETE CASCADE,
-    enabled    boolean     NOT NULL DEFAULT true,
-    expires_at timestamptz,
-    reason     text,
-    created_by uuid        REFERENCES public.users (id) ON DELETE SET NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (flag_key, tenant_id)
-)
-""",
-    """
-CREATE INDEX IF NOT EXISTS ix_feature_flag_targets_tenant
-    ON public.feature_flag_targets (tenant_id)
-""",
-    """
-CREATE TABLE IF NOT EXISTS public.usage_counters (
-    tenant_id    uuid        NOT NULL
-                 REFERENCES public.tenants (id) ON DELETE CASCADE,
-    feature_key  varchar(64) NOT NULL
-                 REFERENCES public.features (key) ON DELETE CASCADE,
-    period_start timestamptz NOT NULL,
-    used         bigint      NOT NULL DEFAULT 0 CHECK (used >= 0),
-    updated_at   timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant_id, feature_key, period_start)
-)
-""",
-    """
-ALTER TABLE public.tenants
-    ADD COLUMN IF NOT EXISTS entitlements_version integer NOT NULL DEFAULT 1
-""",
-    """
--- Supabase serves `public` over its Data API. These rows decide what a
--- merchant may use, so no role but the API's own may touch them.
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-        REVOKE ALL ON public.features, public.plan_entitlements,
-            public.entitlement_overrides, public.feature_flags,
-            public.feature_flag_targets, public.usage_counters
-            FROM anon, authenticated;
-    END IF;
-END $$
-""",
-]
 
 U = "unlimited"
 
@@ -322,9 +182,175 @@ def seed_rows(overrides: dict) -> list[tuple[str, str, object]]:
 
 
 def upgrade() -> None:
-    # asyncpg runs one statement per execute.
-    for statement in DDL:
-        op.execute(statement)
+    # asyncpg runs one statement per execute, and CI's migration safety
+    # check only reads literal SQL.
+    op.execute(
+        """
+CREATE TABLE IF NOT EXISTS public.features (
+    key             varchar(64)  PRIMARY KEY CHECK (key ~ '^[a-z][a-z0-9_]*$'),
+    name            varchar(120) NOT NULL,
+    name_ar         varchar(120) NOT NULL,
+    description     text,
+    category        varchar(40),
+    kind            varchar(10)  NOT NULL CHECK (kind IN ('boolean', 'limit')),
+    default_value   jsonb        NOT NULL,
+    usage           varchar(10)  CHECK (usage IN ('count', 'counter')),
+    period          varchar(10)  CHECK (period IN ('day', 'month')),
+    enforcement     varchar(10)  NOT NULL DEFAULT 'hard'
+                                 CHECK (enforcement IN ('hard', 'soft')),
+    unit            varchar(20),
+    is_enabled      boolean      NOT NULL DEFAULT true,
+    disabled_reason text,
+    created_at      timestamptz  NOT NULL DEFAULT now(),
+    updated_at      timestamptz  NOT NULL DEFAULT now(),
+    CONSTRAINT ck_features_default_value CHECK (
+        CASE jsonb_typeof(default_value)
+            WHEN 'boolean' THEN true
+            WHEN 'number'  THEN default_value::numeric >= 0
+                            AND default_value::numeric = trunc(default_value::numeric)
+            WHEN 'string'  THEN default_value = '"unlimited"'::jsonb
+            ELSE false
+        END),
+    CONSTRAINT ck_features_usage_only_on_limits
+        CHECK (kind = 'limit' OR (usage IS NULL AND period IS NULL)),
+    CONSTRAINT ck_features_period_needs_usage
+        CHECK (period IS NULL OR usage IS NOT NULL)
+)
+"""
+    )
+    op.execute(
+        """
+CREATE TABLE IF NOT EXISTS public.plan_entitlements (
+    plan_key    varchar(64) NOT NULL,
+    feature_key varchar(64) NOT NULL
+                REFERENCES public.features (key) ON DELETE CASCADE,
+    value       jsonb       NOT NULL,
+    updated_by  uuid        REFERENCES public.users (id) ON DELETE SET NULL,
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (plan_key, feature_key),
+    CONSTRAINT ck_plan_entitlements_value CHECK (
+        CASE jsonb_typeof(value)
+            WHEN 'boolean' THEN true
+            WHEN 'number'  THEN value::numeric >= 0
+                            AND value::numeric = trunc(value::numeric)
+            WHEN 'string'  THEN value = '"unlimited"'::jsonb
+            ELSE false
+        END)
+)
+"""
+    )
+    op.execute(
+        """
+CREATE TABLE IF NOT EXISTS public.entitlement_overrides (
+    id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   uuid        NOT NULL
+                REFERENCES public.tenants (id) ON DELETE CASCADE,
+    feature_key varchar(64) NOT NULL
+                REFERENCES public.features (key) ON DELETE CASCADE,
+    value       jsonb       NOT NULL,
+    starts_at   timestamptz NOT NULL DEFAULT now(),
+    expires_at  timestamptz,
+    source      varchar(20) NOT NULL CHECK (source IN
+                ('support', 'sales', 'promotion', 'beta', 'contract',
+                 'testing', 'migration')),
+    reason      text        NOT NULL CHECK (length(btrim(reason)) >= 3),
+    created_by  uuid        REFERENCES public.users (id) ON DELETE SET NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    revoked_at  timestamptz,
+    revoked_by  uuid        REFERENCES public.users (id) ON DELETE SET NULL,
+    CONSTRAINT ck_entitlement_overrides_window
+        CHECK (expires_at IS NULL OR expires_at > starts_at),
+    CONSTRAINT ck_entitlement_overrides_value CHECK (
+        CASE jsonb_typeof(value)
+            WHEN 'boolean' THEN true
+            WHEN 'number'  THEN value::numeric >= 0
+                            AND value::numeric = trunc(value::numeric)
+            WHEN 'string'  THEN value = '"unlimited"'::jsonb
+            ELSE false
+        END)
+)
+"""
+    )
+    op.execute(
+        """
+CREATE UNIQUE INDEX IF NOT EXISTS uq_entitlement_overrides_live
+    ON public.entitlement_overrides (tenant_id, feature_key)
+    WHERE revoked_at IS NULL
+"""
+    )
+    op.execute(
+        """
+CREATE TABLE IF NOT EXISTS public.feature_flags (
+    key             varchar(64) PRIMARY KEY CHECK (key ~ '^[a-z][a-z0-9_]*$'),
+    description     text        NOT NULL,
+    owner           varchar(120),
+    feature_key     varchar(64)
+                    REFERENCES public.features (key) ON DELETE SET NULL,
+    enabled         boolean     NOT NULL DEFAULT false,
+    rollout_percent smallint    NOT NULL DEFAULT 0
+                    CHECK (rollout_percent BETWEEN 0 AND 100),
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+)
+"""
+    )
+    op.execute(
+        """
+CREATE TABLE IF NOT EXISTS public.feature_flag_targets (
+    flag_key   varchar(64) NOT NULL
+               REFERENCES public.feature_flags (key) ON DELETE CASCADE,
+    tenant_id  uuid        NOT NULL
+               REFERENCES public.tenants (id) ON DELETE CASCADE,
+    enabled    boolean     NOT NULL DEFAULT true,
+    expires_at timestamptz,
+    reason     text,
+    created_by uuid        REFERENCES public.users (id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (flag_key, tenant_id)
+)
+"""
+    )
+    op.execute(
+        """
+CREATE INDEX IF NOT EXISTS ix_feature_flag_targets_tenant
+    ON public.feature_flag_targets (tenant_id)
+"""
+    )
+    op.execute(
+        """
+CREATE TABLE IF NOT EXISTS public.usage_counters (
+    tenant_id    uuid        NOT NULL
+                 REFERENCES public.tenants (id) ON DELETE CASCADE,
+    feature_key  varchar(64) NOT NULL
+                 REFERENCES public.features (key) ON DELETE CASCADE,
+    period_start timestamptz NOT NULL,
+    used         bigint      NOT NULL DEFAULT 0 CHECK (used >= 0),
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, feature_key, period_start)
+)
+"""
+    )
+    op.execute(
+        """
+ALTER TABLE public.tenants
+    ADD COLUMN IF NOT EXISTS entitlements_version integer NOT NULL DEFAULT 1
+"""
+    )
+    op.execute(
+        """
+-- Supabase serves `public` over its Data API. These rows decide what a
+-- merchant may use, so no role but the API's own may touch them.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        REVOKE ALL ON public.features, public.plan_entitlements,
+            public.entitlement_overrides, public.feature_flags,
+            public.feature_flag_targets, public.usage_counters
+            FROM anon, authenticated;
+    END IF;
+END $$
+"""
+    )
     conn = op.get_bind()
     columns = (
         "key",
