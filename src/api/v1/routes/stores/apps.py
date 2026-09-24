@@ -47,6 +47,7 @@ from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
     AppModel,
     AppOAuthClientModel,
+    AppUninstallEventModel,
 )
 from src.infrastructure.repositories import StoreRepository
 
@@ -551,6 +552,7 @@ async def uninstall_app(
             )
 
             await deliver_app_event(session, app, store_id, "app.uninstalled", {})
+            session.add(AppUninstallEventModel(app_id=app.id, store_id=store_id))
             try:
                 from src.infrastructure.messaging.tasks.app_redact_task import (
                     app_store_redact_task,

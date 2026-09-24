@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
+    PartnerMemberModel,
 )
 from src.infrastructure.database.models.public.platform_config import (
     PlatformConfigModel,
@@ -99,3 +100,30 @@ async def partner_for_user(
             select(PartnerAccountModel).where(PartnerAccountModel.user_id == user_id)
         )
     ).scalar_one_or_none()
+
+
+MANAGER_ROLES = ("owner", "admin")
+
+
+async def partner_membership(
+    db: AsyncSession, user_id: UUID
+) -> tuple[PartnerAccountModel, str] | None:
+    """The partner the user works for and their role: their own account as
+    ``owner``, else the account they are an active member of."""
+    own = await partner_for_user(db, user_id)
+    if own is not None:
+        return own, "owner"
+    row = (
+        await db.execute(
+            select(PartnerAccountModel, PartnerMemberModel.role)
+            .join(
+                PartnerMemberModel,
+                PartnerMemberModel.partner_id == PartnerAccountModel.id,
+            )
+            .where(
+                PartnerMemberModel.user_id == user_id,
+                PartnerMemberModel.status == "active",
+            )
+        )
+    ).first()
+    return (row[0], row[1]) if row else None

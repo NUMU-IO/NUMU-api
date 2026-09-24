@@ -152,6 +152,24 @@ class AppUninstallModel(Base, UUIDMixin, TimestampMixin):
     )
 
 
+class AppUninstallEventModel(Base, UUIDMixin, TimestampMixin):
+    """One uninstall of a Partner App. The installation row is deleted at
+    uninstall, so this is the only record the partner dashboard can count."""
+
+    __tablename__ = "app_uninstall_events"
+    __table_args__ = (
+        Index("ix_app_uninstall_events_app_created", "app_id", "created_at"),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    store_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+
+
 class AppVersionModel(Base, UUIDMixin, TimestampMixin):
     """One uploaded version of a Partner App: a validated ``numu.app.json``.
 
