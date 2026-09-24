@@ -175,6 +175,13 @@ class AppUninstallEventModel(Base, UUIDMixin, TimestampMixin):
         nullable=False,
     )
     store_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    #: When the removed installation was created; null before 2026-09-24.
+    installed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: routes/stores/apps.py UninstallReason, chosen by the merchant (optional).
+    reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reason_text: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class AppVersionModel(Base, UUIDMixin, TimestampMixin):

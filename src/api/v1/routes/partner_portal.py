@@ -29,6 +29,12 @@ from src.api.dependencies.partners import (
     require_partner_program,
 )
 from src.api.dependencies.services import get_email_service
+from src.api.middleware.token_activity import (
+    APP_RETENTION_DAYS,
+    app_hourly,
+    app_log_entries,
+    p95_from_buckets,
+)
 from src.api.responses import SuccessResponse
 from src.application.services.partner_program import partner_membership
 from src.application.services.partner_referrals import (
@@ -43,6 +49,9 @@ from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
     AppModel,
     AppUninstallEventModel,
+)
+from src.infrastructure.database.models.public.app_billing import (
+    AppSubscriptionModel,
 )
 from src.infrastructure.database.models.public.partner_account import (
     PartnerMemberModel,
@@ -320,6 +329,310 @@ async def resend_delivery(
     await db.flush()
     logger.info("partner_webhook_resend", delivery_id=str(log.id))
     return SuccessResponse(data=_delivery(row), message="Delivery queued")
+
+
+# ─── Analytics ────────────────────────────────────────────────────
+
+
+class AnalyticsMonth(BaseModel):
+    month: str
+    installs: int
+    uninstalls: int
+    #: Stores with the app installed at the end of the month.
+    active_stores: int
+    #: Uninstalls over stores installed at the start of the month.
+    churn_rate: float | None
+
+
+class ReasonCount(BaseModel):
+    reason: str
+    count: int
+
+
+class ReasonNote(BaseModel):
+    app_id: UUID
+    reason: str | None
+    text: str
+    created_at: datetime
+
+
+class AppApiHealth(BaseModel):
+    app_id: UUID
+    app_name: str
+    requests: int
+    errors: int
+    error_rate: float | None
+
+
+class PartnerAnalytics(BaseModel):
+    months: list[AnalyticsMonth]
+    reasons: list[ReasonCount]
+    notes: list[ReasonNote]
+    paid_active: int
+    #: Null until subscriptions carry a trial marker (see trial_note).
+    trial_to_paid: float | None
+    trial_note: str | None
+    api: list[AppApiHealth]
+    #: API counters are kept for 14 days, so their range is clipped to that.
+    api_from: datetime | None
+
+
+def _utc(d: datetime) -> datetime:
+    return d if d.tzinfo else d.replace(tzinfo=UTC)
+
+
+def _next_month(d: date) -> date:
+    return (d.replace(day=1) + timedelta(days=32)).replace(day=1)
+
+
+@router.get(
+    "/me/analytics",
+    response_model=SuccessResponse[PartnerAnalytics],
+    operation_id="get_partner_analytics",
+)
+async def analytics(
+    owner_id: Annotated[UUID, Depends(require_approved_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    start: Annotated[date | None, Query(alias="from")] = None,
+    end: Annotated[date | None, Query(alias="to")] = None,
+    app_id: UUID | None = None,
+):
+    """Installed stores, churn, uninstall reasons, subscriptions and API health.
+
+    ponytail: every install and uninstall of the partner's apps is read and
+    bucketed in Python (months x rows). Move to SQL generate_series when a
+    partner reaches ~100k installs.
+    """
+    now = datetime.now(UTC)
+    end = end or now.date()
+    start = start or (end.replace(day=1) - timedelta(days=334)).replace(day=1)
+    if start > end:
+        raise HTTPException(status_code=422, detail="'from' must be before 'to'.")
+    apps = (
+        await db.execute(
+            select(AppModel.id, AppModel.name).where(
+                AppModel.id.in_(_apps_of(owner_id, app_id))
+            )
+        )
+    ).all()
+    ids = [a[0] for a in apps]
+    installed = [
+        _utc(c)
+        for c in (
+            await db.scalars(
+                select(AppInstallationModel.created_at).where(
+                    AppInstallationModel.app_id.in_(ids)
+                )
+            )
+        ).all()
+    ]
+    events = (
+        await db.scalars(
+            select(AppUninstallEventModel)
+            .where(AppUninstallEventModel.app_id.in_(ids))
+            .order_by(AppUninstallEventModel.created_at.desc())
+        )
+    ).all()
+    gone = [
+        (_utc(e.installed_at) if e.installed_at else None, _utc(e.created_at))
+        for e in events
+    ]
+
+    def active_at(t: datetime) -> int:
+        return sum(c < t for c in installed) + sum(
+            (i is None or i < t) and u >= t for i, u in gone
+        )
+
+    def between(values, a: datetime, b: datetime) -> int:
+        return sum(v is not None and a <= v < b for v in values)
+
+    months = []
+    m = start.replace(day=1)
+    while m <= end:
+        m_start = datetime.combine(m, time.min, UTC)
+        m_end = datetime.combine(_next_month(m), time.min, UTC)
+        base = active_at(m_start)
+        uninstalls = between([u for _, u in gone], m_start, m_end)
+        months.append(
+            AnalyticsMonth(
+                month=m.strftime("%Y-%m"),
+                installs=between(installed, m_start, m_end)
+                + between([i for i, _ in gone], m_start, m_end),
+                uninstalls=uninstalls,
+                active_stores=active_at(min(m_end, now)),
+                churn_rate=round(uninstalls / base, 4) if base else None,
+            )
+        )
+        m = _next_month(m)
+
+    lo = datetime.combine(start, time.min, UTC)
+    hi = datetime.combine(end + timedelta(days=1), time.min, UTC)
+    in_range = [e for e in events if lo <= _utc(e.created_at) < hi]
+    reasons = Counter(e.reason or "unspecified" for e in in_range)
+    paid_active = await db.scalar(
+        select(func.count(AppSubscriptionModel.id)).where(
+            AppSubscriptionModel.app_id.in_(ids),
+            AppSubscriptionModel.status == "active",
+        )
+    )
+
+    api_from = max(lo, now - timedelta(days=APP_RETENTION_DAYS))
+    api_to = min(hi, now)
+    counters: dict[str, dict[str, int]] = {}
+    if api_from < api_to and ids:
+        try:
+            counters = await app_hourly([str(i) for i in ids], api_from, api_to)
+        except Exception:
+            logger.warning("partner_analytics_api_counters_failed")
+    api = []
+    for aid, name in apps:
+        c = counters.get(str(aid), {})
+        n, errors = c.get("n", 0), c.get("4xx", 0) + c.get("5xx", 0)
+        api.append(
+            AppApiHealth(
+                app_id=aid,
+                app_name=name,
+                requests=n,
+                errors=errors,
+                error_rate=round(errors / n, 4) if n else None,
+            )
+        )
+
+    return SuccessResponse(
+        data=PartnerAnalytics(
+            months=months,
+            reasons=[ReasonCount(reason=r, count=n) for r, n in reasons.most_common()],
+            notes=[
+                ReasonNote(
+                    app_id=e.app_id,
+                    reason=e.reason,
+                    text=e.reason_text,
+                    created_at=e.created_at,
+                )
+                for e in in_range
+                if e.reason_text
+            ][:20],
+            paid_active=paid_active or 0,
+            trial_to_paid=None,
+            trial_note="no_trial_marker",
+            api=api,
+            api_from=api_from if api_from < api_to else None,
+        )
+    )
+
+
+# ─── API logs ─────────────────────────────────────────────────────
+
+
+class ApiLogOut(BaseModel):
+    at: datetime
+    request_id: str | None
+    method: str
+    route: str
+    status: int
+    latency_ms: float
+    rate_limited: bool
+    store_id: UUID | None
+    store_name: str | None
+
+
+class ApiLogStats(BaseModel):
+    requests: int
+    errors: int
+    error_rate: float | None
+    p95_ms: int | None
+    rate_limited: int
+
+
+class ApiLogPage(BaseModel):
+    items: list[ApiLogOut]
+    total: int
+    page: int
+    page_size: int
+    stats: ApiLogStats
+    routes: list[str]
+
+
+@router.get(
+    "/me/apps/{app_id}/api-logs",
+    response_model=SuccessResponse[ApiLogPage],
+    operation_id="list_partner_app_api_logs",
+)
+async def api_logs(
+    app_id: UUID,
+    owner_id: Annotated[UUID, Depends(require_approved_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    status_class: Literal["2xx", "3xx", "4xx", "5xx"] | None = None,
+    route: str | None = None,
+    store_id: UUID | None = None,
+    hours: Annotated[int, Query(ge=1, le=APP_RETENTION_DAYS * 24)] = 24,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+):
+    """Requests the app made with its tokens in the last ``hours``: the list
+    holds the latest APP_KEEP, the stats count every request."""
+    if await db.scalar(_apps_of(owner_id, app_id)) is None:
+        raise HTTPException(status_code=404, detail="App not found")
+    now = datetime.now(UTC)
+    since = now - timedelta(hours=hours)
+    try:
+        entries = await app_log_entries(str(app_id))
+        c = (await app_hourly([str(app_id)], since, now))[str(app_id)]
+    except Exception:
+        logger.warning("partner_api_logs_read_failed", app_id=str(app_id))
+        raise HTTPException(status_code=503, detail="API logs are unavailable.")
+    entries = [e for e in entries if e["t"] >= since.timestamp()]
+    routes = sorted({e["r"] for e in entries})
+    if status_class:
+        entries = [e for e in entries if f"{e['s'] // 100}xx" == status_class]
+    if route:
+        entries = [e for e in entries if e["r"] == route]
+    if store_id:
+        entries = [e for e in entries if e.get("st") == str(store_id)]
+    rows = entries[(page - 1) * page_size : page * page_size]
+    store_ids = {UUID(e["st"]) for e in rows if e.get("st")}
+    names = {}
+    if store_ids:
+        names = {
+            str(sid): name
+            for sid, name in (
+                await db.execute(
+                    select(StoreModel.id, StoreModel.name).where(
+                        StoreModel.id.in_(store_ids)
+                    )
+                )
+            ).all()
+        }
+    n, errors = c.get("n", 0), c.get("4xx", 0) + c.get("5xx", 0)
+    return SuccessResponse(
+        data=ApiLogPage(
+            items=[
+                ApiLogOut(
+                    at=datetime.fromtimestamp(e["t"], UTC),
+                    request_id=e.get("id"),
+                    method=e["m"],
+                    route=e["r"],
+                    status=e["s"],
+                    latency_ms=e["ms"],
+                    rate_limited=e["s"] == 429,
+                    store_id=e.get("st"),
+                    store_name=names.get(e.get("st")),
+                )
+                for e in rows
+            ],
+            total=len(entries),
+            page=page,
+            page_size=page_size,
+            stats=ApiLogStats(
+                requests=n,
+                errors=errors,
+                error_rate=round(errors / n, 4) if n else None,
+                p95_ms=p95_from_buckets(c),
+                rate_limited=c.get("429", 0),
+            ),
+            routes=routes,
+        )
+    )
 
 
 # ─── Team ─────────────────────────────────────────────────────────

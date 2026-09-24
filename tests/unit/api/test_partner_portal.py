@@ -341,3 +341,185 @@ def test_every_team_write_needs_a_manager():
     assert len(writes) == 3
     for op, names in writes.items():
         assert "require_partner_manager" in names, op
+
+
+def _at(month, day):
+    return datetime(2026, month, day, 12, tzinfo=UTC)
+
+
+async def test_analytics_rebuilds_installed_stores_churn_and_reasons(
+    test_session, monkeypatch
+):
+    owner, other = await _user(test_session), await _user(test_session)
+    await _partner(test_session, owner)
+    await _partner(test_session, other)
+    app, _ = await _app_with_delivery(test_session, owner)
+    theirs, _ = await _app_with_delivery(test_session, other)
+    inst = (
+        await test_session.execute(
+            portal.select(AppInstallationModel).where(
+                AppInstallationModel.app_id == app.id
+            )
+        )
+    ).scalar_one()
+    inst.created_at = _at(7, 5)
+    test_session.add_all([
+        AppUninstallEventModel(
+            app_id=app.id,
+            store_id=uuid4(),
+            installed_at=_at(7, 10),
+            created_at=_at(8, 15),
+            reason="too_expensive",
+            reason_text="pricey",
+        ),
+        AppUninstallEventModel(app_id=app.id, store_id=uuid4(), created_at=_at(9, 2)),
+        AppUninstallEventModel(
+            app_id=theirs.id, store_id=uuid4(), created_at=_at(8, 3), reason="bugs"
+        ),
+    ])
+    await test_session.flush()
+    seen = {}
+
+    async def hourly(ids, since, until):
+        seen["ids"] = ids
+        return {str(app.id): {"n": 10, "4xx": 2, "5xx": 1}}
+
+    monkeypatch.setattr(portal, "app_hourly", hourly)
+    monkeypatch.setattr(portal, "datetime", _Frozen)
+
+    out = (
+        await portal.analytics(
+            owner_id=owner.id,
+            db=test_session,
+            start=_at(7, 1).date(),
+            end=_at(9, 30).date(),
+        )
+    ).data
+
+    assert [
+        (m.month, m.installs, m.uninstalls, m.active_stores) for m in out.months
+    ] == [
+        ("2026-07", 2, 0, 3),
+        ("2026-08", 0, 1, 2),
+        ("2026-09", 0, 1, 1),
+    ]
+    assert [m.churn_rate for m in out.months] == [0.0, 0.3333, 0.5]
+    assert {r.reason: r.count for r in out.reasons} == {
+        "too_expensive": 1,
+        "unspecified": 1,
+    }
+    assert [n.text for n in out.notes] == ["pricey"]
+    assert out.trial_to_paid is None and out.trial_note == "no_trial_marker"
+    assert seen["ids"] == [str(app.id)]
+    assert [(a.app_id, a.requests, a.error_rate) for a in out.api] == [
+        (app.id, 10, 0.3)
+    ]
+
+
+class _Frozen(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 9, 24, 12, tzinfo=tz)
+
+
+async def test_api_logs_are_the_partners_own_and_filterable(test_session, monkeypatch):
+    owner, other = await _user(test_session), await _user(test_session)
+    await _partner(test_session, owner)
+    await _partner(test_session, other)
+    app, _ = await _app_with_delivery(test_session, owner)
+    theirs, _ = await _app_with_delivery(test_session, other)
+    now = datetime.now(UTC).timestamp()
+    store = str(uuid4())
+    log = [
+        {
+            "t": now - 1,
+            "id": "r1",
+            "m": "GET",
+            "r": "/api/v1/stores/{store_id}/orders",
+            "s": 429,
+            "ms": 3.0,
+            "st": store,
+        },
+        {
+            "t": now - 2,
+            "id": "r2",
+            "m": "GET",
+            "r": "/api/v1/stores/{store_id}/orders",
+            "s": 500,
+            "ms": 900.0,
+            "st": store,
+        },
+        {
+            "t": now - 3,
+            "id": "r3",
+            "m": "POST",
+            "r": "/api/v1/stores/{store_id}/products",
+            "s": 404,
+            "ms": 20.0,
+            "st": str(uuid4()),
+        },
+        {
+            "t": now - 4,
+            "id": "r4",
+            "m": "GET",
+            "r": "/api/v1/stores/{store_id}/orders",
+            "s": 200,
+            "ms": 10.0,
+            "st": store,
+        },
+        {
+            "t": now - 90000,
+            "id": "old",
+            "m": "GET",
+            "r": "/x",
+            "s": 200,
+            "ms": 1.0,
+            "st": store,
+        },
+    ]
+    asked = []
+
+    async def entries(app_id):
+        asked.append(app_id)
+        return log
+
+    async def hourly(ids, since, until):
+        return {ids[0]: {"n": 4, "4xx": 2, "5xx": 1, "429": 1, "b0": 3, "b5": 1}}
+
+    monkeypatch.setattr(portal, "app_log_entries", entries)
+    monkeypatch.setattr(portal, "app_hourly", hourly)
+
+    with pytest.raises(HTTPException) as exc:
+        await portal.api_logs(app_id=theirs.id, owner_id=owner.id, db=test_session)
+    assert exc.value.status_code == 404 and asked == []
+
+    out = (
+        await portal.api_logs(app_id=app.id, owner_id=owner.id, db=test_session)
+    ).data
+    assert [i.request_id for i in out.items] == ["r1", "r2", "r3", "r4"]
+    assert out.items[0].rate_limited and not out.items[1].rate_limited
+    assert (
+        out.stats.requests,
+        out.stats.error_rate,
+        out.stats.p95_ms,
+        out.stats.rate_limited,
+    ) == (4, 0.75, 1000, 1)
+    assert "/x" not in out.routes
+
+    four = (
+        await portal.api_logs(
+            app_id=app.id, owner_id=owner.id, db=test_session, status_class="4xx"
+        )
+    ).data
+    assert [i.request_id for i in four.items] == ["r1", "r3"]
+    mine = (
+        await portal.api_logs(
+            app_id=app.id,
+            owner_id=owner.id,
+            db=test_session,
+            store_id=store,
+            route="/api/v1/stores/{store_id}/orders",
+            page_size=2,
+        )
+    ).data
+    assert ([i.request_id for i in mine.items], mine.total) == (["r1", "r2"], 3)
