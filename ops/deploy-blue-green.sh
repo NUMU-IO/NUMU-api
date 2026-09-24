@@ -246,7 +246,7 @@ run_local() {
     --restart unless-stopped \
     --network "$LOCAL_NETWORK" \
     --env-file "$ENV_FILE" \
-    -e ENVIRONMENT=staging -e DEBUG=false -e LOG_FORMAT=json \
+    -e ENVIRONMENT=production -e DEBUG=false -e LOG_FORMAT=json \
     --log-driver awslogs \
     --log-opt awslogs-region=eu-west-1 \
     --log-opt awslogs-group=/numu/prod/api \
@@ -276,7 +276,7 @@ run_remote() {
     --restart unless-stopped \
     --network host \
     --env-file "$REMOTE_ROOT/.env" \
-    -e ENVIRONMENT=staging -e DEBUG=false -e LOG_FORMAT=json \
+    -e ENVIRONMENT=production -e DEBUG=false -e LOG_FORMAT=json \
     -e REDIS_HOST=127.0.0.1 -e REDIS_PORT=6380 \
     --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
     --cpus 1.5 --memory 768m \
@@ -471,7 +471,7 @@ else
 
   echo "==> Applying backward-compatible migrations while $ACTIVE_LOCATION stays live..."
   docker run --rm --network "$LOCAL_NETWORK" --env-file "$ENV_FILE" \
-    -e ENVIRONMENT=staging -e DEBUG=false -e LOG_FORMAT=json \
+    -e ENVIRONMENT=production -e DEBUG=false -e LOG_FORMAT=json \
     "$IMAGE_DIGEST" alembic upgrade heads
   route_health stable \
     || die "migration is incompatible with the active API; candidate was not started"
