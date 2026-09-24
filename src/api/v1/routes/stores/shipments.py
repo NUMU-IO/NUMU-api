@@ -8,7 +8,8 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi.responses import RedirectResponse
 
 from src.api.dependencies import (
     get_current_store,
@@ -20,6 +21,7 @@ from src.api.v1.schemas.tenant.shipment import (
     BulkCreateShipmentRequest,
     BulkShipmentResultItem,
     BulkShipmentResultResponse,
+    CarrierEventRequest,
     CodSummaryResponse,
     CreateShipmentRequest,
     ShipmentListItemResponse,
@@ -36,6 +38,14 @@ from src.application.services.carrier_resolver import (
     service_for_shipment,
     supports,
     tracking_url_for,
+)
+from src.application.services.partner_carriers import (
+    app_carrier_slug,
+    is_app_carrier,
+)
+from src.application.services.shipment_status_sync import (
+    apply_carrier_status,
+    sync_order_status,
 )
 from src.core.entities.shipment import Shipment, ShipmentStatus
 from src.core.entities.store import Store
@@ -159,7 +169,9 @@ async def _create_shipment_for_order(
     # This used to read `carrier = "bosta"  # Normalize to bosta as default`,
     # so a typo'd carrier silently booked a real Bosta delivery.
     try:
-        shipping_service = await service_for_carrier(carrier, store.settings or {})
+        shipping_service = await service_for_carrier(
+            carrier, store.settings or {}, store_id=store.id, db=order_repo.session
+        )
     except UnknownCarrierError as e:
         raise HTTPException(status_code=400, detail=e.as_detail()) from e
 
@@ -208,7 +220,9 @@ async def _create_shipment_for_order(
 
     # Build tracking URL based on carrier. Returns None for a carrier we
     # have no tracking page for — never another carrier's URL.
-    tracking_url = tracking_url_for(carrier, label.tracking_number)
+    tracking_url = tracking_url_for(carrier, label.tracking_number) or (
+        label.tracking_url
+    )
 
     # Create shipment entity
     shipment = Shipment(
@@ -328,6 +342,83 @@ async def bulk_create_shipments(
             results=list(results),
         ),
         message=f"{succeeded}/{len(results)} shipments created",
+    )
+
+
+@router.post(
+    "/carrier-events",
+    response_model=SuccessResponse[ShipmentResponse],
+    summary="Shipping app: report a shipment's status, label or tracking link",
+    operation_id="push_carrier_event",
+)
+async def push_carrier_event(
+    body: CarrierEventRequest,
+    request: Request,
+    store: Annotated[Store, Depends(get_current_store)],
+    shipment_repo: Annotated[ShipmentRepository, Depends(get_shipment_repository)],
+):
+    """App tokens only, and only for shipments that app created.
+
+    The status goes through the same path as first-party carrier webhooks
+    (``apply_carrier_status``), and the order through
+    ``UpdateOrderStatusUseCase``, so notifications, webhooks and COD
+    Autopilot fire as for any courier.
+    """
+    app_slug = (getattr(request.state, "pat", None) or {}).get("app_slug")
+    if not app_slug:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "APP_TOKEN_REQUIRED",
+                "message_en": "Only a shipping app can report carrier events.",
+                "message_ar": "تطبيقات الشحن بس هي اللي تقدر تبعت تحديثات الشحنة.",
+            },
+        )
+    carrier = app_carrier_slug(app_slug)
+    shipment = await shipment_repo.get_for_carrier_for_update(
+        store.id, carrier, body.tracking_number
+    )
+    if shipment is None:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+
+    if body.label_url:
+        shipment.awb_url = body.label_url
+    if body.tracking_url:
+        shipment.tracking_url = body.tracking_url
+    new_status = body.status if body.status != shipment.status else None
+    if new_status is not None and shipment.is_terminal:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "SHIPMENT_TERMINAL",
+                "message_en": "This shipment is already closed.",
+                "message_ar": "الشحنة دي اتقفلت خلاص.",
+            },
+        )
+    if new_status is ShipmentStatus.DELIVERED and body.cod_collected:
+        shipment.cod_collected = bool(shipment.cod_amount)
+        shipment.cod_collected_at = datetime.utcnow() if shipment.cod_amount else None
+    if new_status is None:
+        shipment = await shipment_repo.update(shipment)
+    else:
+        await apply_carrier_status(
+            shipment=shipment,
+            shipment_repo=shipment_repo,
+            carrier=carrier,
+            raw_status=new_status.value,
+            description=body.description,
+            failure_reason=body.description,
+            status=new_status,
+        )
+        await sync_order_status(
+            shipment_repo.session,
+            order_id=shipment.order_id,
+            store=store,
+            status=new_status,
+            reason=body.description or f"{carrier}: {new_status.value}",
+        )
+    return SuccessResponse(
+        data=_shipment_to_response(shipment), message="Carrier event applied"
     )
 
 
@@ -691,6 +782,8 @@ async def print_shipment_awb(
         raise HTTPException(status_code=404, detail="Shipment not found")
     if not shipment.tracking_number:
         raise HTTPException(status_code=400, detail="Shipment has no tracking number")
+    if is_app_carrier(shipment.carrier) and shipment.awb_url:
+        return RedirectResponse(shipment.awb_url)
 
     _, print_awb = await _resolve_for_shipment(shipment, store, "print_awb")
     pdf_bytes = await print_awb(shipment.tracking_number)

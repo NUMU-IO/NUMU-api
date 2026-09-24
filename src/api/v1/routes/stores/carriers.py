@@ -28,8 +28,10 @@ from typing import Annotated, Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies import get_current_store
+from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import get_store_repository
 from src.api.responses import SuccessResponse
 from src.application.services.carrier_credentials import (
@@ -48,6 +50,7 @@ from src.application.services.carrier_resolver import (
     service_for_carrier,
     spec_for,
 )
+from src.application.services.partner_carriers import installed_carriers
 from src.core.entities.store import Store
 from src.core.interfaces.services.shipping_provider import CarrierApiError
 from src.core.logging import get_logger
@@ -94,6 +97,7 @@ def _carrier_status(store: Store, slug: str) -> dict[str, Any]:
 )
 async def list_store_carriers(
     store: Annotated[Store, Depends(get_current_store)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Every selectable carrier, its capabilities, and this store's state.
 
@@ -108,6 +112,7 @@ async def list_store_carriers(
     entries = carrier_catalog()
     for entry in entries:
         entry["status"] = _carrier_status(store, entry["slug"])
+    entries += [p.catalog_entry() for p in await installed_carriers(db, store.id)]
     return SuccessResponse(data=entries, message="Carriers retrieved")
 
 

@@ -14,7 +14,14 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID as PyUUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +30,7 @@ from src.infrastructure.database.models.base import TimestampMixin, UUIDMixin
 
 PARTNER_STATUSES = ("pending", "approved", "rejected", "suspended")
 PARTNER_KINDS = ("individual", "company")
+PARTNER_ROLES = ("owner", "admin", "developer")
 
 
 class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
@@ -68,3 +76,44 @@ class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class PartnerMemberModel(Base, UUIDMixin, TimestampMixin):
+    """A teammate on a partner account. The account's own ``user_id`` is the
+    owner and has no row here. ``user_id`` stays null until the invite is
+    accepted; a user belongs to at most one partner."""
+
+    __tablename__ = "partner_members"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('owner', 'admin', 'developer')", name="ck_partner_members_role"
+        ),
+        CheckConstraint(
+            "status IN ('invited', 'active')", name="ck_partner_members_status"
+        ),
+        UniqueConstraint(
+            "partner_id", "email", name="uq_partner_members_partner_email"
+        ),
+        Index("ix_partner_members_email", "email"),
+        {"schema": "public"},
+    )
+
+    partner_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.partner_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="CASCADE"),
+        nullable=True,
+        unique=True,
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    invited_by: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="invited")

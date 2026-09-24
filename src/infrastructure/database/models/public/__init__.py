@@ -14,6 +14,7 @@ from src.infrastructure.database.models.public.app import (
     AppModel,
     AppOAuthClientModel,
     AppOAuthCodeModel,
+    AppUninstallEventModel,
     AppUninstallModel,
     AppVersionModel,
 )
@@ -49,6 +50,7 @@ from src.infrastructure.database.models.public.omnichannel import (
 from src.infrastructure.database.models.public.onboarding import StoreOnboardingModel
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
+    PartnerMemberModel,
 )
 from src.infrastructure.database.models.public.personal_access_token import (
     PersonalAccessTokenModel,
@@ -86,6 +88,7 @@ __all__ = [
     "AppModel",
     "AppInstallationModel",
     "AppUninstallModel",
+    "AppUninstallEventModel",
     "AppVersionModel",
     "AppOAuthClientModel",
     "AppOAuthCodeModel",
@@ -93,6 +96,7 @@ __all__ = [
     "AppSubscriptionModel",
     "PartnerLedgerEntryModel",
     "PartnerAccountModel",
+    "PartnerMemberModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",
     "FeedbackModel",

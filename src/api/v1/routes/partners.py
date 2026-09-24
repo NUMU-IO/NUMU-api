@@ -28,12 +28,15 @@ from src.api.dependencies.partners import (
 from src.api.responses import SuccessResponse
 from src.application.services.partner_program import (
     AGREEMENT_VERSION,
+    MANAGER_ROLES,
     MAX_DEV_STORES,
     partner_for_user,
+    partner_membership,
 )
 from src.core.logging import get_logger
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
+    PartnerMemberModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.user import UserModel
@@ -71,8 +74,18 @@ class PartnerAccountOut(BaseModel):
     created_at: datetime
 
 
+class PartnerInvitationOut(BaseModel):
+    id: UUID
+    partner_name: str
+    role: str
+
+
 class PartnerMe(BaseModel):
     account: PartnerAccountOut | None
+    #: The caller's role on ``account``: owner, admin or developer.
+    role: str | None = None
+    #: Pending team invites addressed to the caller's email.
+    invitations: list[PartnerInvitationOut] = []
     #: The agreement a new application accepts. An approved partner on an
     #: older version must accept again (``needs_agreement``).
     agreement_version: str
@@ -170,10 +183,34 @@ async def get_me(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    account = await partner_for_user(db, user_id)
+    found = await partner_membership(db, user_id)
+    account, role = found if found else (None, None)
+    email = await db.scalar(select(UserModel.email).where(UserModel.id == user_id))
+    invites = (
+        (
+            await db.execute(
+                select(PartnerMemberModel, PartnerAccountModel.display_name)
+                .join(
+                    PartnerAccountModel,
+                    PartnerAccountModel.id == PartnerMemberModel.partner_id,
+                )
+                .where(
+                    func.lower(PartnerMemberModel.email) == (email or "").lower(),
+                    PartnerMemberModel.status == "invited",
+                )
+            )
+        ).all()
+        if email and found is None
+        else []
+    )
     return SuccessResponse(
         data=PartnerMe(
             account=_out(account) if account else None,
+            role=role,
+            invitations=[
+                PartnerInvitationOut(id=m.id, partner_name=name, role=m.role)
+                for m, name in invites
+            ],
             agreement_version=AGREEMENT_VERSION,
             needs_agreement=account is not None
             and account.agreement_version != AGREEMENT_VERSION,
@@ -249,9 +286,17 @@ async def update_me(
     user_id: Annotated[UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    account = await partner_for_user(db, user_id)
-    if account is None:
+    found = await partner_membership(db, user_id)
+    if found is None:
         raise HTTPException(status_code=404, detail="No partner account")
+    account, role = found
+    if role not in MANAGER_ROLES or (
+        body.accept_agreement_version is not None and role != "owner"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the partner's owner or an admin can do this.",
+        )
     changes = body.model_dump(exclude_unset=True, exclude={"accept_agreement_version"})
     for key, value in changes.items():
         if value is None and key in _REQUIRED_PROFILE:
