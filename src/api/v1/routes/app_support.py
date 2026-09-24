@@ -391,6 +391,7 @@ async def _add_message(
             author_id=user_id,
             author_role=role,
             body=body.strip(),
+            created_at=now,
             attachments=attachments,
         )
     )
