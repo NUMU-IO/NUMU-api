@@ -209,6 +209,7 @@ async def rotate_webhook_secret(
     "/{subscription_id}/test",
     response_model=SuccessResponse[WebhookTestResponse],
     summary="Send a test event to a webhook endpoint",
+    dependencies=[require_feature("api_access")],
 )
 async def test_webhook_subscription(
     store_id: UUID,
