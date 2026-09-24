@@ -9,9 +9,17 @@ How money moves (apps plan, Phase 7):
   platform Kashier account is configured). So an app charge never talks to a
   payment gateway, and Kashier arrives as a wallet top-up rail, not here.
   ``ChargeSource`` is the seam if a direct card charge is ever wanted.
-- **A Partner App sale credits the partner 80%** (``partner_ledger_entries``,
-  kind ``sale``). NUMU keeps 20% (OD-4). A NUMU App keeps 100% and writes no
-  ledger row.
+- **A Partner App sale credits the partner their share**
+  (``partner_ledger_entries``, kind ``sale``): ``partner_accounts.share_bps``,
+  80% by default (OD-4). NUMU keeps the rest as its fee. A NUMU App keeps
+  100% and writes no ledger row.
+- **VAT (14%) is on NUMU's fee only, added on top**: the merchant pays the
+  app's price plus VAT on NUMU's fee, and NUMU issues a numbered invoice for
+  its fee and that VAT (``app_fee_invoices``). The partner's share is
+  unaffected and the partner handles their own tax.
+- **Partner coupons are funded by the partner**: NUMU's fee (and its VAT)
+  is computed on the full list price and the discount comes out of the
+  partner's share, capped at it.
 - **Payouts are manual bank transfers** an admin records as a ``payout``
   entry. The balance NUMU owes a partner is the sum of their entries.
 
@@ -36,7 +44,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +60,9 @@ from src.infrastructure.database.models.public.app import (
     AppModel,
 )
 from src.infrastructure.database.models.public.app_billing import (
+    AppCouponModel,
+    AppCouponRedemptionModel,
+    AppFeeInvoiceModel,
     AppSubscriptionModel,
     AppTrialModel,
     AppUsageRecordModel,
@@ -61,12 +72,17 @@ from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
 )
 from src.infrastructure.database.models.public.wallet import WalletTransactionModel
+from src.infrastructure.database.models.tenant.marketplace_theme import (
+    MarketplaceThemeModel,
+    MarketplaceThemePurchaseModel,
+)
 from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = get_logger(__name__)
 
-#: OD-4: the partner keeps 80% of what the merchant pays, NUMU 20%.
+#: OD-4: by default the partner keeps 80% of the list price, NUMU 20%.
 PARTNER_SHARE_BPS = 8_000
+VAT_BPS = 1_400
 CYCLE_DAYS = {"monthly": 30, "annual": 365}
 #: Partner Agreement § 11.5 (draft): a lapsed payment keeps the app working
 #: for 3 days before it is switched off on that store.
@@ -84,6 +100,14 @@ class InsufficientFundsError(Exception):
         super().__init__(f"needs {needed_cents}, wallet has {balance_cents}")
         self.needed_cents = needed_cents
         self.balance_cents = balance_cents
+
+
+class CouponError(ValueError):
+    """A coupon the store can't use. ``code`` is the API error code."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
 
 
 class NotPaidError(ValueError):
@@ -123,14 +147,116 @@ def app_price(app: AppModel) -> AppPrice | None:
     )
 
 
-def split(gross_cents: int) -> tuple[int, int]:
+def bps_of(amount_cents: int, bps: int) -> int:
+    """``bps`` basis points of a non-negative amount, rounded half up."""
+    return (amount_cents * bps + 5_000) // 10_000
+
+
+def split(gross_cents: int, share_bps: int = PARTNER_SHARE_BPS) -> tuple[int, int]:
     """``(partner_share, platform_fee)`` of a sale, in whole piasters.
 
     The fee rounds half up and the partner gets the rest, so the two always
-    add up to exactly what the merchant paid.
+    add up to exactly the list price.
     """
-    fee = (gross_cents * (10_000 - PARTNER_SHARE_BPS) + 5_000) // 10_000
+    fee = bps_of(gross_cents, 10_000 - share_bps)
     return gross_cents - fee, fee
+
+
+@dataclass(frozen=True)
+class Quote:
+    """One charge: NUMU's fee and its VAT on the full list price, and the
+    partner's coupon discount taken from the partner's share only."""
+
+    list_cents: int
+    share_bps: int
+    fee_cents: int
+    vat_cents: int
+    discount_cents: int
+    capped: bool = False
+    partner_id: UUID | None = None
+    vat_bps: int = VAT_BPS
+
+    @property
+    def partner_cents(self) -> int:
+        return self.list_cents - self.fee_cents - self.discount_cents
+
+    @property
+    def total_cents(self) -> int:
+        return self.list_cents - self.discount_cents + self.vat_cents
+
+    def out(self) -> dict[str, Any]:
+        return {
+            "list_price_cents": self.list_cents,
+            "discount_cents": self.discount_cents,
+            "discount_capped": self.capped,
+            "vat_cents": self.vat_cents,
+            "vat_bps": self.vat_bps,
+            "total_cents": self.total_cents,
+        }
+
+
+def quote(
+    list_cents: int,
+    share_bps: int,
+    discount_cents: int = 0,
+    partner_id: UUID | None = None,
+    vat_bps: int = VAT_BPS,
+) -> Quote:
+    share, fee = split(list_cents, share_bps)
+    return Quote(
+        list_cents=list_cents,
+        share_bps=share_bps,
+        fee_cents=fee,
+        vat_cents=bps_of(fee, vat_bps),
+        discount_cents=min(discount_cents, share),
+        capped=discount_cents > share,
+        partner_id=partner_id,
+        vat_bps=vat_bps,
+    )
+
+
+def coupon_discount(coupon: AppCouponModel, list_cents: int) -> int:
+    if coupon.percent_off:
+        return bps_of(list_cents, coupon.percent_off * 100)
+    return min(coupon.amount_off_cents or 0, list_cents)
+
+
+def effective_share_bps(account: PartnerAccountModel | None) -> int:
+    if account is None or account.share_bps is None:
+        return PARTNER_SHARE_BPS
+    return account.share_bps
+
+
+async def partner_terms(db: AsyncSession, app: AppModel) -> tuple[UUID | None, int]:
+    """``(partner_id, share_bps)`` for a charge now. A NUMU App: NUMU keeps
+    it all (share 0). A Partner App whose partner account is missing: NUMU
+    holds the partner's share (logged at credit time)."""
+    if app.developer_id is None:
+        return None, 0
+    account = await db.scalar(
+        select(PartnerAccountModel).where(
+            PartnerAccountModel.user_id == app.developer_id
+        )
+    )
+    return (account.id if account else None), effective_share_bps(account)
+
+
+def sub_vat_bps(sub: AppSubscriptionModel | None) -> int:
+    """No VAT for a subscription grandfathered from before VAT on app fees,
+    until it ends or is subscribed again."""
+    return 0 if sub is not None and sub.vat_grandfathered else VAT_BPS
+
+
+async def quote_for(
+    db: AsyncSession,
+    app: AppModel,
+    list_cents: int,
+    coupon: AppCouponModel | None,
+    vat_bps: int = VAT_BPS,
+) -> Quote:
+    partner_id, share_bps = await partner_terms(db, app)
+    discount = coupon_discount(coupon, list_cents) if coupon else 0
+    return quote(list_cents, share_bps, discount, partner_id, vat_bps)
 
 
 class ChargeSource(Protocol):
@@ -144,8 +270,10 @@ class ChargeSource(Protocol):
         currency: str,
         key: str,
         note: str,
-    ) -> bool:
-        """True once the money is taken; False if ``key`` was already charged.
+        meta: dict | None = None,
+    ) -> WalletTransactionModel | None:
+        """The charge once the money is taken; None if ``key`` was already
+        charged.
 
         Raises InsufficientFundsError when it can't be taken.
         """
@@ -162,7 +290,9 @@ class WalletChargeSource:
         self._wallet = WalletService(db)
         self._touched: set[UUID] = set()
 
-    async def charge(self, *, tenant_id, amount_cents, currency, key, note) -> bool:
+    async def charge(
+        self, *, tenant_id, amount_cents, currency, key, note, meta=None
+    ) -> WalletTransactionModel | None:
         wallet = await self._wallet.get_or_create_wallet(tenant_id, for_update=True)
         if wallet.balance_cents < amount_cents:
             raise InsufficientFundsError(amount_cents, wallet.balance_cents)
@@ -173,10 +303,11 @@ class WalletChargeSource:
             currency=currency,
             idempotency_key=key,
             note=note,
+            meta=meta,
         )
         if tx is not None:
             self._touched.add(tenant_id)
-        return tx is not None
+        return tx
 
     async def invalidate(self) -> None:
         for tenant_id in self._touched:
@@ -244,6 +375,7 @@ async def subscribe(
     app: AppModel,
     source: ChargeSource,
     now: datetime | None = None,
+    coupon_code: str | None = None,
 ) -> tuple[AppSubscriptionModel, bool]:
     """Start a period now. Returns ``(subscription, started)``.
 
@@ -251,7 +383,9 @@ async def subscribe(
     period; otherwise one period is charged. A no-op when the store is
     already covered (a double click, or paying twice): ``started`` is then
     False and nothing is taken. Re-subscribing after a lapse or a
-    cancellation takes the app's CURRENT price. Caller owns the commit.
+    cancellation takes the app's CURRENT price. A coupon is redeemed once per
+    store and discounts the charged periods it covers. Raises CouponError.
+    Caller owns the commit.
     """
     now = now or _now()
     price = app_price(app)
@@ -271,21 +405,31 @@ async def subscribe(
             await TenantRepository(db).bump_entitlements_version(sub.tenant_id)
         return sub, False
 
+    coupon = (
+        await redeemable_coupon(db, app, installation.store_id, coupon_code, now)
+        if coupon_code
+        else None
+    )
+    applied = coupon or await _active_coupon(db, sub)
     end = now + timedelta(days=CYCLE_DAYS[price.cycle])
     key = f"app-sub:{installation.id}:start:{now.isoformat()}"
     trial = price.trial_days > 0 and await _claim_trial(db, installation, app)
-    charged = False
+    tx = q = None
     if trial:
         end = now + timedelta(days=price.trial_days)
     elif price.price_cents:
-        charged = await source.charge(
+        q, tx = await _charge(
+            db,
+            source,
+            app,
             tenant_id=installation.tenant_id,
-            amount_cents=price.price_cents,
+            list_cents=price.price_cents,
             currency=price.currency,
             key=key,
             note=f"{app.slug} ({price.cycle})",
+            coupon=applied,
         )
-        if not charged:
+        if tx is None:
             return sub, False
     if sub is None:
         sub = AppSubscriptionModel(
@@ -303,12 +447,17 @@ async def subscribe(
     sub.current_period_end = end
     sub.cancel_at_period_end = False
     sub.is_trial = trial
+    sub.vat_grandfathered = False
     sub.usage_cap_cents = price.usage["cap_cents"] if price.usage else None
     sub.usage_unit_cents = price.usage.get("price_cents") if price.usage else None
     await db.flush()
     await TenantRepository(db).bump_entitlements_version(installation.tenant_id)
-    if charged:
-        await _credit_partner(db, app, sub, price.price_cents, price.currency, key, now)
+    if coupon:
+        await _redeem(db, coupon, sub)
+    if tx is not None:
+        if applied:
+            _consume_coupon(sub)
+        await _book(db, app, sub, q, tx, key, now)
     logger.info(
         "app_subscription_started",
         app=app.slug,
@@ -337,6 +486,239 @@ async def _claim_trial(
     except IntegrityError:
         return False
     return True
+
+
+COUPON_CODE_RE = re.compile(r"^[A-Z0-9_-]{3,40}$")
+
+
+def normalize_code(code: str) -> str:
+    return code.strip().upper()
+
+
+async def redeemable_coupon(
+    db: AsyncSession,
+    app: AppModel,
+    store_id: UUID,
+    code: str,
+    now: datetime,
+    *,
+    lock: bool = True,
+) -> AppCouponModel:
+    """The app's coupon ``code`` if this store may use it now, else
+    CouponError: ``coupon_invalid`` (unknown, disabled or another store's),
+    ``coupon_expired``, ``coupon_used`` (this store already redeemed it) or
+    ``coupon_exhausted`` (no redemptions left)."""
+    stmt = select(AppCouponModel).where(
+        AppCouponModel.app_id == app.id,
+        AppCouponModel.code == normalize_code(code),
+    )
+    if lock:
+        stmt = stmt.with_for_update()
+    coupon = await db.scalar(stmt)
+    if (
+        coupon is None
+        or not coupon.active
+        or (coupon.store_id is not None and coupon.store_id != store_id)
+    ):
+        raise CouponError("coupon_invalid")
+    if coupon.expires_at is not None and _aware(coupon.expires_at) <= now:
+        raise CouponError("coupon_expired")
+    redeemed = await db.scalar(
+        select(AppCouponRedemptionModel.id).where(
+            AppCouponRedemptionModel.coupon_id == coupon.id,
+            AppCouponRedemptionModel.store_id == store_id,
+        )
+    )
+    if redeemed is not None:
+        raise CouponError("coupon_used")
+    if coupon.max_redemptions is not None:
+        used = await db.scalar(
+            select(func.count(AppCouponRedemptionModel.id)).where(
+                AppCouponRedemptionModel.coupon_id == coupon.id
+            )
+        )
+        if (used or 0) >= coupon.max_redemptions:
+            raise CouponError("coupon_exhausted")
+    return coupon
+
+
+def coupon_out(
+    c: AppCouponModel, app_name: str | None, redemptions: int
+) -> dict[str, Any]:
+    return {
+        "id": str(c.id),
+        "app_id": str(c.app_id),
+        "app_name": app_name,
+        "code": c.code,
+        "percent_off": c.percent_off,
+        "amount_off_cents": c.amount_off_cents,
+        "duration_cycles": c.duration_cycles,
+        "max_redemptions": c.max_redemptions,
+        "expires_at": c.expires_at,
+        "store_id": str(c.store_id) if c.store_id else None,
+        "active": c.active,
+        "redemptions": redemptions,
+        "created_at": c.created_at,
+    }
+
+
+def redemption_count():
+    return (
+        select(func.count(AppCouponRedemptionModel.id))
+        .where(AppCouponRedemptionModel.coupon_id == AppCouponModel.id)
+        .scalar_subquery()
+    )
+
+
+async def _redeem(
+    db: AsyncSession, coupon: AppCouponModel, sub: AppSubscriptionModel
+) -> None:
+    try:
+        async with db.begin_nested():
+            db.add(
+                AppCouponRedemptionModel(
+                    coupon_id=coupon.id,
+                    store_id=sub.store_id,
+                    tenant_id=sub.tenant_id,
+                    subscription_id=sub.id,
+                )
+            )
+            await db.flush()
+    except IntegrityError:
+        raise CouponError("coupon_used") from None
+    sub.coupon_id = coupon.id
+    sub.coupon_cycles_left = coupon.duration_cycles
+
+
+async def _active_coupon(
+    db: AsyncSession, sub: AppSubscriptionModel | None
+) -> AppCouponModel | None:
+    if sub is None or sub.coupon_id is None:
+        return None
+    return await db.get(AppCouponModel, sub.coupon_id)
+
+
+def _consume_coupon(sub: AppSubscriptionModel) -> None:
+    if sub.coupon_cycles_left is None:
+        return
+    sub.coupon_cycles_left -= 1
+    if sub.coupon_cycles_left <= 0:
+        sub.coupon_id = None
+        sub.coupon_cycles_left = None
+
+
+async def _charge(
+    db: AsyncSession,
+    source: ChargeSource,
+    app: AppModel,
+    *,
+    tenant_id: UUID,
+    list_cents: int,
+    currency: str,
+    key: str,
+    note: str,
+    coupon: AppCouponModel | None = None,
+    vat_bps: int = VAT_BPS,
+) -> tuple[Quote, WalletTransactionModel | None]:
+    """Take the list price, less the coupon, plus VAT on NUMU's fee."""
+    q = await quote_for(db, app, list_cents, coupon, vat_bps)
+    tx = await source.charge(
+        tenant_id=tenant_id,
+        amount_cents=q.total_cents,
+        currency=currency,
+        key=key,
+        note=note,
+        meta={**q.out(), "share_bps": q.share_bps, "fee_cents": q.fee_cents},
+    )
+    return q, tx
+
+
+async def _book(
+    db: AsyncSession,
+    app: AppModel,
+    sub: AppSubscriptionModel,
+    q: Quote,
+    tx: WalletTransactionModel,
+    key: str,
+    now: datetime,
+) -> None:
+    """After a charge: the partner's share and NUMU's fee invoice."""
+    await _credit_partner(db, app, sub, q, tx.currency, key, now)
+    await issue_fee_invoice(
+        db,
+        tx=tx,
+        kind="invoice",
+        q=q,
+        store_id=sub.store_id,
+        app_id=app.id,
+        description=tx.note or app.name,
+        now=now,
+    )
+
+
+async def _next_invoice_number(db: AsyncSession, prefix: str) -> str:
+    if db.get_bind().dialect.name == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext('app-fee-invoice-number'))")
+        )
+    last = await db.scalar(
+        select(func.max(AppFeeInvoiceModel.number)).where(
+            AppFeeInvoiceModel.number.like(f"{prefix}%")
+        )
+    )
+    seq = int(last[len(prefix) :]) if last else 0
+    return f"{prefix}{seq + 1:06d}"
+
+
+async def issue_fee_invoice(
+    db: AsyncSession,
+    *,
+    tx: WalletTransactionModel,
+    kind: str,
+    q: Quote,
+    store_id: UUID | None,
+    app_id: UUID | None,
+    description: str,
+    now: datetime,
+    original: AppFeeInvoiceModel | None = None,
+    theme_id: UUID | None = None,
+) -> AppFeeInvoiceModel:
+    """NUMU's numbered invoice for its fee and VAT on one wallet charge, or
+    (``credit_note``, negative amounts) the one reversing it. One per wallet
+    row and kind: issuing again returns the first."""
+    existing = await db.scalar(
+        select(AppFeeInvoiceModel).where(
+            AppFeeInvoiceModel.wallet_transaction_id == tx.id,
+            AppFeeInvoiceModel.kind == kind,
+        )
+    )
+    if existing is not None:
+        return existing
+    sign = -1 if kind == "credit_note" else 1
+    prefix = "NUMU-CN-" if kind == "credit_note" else "NUMU-"
+    invoice = AppFeeInvoiceModel(
+        number=await _next_invoice_number(db, f"{prefix}{now.year}-"),
+        kind=kind,
+        tenant_id=tx.tenant_id,
+        store_id=store_id,
+        app_id=app_id,
+        theme_id=theme_id,
+        wallet_transaction_id=tx.id,
+        original_id=original.id if original else None,
+        list_price_cents=sign * q.list_cents,
+        discount_cents=sign * q.discount_cents,
+        fee_cents=sign * q.fee_cents,
+        vat_cents=sign * q.vat_cents,
+        vat_bps=q.vat_bps,
+        share_bps=q.share_bps,
+        total_cents=sign * q.total_cents,
+        currency=tx.currency,
+        description=description[:255],
+        created_at=now,
+    )
+    db.add(invoice)
+    await db.flush()
+    return invoice
 
 
 async def trial_available(db: AsyncSession, store_id: UUID, app: AppModel) -> bool:
@@ -447,15 +829,22 @@ async def renew_due(
             continue
         start = _aware(sub.current_period_end)
         key = f"app-sub:{sub.id}:renew:{start.isoformat()}"
-        charged = False
+        coupon = await _active_coupon(db, sub)
+        q = await quote_for(db, app, sub.price_cents, coupon, sub_vat_bps(sub))
+        tx = None
         try:
             if sub.price_cents:
-                charged = await source.charge(
+                q, tx = await _charge(
+                    db,
+                    source,
+                    app,
                     tenant_id=sub.tenant_id,
-                    amount_cents=sub.price_cents,
+                    list_cents=sub.price_cents,
                     currency=sub.currency,
                     key=key,
                     note=f"{app.slug} ({sub.cycle}) renewal",
+                    coupon=coupon,
+                    vat_bps=sub_vat_bps(sub),
                 )
         except (InsufficientFundsError, WalletSuspendedError):
             sub.status = "past_due"
@@ -470,15 +859,17 @@ async def renew_due(
                         f"app-past-due:{sub.id}:{start.isoformat()}",
                         important=True,
                         link="/wallet",
-                        amount_cents=sub.price_cents,
+                        amount_cents=q.total_cents,
                     )
                 )
             continue
         sub.current_period_start = start
         sub.current_period_end = start + timedelta(days=CYCLE_DAYS[sub.cycle])
         sub.is_trial = False
-        if charged:
-            await _credit_partner(db, app, sub, sub.price_cents, sub.currency, key, now)
+        if tx is not None:
+            if coupon:
+                _consume_coupon(sub)
+            await _book(db, app, sub, q, tx, key, now)
             stats["renewed"] += 1
             if notices is not None:
                 notices.append(
@@ -487,7 +878,7 @@ async def renew_due(
                         app,
                         "app.renewal_charged",
                         f"app-renewal:{key}",
-                        amount_cents=sub.price_cents,
+                        amount_cents=q.total_cents,
                         period_end=_aware(sub.current_period_end).isoformat(),
                     )
                 )
@@ -608,12 +999,16 @@ async def record_usage(
             f"piasters for the period ({used} used).",
         )
     key = f"app-usage:{installation.id}:{idempotency_key}"
-    await source.charge(
+    q, tx = await _charge(
+        db,
+        source,
+        app,
         tenant_id=installation.tenant_id,
-        amount_cents=amount,
+        list_cents=amount,
         currency=sub.currency,
         key=key,
         note=f"{app.slug} usage: {description}"[:255],
+        vat_bps=sub_vat_bps(sub),
     )
     record = AppUsageRecordModel(
         tenant_id=installation.tenant_id,
@@ -630,7 +1025,8 @@ async def record_usage(
     )
     db.add(record)
     await db.flush()
-    await _credit_partner(db, app, sub, amount, sub.currency, key, now)
+    if tx is not None:
+        await _book(db, app, sub, q, tx, key, now)
     if used + amount == sub.usage_cap_cents and notices is not None:
         notices.append(cap_notice)
     return record, True
@@ -640,8 +1036,9 @@ async def refund_charge(
     db: AsyncSession, *, charge_id: UUID, actor_user_id: UUID, note: str
 ) -> tuple[WalletTransactionModel, PartnerLedgerEntryModel | None] | None:
     """Refund one ``app_charge`` in full: credit the merchant's wallet
-    (``app_charge_reversal``) and take back the partner's share of it (a
-    negative ``adjustment``). None when it was already refunded. Raises
+    (``app_charge_reversal``, VAT included), take back the partner's share of
+    it (a negative ``adjustment``) and issue a credit note against NUMU's fee
+    invoice. None when it was already refunded. Raises
     LookupError for anything that is not an app charge. Caller commits, then
     invalidates the wallet cache."""
     charge = await db.get(WalletTransactionModel, charge_id)
@@ -659,6 +1056,41 @@ async def refund_charge(
     )
     if reversal is None:
         return None
+    purchase = await db.scalar(
+        select(MarketplaceThemePurchaseModel).where(
+            MarketplaceThemePurchaseModel.wallet_transaction_id == charge.id
+        )
+    )
+    if purchase is not None:
+        purchase.status = "refunded"
+        purchase.refunded_amount_cents = purchase.amount_cents
+        purchase.refund_reason = note
+    invoice = await db.scalar(
+        select(AppFeeInvoiceModel).where(
+            AppFeeInvoiceModel.wallet_transaction_id == charge.id,
+            AppFeeInvoiceModel.kind == "invoice",
+        )
+    )
+    if invoice is not None:
+        await issue_fee_invoice(
+            db,
+            tx=reversal,
+            kind="credit_note",
+            q=Quote(
+                list_cents=invoice.list_price_cents,
+                share_bps=invoice.share_bps,
+                fee_cents=invoice.fee_cents,
+                vat_cents=invoice.vat_cents,
+                discount_cents=invoice.discount_cents,
+                vat_bps=invoice.vat_bps,
+            ),
+            store_id=invoice.store_id,
+            app_id=invoice.app_id,
+            theme_id=invoice.theme_id,
+            description=invoice.description,
+            now=_now(),
+            original=invoice,
+        )
     sale = await db.scalar(
         select(PartnerLedgerEntryModel).where(
             PartnerLedgerEntryModel.idempotency_key == charge.idempotency_key,
@@ -674,8 +1106,12 @@ async def refund_charge(
         amount_cents=-sale.amount_cents,
         gross_cents=-(sale.gross_cents or 0),
         platform_fee_cents=-(sale.platform_fee_cents or 0),
+        share_bps=sale.share_bps,
+        discount_cents=-(sale.discount_cents or 0),
+        vat_cents=-(sale.vat_cents or 0),
         currency=sale.currency,
         app_id=sale.app_id,
+        theme_id=sale.theme_id,
         subscription_id=sale.subscription_id,
         idempotency_key=reference,
         reference=reference,
@@ -691,34 +1127,49 @@ async def _credit_partner(
     db: AsyncSession,
     app: AppModel,
     sub: AppSubscriptionModel,
-    gross_cents: int,
+    q: Quote,
     currency: str,
     key: str,
     collected_at: datetime,
 ) -> PartnerLedgerEntryModel | None:
-    """The partner's 80% of one charge. NUMU Apps: nothing to credit."""
+    """The partner's share of one charge at the rate it was quoted with,
+    less their coupon. NUMU Apps: nothing to credit."""
     if app.developer_id is None:
         return None
-    partner_id = await db.scalar(
-        select(PartnerAccountModel.id).where(
-            PartnerAccountModel.user_id == app.developer_id
-        )
-    )
-    if partner_id is None:
+    if q.partner_id is None:
         # Should not happen: publishing needs an approved partner. NUMU holds
         # the money until an admin records an adjustment.
         logger.error("partner_ledger_no_partner_account", app=app.slug, key=key)
         return None
-    share, fee = split(gross_cents)
+    return await _ledger_sale(
+        db, q, currency, key, collected_at, app_id=app.id, subscription_id=sub.id
+    )
+
+
+async def _ledger_sale(
+    db: AsyncSession,
+    q: Quote,
+    currency: str,
+    key: str,
+    collected_at: datetime,
+    *,
+    app_id: UUID | None = None,
+    subscription_id: UUID | None = None,
+    theme_id: UUID | None = None,
+) -> PartnerLedgerEntryModel | None:
     entry = PartnerLedgerEntryModel(
-        partner_id=partner_id,
+        partner_id=q.partner_id,
         kind="sale",
-        amount_cents=share,
-        gross_cents=gross_cents,
-        platform_fee_cents=fee,
+        amount_cents=q.partner_cents,
+        gross_cents=q.list_cents - q.discount_cents,
+        platform_fee_cents=q.fee_cents,
+        share_bps=q.share_bps,
+        discount_cents=q.discount_cents,
+        vat_cents=q.vat_cents,
         currency=currency,
-        app_id=app.id,
-        subscription_id=sub.id,
+        app_id=app_id,
+        subscription_id=subscription_id,
+        theme_id=theme_id,
         idempotency_key=key,
         # The 30-day hold counts from when NUMU collected the money.
         created_at=collected_at,
@@ -730,6 +1181,136 @@ async def _credit_partner(
     except IntegrityError:
         return None  # this charge was already credited
     return entry
+
+
+THEME_CURRENCY = "EGP"
+
+
+async def theme_quote(db: AsyncSession, theme: MarketplaceThemeModel) -> Quote:
+    """A theme purchase: the partner's share of the price, NUMU's fee and VAT
+    on it. A NUMU theme (its developer is no partner) keeps it all."""
+    account = await db.scalar(
+        select(PartnerAccountModel).where(
+            PartnerAccountModel.user_id == theme.developer_id
+        )
+    )
+    return quote(
+        theme.price_cents,
+        effective_share_bps(account) if account else 0,
+        partner_id=account.id if account else None,
+    )
+
+
+async def store_purchase(
+    db: AsyncSession, store_id: UUID, theme_id: UUID
+) -> MarketplaceThemePurchaseModel | None:
+    return await db.scalar(
+        select(MarketplaceThemePurchaseModel).where(
+            MarketplaceThemePurchaseModel.store_id == store_id,
+            MarketplaceThemePurchaseModel.marketplace_theme_id == theme_id,
+            MarketplaceThemePurchaseModel.status == "succeeded",
+        )
+    )
+
+
+async def purchase_theme(
+    db: AsyncSession,
+    *,
+    theme: MarketplaceThemeModel,
+    store_id: UUID,
+    tenant_id: UUID,
+    user_id: UUID,
+    source: ChargeSource,
+    now: datetime | None = None,
+) -> tuple[MarketplaceThemePurchaseModel, bool]:
+    """Buy a paid theme for one store, once and for good (later versions are
+    free). Returns ``(purchase, charged)``; a store that already owns it is
+    charged nothing. The price plus VAT on NUMU's fee comes from the wallet
+    (InsufficientFundsError otherwise); the partner is credited their share
+    and NUMU issues its fee invoice. Caller owns the commit."""
+    now = now or _now()
+    if theme.price_cents <= 0:
+        raise NotPaidError(theme.slug)
+    await db.execute(
+        select(MarketplaceThemeModel.id)
+        .where(MarketplaceThemeModel.id == theme.id)
+        .with_for_update()
+    )
+    owned = await store_purchase(db, store_id, theme.id)
+    if owned is not None:
+        return owned, False
+    earlier = await db.scalar(
+        select(func.count(MarketplaceThemePurchaseModel.id)).where(
+            MarketplaceThemePurchaseModel.store_id == store_id,
+            MarketplaceThemePurchaseModel.marketplace_theme_id == theme.id,
+        )
+    )
+    key = f"theme-purchase:{store_id}:{theme.id}:{earlier or 0}"
+    q = await theme_quote(db, theme)
+    tx = await source.charge(
+        tenant_id=tenant_id,
+        amount_cents=q.total_cents,
+        currency=THEME_CURRENCY,
+        key=key,
+        note=f"theme {theme.slug}"[:255],
+        meta={
+            **q.out(),
+            "share_bps": q.share_bps,
+            "fee_cents": q.fee_cents,
+            "theme_id": str(theme.id),
+        },
+    )
+    if tx is None:
+        raise RuntimeError(f"theme charge {key} already taken")
+    purchase = MarketplaceThemePurchaseModel(
+        user_id=user_id,
+        marketplace_theme_id=theme.id,
+        amount_cents=q.total_cents,
+        currency=THEME_CURRENCY,
+        status="succeeded",
+        store_id=store_id,
+        tenant_id=tenant_id,
+        wallet_transaction_id=tx.id,
+        purchase_metadata={"theme_slug": theme.slug, "rail": "wallet", **q.out()},
+    )
+    db.add(purchase)
+    await db.flush()
+    if q.partner_id is not None:
+        await _ledger_sale(db, q, THEME_CURRENCY, key, now, theme_id=theme.id)
+    await issue_fee_invoice(
+        db,
+        tx=tx,
+        kind="invoice",
+        q=q,
+        store_id=store_id,
+        app_id=None,
+        theme_id=theme.id,
+        description=f"Theme: {theme.name}"[:255],
+        now=now,
+    )
+    logger.info(
+        "theme_purchased",
+        theme=theme.slug,
+        store_id=str(store_id),
+        total_cents=q.total_cents,
+    )
+    return purchase, True
+
+
+async def theme_labels(
+    db: AsyncSession, theme_ids: list[UUID | None]
+) -> dict[UUID, dict[str, str]]:
+    ids = {i for i in theme_ids if i}
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(
+            MarketplaceThemeModel.id,
+            MarketplaceThemeModel.name,
+            MarketplaceThemeModel.slug,
+        ).where(MarketplaceThemeModel.id.in_(ids))
+    )
+    return {r.id: {"name": r.name, "slug": r.slug} for r in rows}
 
 
 async def app_labels(
@@ -898,8 +1479,11 @@ async def partner_statement(
 ) -> dict[str, Any]:
     """One month of a partner's ledger. Every figure is signed as it moves
     the balance, so ``closing = opening + net_sales + referrals + refunds
-    + adjustments + payouts``. Sales: what merchants paid (gross), NUMU's 20% (fees) and
-    the partner's 80% (net). Refunds reverse a sale's share."""
+    + adjustments + payouts``. Sales: what merchants paid before VAT (gross,
+    after the partner's coupons), NUMU's fee and the partner's share (net) at
+    the share each sale was booked with. Refunds reverse a sale's share.
+    Coupon discounts and NUMU's VAT are informational: VAT is NUMU's, on its
+    fee, and never touches the partner's balance."""
     start, end = month_bounds(month)
     opening = int(
         await db.scalar(
@@ -933,6 +1517,7 @@ async def partner_statement(
     payouts = [e for e in entries if e.kind == "payout"]
     referrals = [e for e in entries if e.kind == "referral"]
     apps = await app_labels(db, [e.app_id for e in entries])
+    apps.update(await theme_labels(db, [e.theme_id for e in entries]))
     return {
         "month": month,
         "currency": "EGP",
@@ -944,6 +1529,8 @@ async def partner_statement(
         "refunds_cents": sum(e.amount_cents for e in refunds),
         "adjustments_cents": sum(e.amount_cents for e in others),
         "payouts_cents": sum(e.amount_cents for e in payouts),
+        "coupon_discounts_cents": sum(e.discount_cents or 0 for e in sales + refunds),
+        "vat_collected_cents": sum(e.vat_cents or 0 for e in sales + refunds),
         "closing_balance_cents": opening + sum(e.amount_cents for e in entries),
         "entries": [
             {
@@ -952,8 +1539,12 @@ async def partner_statement(
                 "amount_cents": e.amount_cents,
                 "gross_cents": e.gross_cents,
                 "platform_fee_cents": e.platform_fee_cents,
-                "app_name": apps.get(e.app_id, {}).get("name"),
-                "app_slug": apps.get(e.app_id, {}).get("slug"),
+                "share_bps": e.share_bps,
+                "discount_cents": e.discount_cents,
+                "vat_cents": e.vat_cents,
+                "item": "theme" if e.theme_id else "app",
+                "app_name": apps.get(e.theme_id or e.app_id, {}).get("name"),
+                "app_slug": apps.get(e.theme_id or e.app_id, {}).get("slug"),
                 "reference": e.reference,
                 "created_at": _aware(e.created_at).isoformat(),
             }
@@ -971,6 +1562,8 @@ STATEMENT_TOTALS = (
     "refunds_cents",
     "adjustments_cents",
     "payouts_cents",
+    "coupon_discounts_cents",
+    "vat_collected_cents",
     "closing_balance_cents",
 )
 
@@ -987,9 +1580,13 @@ def statement_csv(statement: dict[str, Any]) -> str:
     cols = [
         "created_at",
         "kind",
+        "item",
         "app_slug",
         "gross_cents",
+        "discount_cents",
+        "share_bps",
         "platform_fee_cents",
+        "vat_cents",
         "amount_cents",
         "reference",
     ]
@@ -1009,8 +1606,28 @@ async def subscription_view(
     offer and this period's usage."""
     price = app_price(app)
     usage = price.usage if price else None
+    list_cents = (sub.price_cents if sub else None) or (
+        price.price_cents if price else 0
+    )
+    coupon = await _active_coupon(db, sub)
+    live = sub is not None and sub.status == "active"
+    next_charge = (
+        await quote_for(
+            db, app, list_cents, coupon, sub_vat_bps(sub) if live else VAT_BPS
+        )
+        if price
+        else None
+    )
     return {
         **subscription_out(sub, app),
+        "vat_bps": next_charge.vat_bps if next_charge else VAT_BPS,
+        "next_charge": next_charge.out() if next_charge else None,
+        "coupon": {
+            "code": coupon.code,
+            "cycles_left": sub.coupon_cycles_left,
+        }
+        if coupon
+        else None,
         "trial_days": price.trial_days if price else 0,
         "trial_available": await trial_available(db, store_id, app),
         "is_trial": bool(sub and sub.is_trial),

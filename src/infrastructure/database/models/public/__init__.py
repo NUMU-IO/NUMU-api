@@ -11,9 +11,12 @@ They include:
 from src.infrastructure.database.models.public.app import (
     AppAccessTokenModel,
     AppInstallationModel,
+    AppListingModel,
     AppModel,
     AppOAuthClientModel,
     AppOAuthCodeModel,
+    AppRatingModel,
+    AppReviewModel,
     AppUninstallEventModel,
     AppUninstallModel,
     AppVersionModel,
@@ -51,6 +54,7 @@ from src.infrastructure.database.models.public.onboarding import StoreOnboarding
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
     PartnerMemberModel,
+    PartnerNotificationModel,
     PartnerReferralModel,
 )
 from src.infrastructure.database.models.public.personal_access_token import (
@@ -66,6 +70,10 @@ from src.infrastructure.database.models.public.reconciliation import (
 from src.infrastructure.database.models.public.subscription_payment import (
     SubscriptionPaymentIntentModel,
     SubscriptionPaymentProofModel,
+)
+from src.infrastructure.database.models.public.support_ticket import (
+    SupportMessageModel,
+    SupportTicketModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.theme_admin_config import (
@@ -90,7 +98,12 @@ __all__ = [
     "AppInstallationModel",
     "AppUninstallModel",
     "AppUninstallEventModel",
+    "AppRatingModel",
+    "SupportTicketModel",
+    "SupportMessageModel",
     "AppVersionModel",
+    "AppListingModel",
+    "AppReviewModel",
     "AppOAuthClientModel",
     "AppOAuthCodeModel",
     "AppAccessTokenModel",
@@ -98,6 +111,7 @@ __all__ = [
     "PartnerLedgerEntryModel",
     "PartnerAccountModel",
     "PartnerMemberModel",
+    "PartnerNotificationModel",
     "PartnerReferralModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",

@@ -31,6 +31,7 @@ from src.infrastructure.database.models.public.wallet import WalletTransactionMo
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 PRICE = 9_900  # EGP 99 a month
+CHARGE = PRICE + 277  # plus 14% VAT on NUMU's 20% fee (1_980)
 
 
 def _pricing(price):
@@ -164,7 +165,7 @@ async def test_subscribing_charges_the_wallet_once_and_credits_the_partner_80(
     assert charged is True
     assert sub.status == "active"
     assert billing._aware(sub.current_period_end) == NOW + timedelta(days=30)
-    assert await _balance(test_session, tenant.id) == 20_000 - PRICE
+    assert await _balance(test_session, tenant.id) == 20_000 - CHARGE
     entry = await test_session.scalar(select(PartnerLedgerEntryModel))
     assert (
         entry.kind,
@@ -197,7 +198,7 @@ async def test_a_second_click_while_covered_charges_nothing(test_session):
     await test_session.commit()
 
     assert charged is False
-    assert await _balance(test_session, tenant.id) == 50_000 - PRICE
+    assert await _balance(test_session, tenant.id) == 50_000 - CHARGE
     charges = await test_session.scalar(
         select(func.count()).where(WalletTransactionModel.kind == "app_charge")
     )
@@ -207,7 +208,7 @@ async def test_a_second_click_while_covered_charges_nothing(test_session):
 
 @pytest.mark.asyncio
 async def test_an_empty_wallet_is_refused_and_nothing_is_written(test_session):
-    _, app, install, partner = await _seed(test_session, balance=PRICE - 1)
+    _, app, install, partner = await _seed(test_session, balance=CHARGE - 1)
     install_id, partner_id = install.id, partner.id  # expired by the rollback
     with pytest.raises(billing.InsufficientFundsError) as exc:
         await billing.subscribe(
@@ -217,7 +218,7 @@ async def test_an_empty_wallet_is_refused_and_nothing_is_written(test_session):
             source=_source(test_session),
             now=NOW,
         )
-    assert (exc.value.needed_cents, exc.value.balance_cents) == (PRICE, PRICE - 1)
+    assert (exc.value.needed_cents, exc.value.balance_cents) == (CHARGE, CHARGE - 1)
     await test_session.rollback()
     assert await billing.subscription_for(test_session, install_id) is None
     assert await _ledger_sum(test_session, partner_id) == 0
@@ -225,7 +226,9 @@ async def test_an_empty_wallet_is_refused_and_nothing_is_written(test_session):
 
 @pytest.mark.asyncio
 async def test_a_numu_app_keeps_the_whole_charge(test_session):
-    tenant, app, install, _ = await _seed(test_session, partner=False, balance=PRICE)
+    tenant, app, install, _ = await _seed(
+        test_session, partner=False, balance=PRICE + 1_386
+    )
     await billing.subscribe(
         test_session,
         installation=install,
@@ -258,7 +261,7 @@ async def test_a_free_app_cannot_be_subscribed_to(test_session):
 
 @pytest.mark.asyncio
 async def test_access_follows_the_paid_period(test_session):
-    _, app, install, _ = await _seed(test_session, balance=PRICE)
+    _, app, install, _ = await _seed(test_session, balance=CHARGE)
     assert not await billing.is_entitled(test_session, install, app, now=NOW)
 
     await billing.subscribe(
@@ -290,7 +293,7 @@ async def test_a_free_app_is_always_entitled(test_session):
 
 @pytest.mark.asyncio
 async def test_cancelling_keeps_access_to_the_end_of_the_period(test_session):
-    _, app, install, _ = await _seed(test_session, balance=PRICE)
+    _, app, install, _ = await _seed(test_session, balance=CHARGE)
     await billing.subscribe(
         test_session,
         installation=install,
@@ -328,7 +331,7 @@ async def test_renewal_charges_the_snapshot_price_and_credits_again(test_session
     await test_session.commit()
 
     assert stats == {"renewed": 1, "cancelled": 0, "past_due": 0}
-    assert await _balance(test_session, tenant.id) == 30_000 - 2 * PRICE
+    assert await _balance(test_session, tenant.id) == 30_000 - 2 * CHARGE
     sub = await billing.subscription_for(test_session, install.id)
     assert billing._aware(sub.current_period_end) == NOW + timedelta(days=60)
     assert await _ledger_sum(test_session, partner.id) == 2 * 7_920
@@ -340,7 +343,7 @@ async def test_renewal_charges_the_snapshot_price_and_credits_again(test_session
 
 @pytest.mark.asyncio
 async def test_renewal_with_an_empty_wallet_goes_past_due(test_session):
-    tenant, app, install, partner = await _seed(test_session, balance=PRICE)
+    tenant, app, install, partner = await _seed(test_session, balance=CHARGE)
     source = _source(test_session)
     await billing.subscribe(
         test_session, installation=install, app=app, source=source, now=NOW
@@ -359,7 +362,7 @@ async def test_renewal_with_an_empty_wallet_goes_past_due(test_session):
     assert await _ledger_sum(test_session, partner.id) == 7_920
 
     # Top up and subscribe again: a fresh period from now.
-    await _top_up(test_session, tenant.id, PRICE)
+    await _top_up(test_session, tenant.id, CHARGE)
     sub, charged = await billing.subscribe(
         test_session, installation=install, app=app, source=source, now=later
     )
@@ -383,7 +386,7 @@ async def test_a_cancelled_or_uninstalled_subscription_is_not_charged(test_sessi
     )
     await test_session.commit()
     assert stats["cancelled"] == 1
-    assert await _balance(test_session, tenant.id) == 9 * PRICE
+    assert await _balance(test_session, tenant.id) == 10 * PRICE - CHARGE
 
 
 @pytest.mark.asyncio
@@ -401,7 +404,7 @@ async def test_a_suspended_app_is_not_charged(test_session):
     )
     await test_session.commit()
     assert stats["cancelled"] == 1
-    assert await _balance(test_session, tenant.id) == 9 * PRICE
+    assert await _balance(test_session, tenant.id) == 10 * PRICE - CHARGE
 
 
 # ─── The partner ledger ────────────────────────────────────────────
@@ -434,7 +437,7 @@ async def test_the_balance_is_the_sum_of_the_entries(test_session):
 
 @pytest.mark.asyncio
 async def test_a_payout_cannot_exceed_the_balance_or_repeat_a_reference(test_session):
-    _, app, install, partner = await _seed(test_session, balance=PRICE)
+    _, app, install, partner = await _seed(test_session, balance=CHARGE)
     await billing.subscribe(
         test_session,
         installation=install,
@@ -477,7 +480,7 @@ async def test_a_payout_cannot_exceed_the_balance_or_repeat_a_reference(test_ses
 
 @pytest.mark.asyncio
 async def test_sales_stay_on_hold_for_30_days(test_session):
-    _, app, install, partner = await _seed(test_session, balance=PRICE)
+    _, app, install, partner = await _seed(test_session, balance=CHARGE)
     await billing.subscribe(
         test_session,
         installation=install,
@@ -509,7 +512,7 @@ async def test_sales_stay_on_hold_for_30_days(test_session):
 
 @pytest.mark.asyncio
 async def test_an_adjustment_reverses_a_refunded_share(test_session):
-    _, app, install, partner = await _seed(test_session, balance=PRICE)
+    _, app, install, partner = await _seed(test_session, balance=CHARGE)
     await billing.subscribe(
         test_session,
         installation=install,

@@ -95,6 +95,7 @@ class MarketplaceRepository:
             description_ar=getattr(m, "description_ar", None),
             short_description=m.short_description,
             price_cents=m.price_cents,
+            pending_price_cents=getattr(m, "pending_price_cents", None),
             currency=m.currency,
             status=MarketplaceThemeStatus(m.status),
             thumbnail_url=m.thumbnail_url,
@@ -643,6 +644,7 @@ class MarketplaceRepository:
                 == marketplace_theme_id,
                 MarketplaceThemePurchaseModel.status
                 == MarketplacePurchaseStatus.SUCCEEDED.value,
+                MarketplaceThemePurchaseModel.store_id.is_(None),
             )
             .limit(1)
         )

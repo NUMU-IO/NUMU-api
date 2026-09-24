@@ -24,8 +24,18 @@ from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.partners import DEV_PLAN, PartnerAccountOut
-from src.application.services.app_billing import partner_statement, statement_csv
+from src.application.services.app_billing import (
+    PARTNER_SHARE_BPS,
+    coupon_out,
+    partner_statement,
+    redemption_count,
+    statement_csv,
+)
 from src.application.services.audit_service import AuditService
+from src.application.services.partner_notifications import (
+    emit_partner_notification,
+    post_platform_notice,
+)
 from src.application.services.partner_program import (
     program_enabled,
     set_program_enabled,
@@ -35,8 +45,11 @@ from src.application.services.partner_referrals import (
     ensure_code,
     referred_stores,
 )
+from src.infrastructure.database.models.public.app import AppModel
+from src.infrastructure.database.models.public.app_billing import AppCouponModel
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
+    PartnerNotificationModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.user import UserModel
@@ -89,6 +102,10 @@ class SuspensionRequest(BaseModel):
 
 class ProgramState(BaseModel):
     enabled: bool
+
+
+class ShareRequest(BaseModel):
+    share_bps: int | None = Field(default=None, ge=0, le=10_000)
 
 
 async def _load(db: AsyncSession, partner_id: UUID) -> PartnerAccountModel:
@@ -211,6 +228,81 @@ async def put_partner_billing(
 # ─── Queue ────────────────────────────────────────────────────────
 
 
+# ─── Platform notices (changelog, deprecations) ───────────────────
+
+
+class NoticeRequest(BaseModel):
+    notice_kind: Literal["changelog", "deprecation"]
+    title_ar: str = Field(min_length=3, max_length=200)
+    title_en: str = Field(min_length=3, max_length=200)
+    body_ar: str = Field(min_length=3, max_length=4000)
+    body_en: str = Field(min_length=3, max_length=4000)
+    link: str | None = Field(default=None, max_length=512)
+
+    @model_validator(mode="after")
+    def _https_link(self):
+        if self.link and not self.link.startswith("https://"):
+            raise ValueError("link must be an https:// URL")
+        return self
+
+
+@router.get("/notices", response_model=SuccessResponse[list[dict]])
+async def list_notices(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+):
+    """Notices posted to every partner, newest first, with their reach."""
+    rows = (
+        await db.scalars(
+            select(PartnerNotificationModel)
+            .where(PartnerNotificationModel.kind == "platform_notice")
+            .order_by(PartnerNotificationModel.created_at.desc())
+        )
+    ).all()
+    notices: dict[str, dict] = {}
+    # ponytail: groups every notice row in Python (rows = notices x partners);
+    # fine at today's partner count, move to a notices table if it grows.
+    for r in rows:
+        key = r.data.get("notice_id")
+        if key in notices:
+            notices[key]["recipients"] += 1
+        elif len(notices) < limit:
+            notices[key] = {
+                **{
+                    k: r.data.get(k)
+                    for k in ("notice_id", "notice_kind", "title", "body", "link")
+                },
+                "created_at": r.created_at,
+                "recipients": 1,
+            }
+    return SuccessResponse(data=list(notices.values()))
+
+
+@router.post("/notices", response_model=SuccessResponse[dict], dependencies=_STEP_UP)
+async def post_notice(
+    body: NoticeRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Post a changelog or API deprecation notice to every approved partner."""
+    notice_id, recipients = await post_platform_notice(
+        db,
+        notice_kind=body.notice_kind,
+        title={"ar": body.title_ar, "en": body.title_en},
+        body={"ar": body.body_ar, "en": body.body_en},
+        link=body.link,
+    )
+    await AuditService(db).log(
+        event_type="admin.partner_program",
+        action="partner_notice_posted",
+        resource_type="partner_notice",
+        resource_id=str(notice_id),
+        user_id=admin_id,
+        new_value={"notice_kind": body.notice_kind, "recipients": recipients},
+    )
+    return SuccessResponse(data={"notice_id": str(notice_id), "recipients": recipients})
+
+
 @router.get("", response_model=SuccessResponse[list[AdminPartner]])
 async def list_partners(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -327,15 +419,19 @@ class PayoutRequest(BaseModel):
 
 
 def _entry_out(e, apps: dict | None = None) -> dict:
-    app = (apps or {}).get(e.app_id) or {}
+    app = (apps or {}).get(e.theme_id or e.app_id) or {}
     return {
         "id": str(e.id),
         "kind": e.kind,
         "amount_cents": e.amount_cents,
         "gross_cents": e.gross_cents,
         "platform_fee_cents": e.platform_fee_cents,
+        "share_bps": e.share_bps,
+        "discount_cents": e.discount_cents,
+        "vat_cents": e.vat_cents,
         "currency": e.currency,
         "app_id": str(e.app_id) if e.app_id else None,
+        "theme_id": str(e.theme_id) if e.theme_id else None,
         "app_name": app.get("name"),
         "app_slug": app.get("slug"),
         "reference": e.reference,
@@ -357,6 +453,7 @@ async def ledger(
         charge_ids,
         partner_balance,
         partner_payable,
+        theme_labels,
     )
     from src.infrastructure.database.models.public.app_billing import (
         PartnerLedgerEntryModel,
@@ -376,6 +473,7 @@ async def ledger(
         .all()
     )
     apps = await app_labels(db, [e.app_id for e in rows])
+    apps.update(await theme_labels(db, [e.theme_id for e in rows]))
     charges = await charge_ids(
         db, [e.idempotency_key for e in rows if e.kind == "sale"]
     )
@@ -427,6 +525,16 @@ async def payout(
         resource_id=str(a.id),
         user_id=admin_id,
         new_value={"amount_cents": body.amount_cents, "reference": entry.reference},
+    )
+    await emit_partner_notification(
+        db,
+        partner_id=a.id,
+        kind="payout_recorded",
+        data={
+            "amount_cents": body.amount_cents,
+            "currency": entry.currency,
+            "reference": entry.reference,
+        },
     )
     await db.flush()
     return SuccessResponse(
@@ -510,6 +618,56 @@ async def admin_statement_csv(
                 f'attachment; filename="partner-{partner_id}-{month}.csv"'
             )
         },
+    )
+
+
+# ─── Revenue share and coupons ────────────────────────────────────
+
+
+@router.put(
+    "/{partner_id}/share",
+    response_model=SuccessResponse[AdminPartner],
+    dependencies=_STEP_UP,
+)
+async def set_share(
+    partner_id: UUID,
+    body: ShareRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """The partner's share of each app sale in basis points (8000 = 80%);
+    null returns them to the default. Applies to charges from now on; every
+    sale records the share it was booked with."""
+    a = await _load(db, partner_id)
+    old = a.share_bps
+    a.share_bps = body.share_bps
+    await AuditService(db).log(
+        event_type="admin.partner_program",
+        action="partner_share_changed",
+        resource_type="partner_account",
+        resource_id=str(a.id),
+        user_id=admin_id,
+        old_value={"share_bps": old},
+        new_value={"share_bps": body.share_bps, "default_bps": PARTNER_SHARE_BPS},
+    )
+    await db.flush()
+    return SuccessResponse(data=await _admin_view(db, a))
+
+
+@router.get("/{partner_id}/coupons", response_model=SuccessResponse[list[dict]])
+async def partner_coupons(
+    partner_id: UUID, db: Annotated[AsyncSession, Depends(get_db)]
+):
+    """The partner's app coupons and how many stores redeemed each."""
+    await _load(db, partner_id)
+    rows = await db.execute(
+        select(AppCouponModel, AppModel.name, redemption_count())
+        .join(AppModel, AppModel.id == AppCouponModel.app_id)
+        .where(AppCouponModel.partner_id == partner_id)
+        .order_by(AppCouponModel.created_at.desc())
+    )
+    return SuccessResponse(
+        data=[coupon_out(c, name, used or 0) for c, name, used in rows]
     )
 
 

@@ -17,6 +17,7 @@ from uuid import UUID as PyUUID
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -81,6 +82,15 @@ class AppSubscriptionModel(Base, UUIDMixin, TimestampMixin):
     #: Usage pricing the merchant approved when subscribing (snapshot).
     usage_cap_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     usage_unit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    coupon_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_coupons.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    coupon_cycles_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vat_grandfathered: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
 
 class AppTrialModel(Base):
@@ -172,6 +182,14 @@ class PartnerLedgerEntryModel(Base, UUIDMixin):
     #: sale only: what the merchant paid, and NUMU's fee out of it.
     gross_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     platform_fee_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    share_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    discount_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    vat_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    theme_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketplace_themes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EGP")
     app_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -198,6 +216,129 @@ class PartnerLedgerEntryModel(Base, UUIDMixin):
         nullable=True,
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AppCouponModel(Base, UUIDMixin, TimestampMixin):
+    """A partner's discount code for one of their apps. The partner funds it:
+    it comes out of the partner's share, never NUMU's fee."""
+
+    __tablename__ = "app_coupons"
+    __table_args__ = (
+        UniqueConstraint("app_id", "code", name="uq_app_coupons_app_code"),
+        CheckConstraint(
+            "(percent_off IS NULL) <> (amount_off_cents IS NULL)",
+            name="ck_app_coupons_one_discount",
+        ),
+        {"schema": "public"},
+    )
+
+    partner_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.partner_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    app_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    percent_off: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    amount_off_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_cycles: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_redemptions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    store_id: Mapped[PyUUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class AppCouponRedemptionModel(Base, UUIDMixin):
+    """A store used a coupon. One per store and coupon."""
+
+    __tablename__ = "app_coupon_redemptions"
+    __table_args__ = (
+        UniqueConstraint("coupon_id", "store_id", name="uq_app_coupon_redemption"),
+        {"schema": "public"},
+    )
+
+    coupon_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_coupons.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    store_id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    tenant_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    subscription_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_subscriptions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AppFeeInvoiceModel(Base, UUIDMixin):
+    """NUMU's numbered invoice to a merchant for NUMU's fee on one app charge
+    and the VAT on it, or the credit note that reverses one."""
+
+    __tablename__ = "app_fee_invoices"
+    __table_args__ = (
+        UniqueConstraint("number", name="uq_app_fee_invoices_number"),
+        UniqueConstraint(
+            "wallet_transaction_id", "kind", name="uq_app_fee_invoices_tx_kind"
+        ),
+        Index("ix_app_fee_invoices_tenant_created", "tenant_id", "created_at"),
+        {"schema": "public"},
+    )
+
+    number: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    tenant_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    store_id: Mapped[PyUUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    app_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    wallet_transaction_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.wallet_transactions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    theme_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketplace_themes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    original_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_fee_invoices.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    list_price_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    discount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    fee_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    vat_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    vat_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+    share_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EGP")
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

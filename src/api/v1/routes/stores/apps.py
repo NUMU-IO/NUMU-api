@@ -19,6 +19,7 @@ only ever see *published* apps in the catalog.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlencode, urljoin, urlsplit
 from uuid import UUID
@@ -32,6 +33,13 @@ from src.api.dependencies import get_current_user_id, verify_store_ownership
 from src.api.dependencies.feature_flags import _read_feature_flags, is_flag_enabled
 from src.api.dependencies.repositories import get_store_repository
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.app_reviews import rating_summaries
+from src.application.services.app_billing import (
+    CouponError,
+    app_price,
+    quote_for,
+    redeemable_coupon,
+)
 from src.application.services.app_manifest import validate_settings
 from src.application.services.numu_apps import (
     FLAG,
@@ -100,6 +108,10 @@ class AppListing(BaseModel):
     pricing: dict[str, Any] | None = None
     languages: list[str] = []
     compatibility: dict[str, Any] | None = None
+    #: A Partner App's reviewed listing: a YouTube/Vimeo link and search
+    #: keywords per language.
+    video_url: str | None = None
+    keywords: dict[str, list[str]] = {}
     #: Partner App opted in to render inside the hub (``/apps/<slug>/app``).
     embedded: bool = False
 
@@ -122,6 +134,8 @@ def _listing(manifest: dict | None) -> AppListing:
         compatibility=(
             m.get("compatibility") if isinstance(m.get("compatibility"), dict) else None
         ),
+        video_url=m.get("video_url") if isinstance(m.get("video_url"), str) else None,
+        keywords=m.get("keywords") if isinstance(m.get("keywords"), dict) else {},
         embedded=bool((m.get("app") or {}).get("embedded")),
     )
 
@@ -137,6 +151,8 @@ class AppCatalogEntry(BaseModel):
     #: Partner Apps install through consent: what the hub needs to open it
     #: (``client_id``, the first registered ``redirect_uri``, the scopes).
     connect: dict[str, Any] | None = None
+    rating: float | None = None
+    reviews_count: int = 0
 
 
 class AppInstallation(BaseModel):
@@ -302,6 +318,7 @@ async def list_catalog(store_id: UUID):
             or_(AppModel.developer_id.is_(None), partner_listed),
         )
         rows = (await session.execute(stmt)).scalars().all()
+        ratings = await rating_summaries(session, [a.id for a in rows])
         client_ids = dict(
             (
                 await session.execute(
@@ -331,6 +348,8 @@ async def list_catalog(store_id: UUID):
                 blocks=(a.manifest or {}).get("blocks", []) or [],
                 listing=_listing(a.manifest),
                 connect=connect(a),
+                rating=ratings.get(a.id, (None, 0))[0],
+                reviews_count=ratings.get(a.id, (None, 0))[1],
             )
             for a in rows
         ],
@@ -765,13 +784,61 @@ async def get_subscription(store_id: UUID, slug: str):
         )
 
 
+class SubscribeRequest(BaseModel):
+    coupon_code: str | None = None
+
+
+def _coupon_error(exc: CouponError) -> HTTPException:
+    return HTTPException(status_code=422, detail={"code": exc.code})
+
+
+@router.get(
+    "/{slug}/subscription/quote",
+    response_model=SuccessResponse[dict[str, Any]],
+    summary="What subscribing costs now, with an optional coupon",
+    operation_id="quote_app_subscription",
+)
+async def quote_subscription(store_id: UUID, slug: str, coupon_code: str | None = None):
+    """The next charge: the list price, the coupon discount (taken from the
+    partner's share and capped at it), VAT on NUMU's fee, and the total.
+    422 ``{code}`` for a coupon this store can't use."""
+    async with AsyncSessionLocal() as session:
+        _, app = await _install_for(session, store_id, slug)
+        price = app_price(app)
+        if price is None:
+            raise HTTPException(status_code=409, detail="This app is free.")
+        coupon = None
+        if coupon_code:
+            try:
+                coupon = await redeemable_coupon(
+                    session, app, store_id, coupon_code, datetime.now(UTC), lock=False
+                )
+            except CouponError as exc:
+                raise _coupon_error(exc) from None
+        q = await quote_for(session, app, price.price_cents, coupon)
+        return SuccessResponse(
+            data={
+                **q.out(),
+                "currency": price.currency,
+                "coupon": {
+                    "code": coupon.code,
+                    "duration_cycles": coupon.duration_cycles,
+                }
+                if coupon
+                else None,
+            }
+        )
+
+
 @router.post(
     "/{slug}/subscription",
     response_model=SuccessResponse[dict[str, Any]],
     summary="Pay for a paid app from the store's wallet",
     operation_id="subscribe_app",
 )
-async def subscribe_app(store_id: UUID, slug: str):
+async def subscribe_app(
+    store_id: UUID, slug: str, body: SubscribeRequest | None = None
+):
     """Charges one period to the NUMU wallet, now, or starts the app's free
     trial on the store's first subscription. Already covered: nothing is
     charged (and a pending cancellation is withdrawn). 402 when the wallet
@@ -800,8 +867,14 @@ async def subscribe_app(store_id: UUID, slug: str):
         source = WalletChargeSource(session)
         try:
             sub, started = await subscribe(
-                session, installation=install, app=app, source=source
+                session,
+                installation=install,
+                app=app,
+                source=source,
+                coupon_code=body.coupon_code if body else None,
             )
+        except CouponError as exc:
+            raise _coupon_error(exc) from None
         except NotPaidError:
             raise HTTPException(status_code=409, detail="This app is free.") from None
         except InsufficientFundsError as exc:

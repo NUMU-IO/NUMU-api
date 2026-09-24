@@ -26,6 +26,7 @@ from src.infrastructure.database.models.public.partner_account import (
 )
 from src.infrastructure.database.models.public.wallet import WalletTransactionModel
 from tests.unit.application.test_app_billing import (
+    CHARGE,
     NOW,
     PRICE,
     _balance,
@@ -94,13 +95,13 @@ def test_trial_and_usage_pricing_validate_and_label():
 async def test_the_first_subscription_is_a_free_trial_then_renewal_charges(
     test_session,
 ):
-    tenant, app, install, partner = await _priced(test_session, TRIAL, balance=PRICE)
+    tenant, app, install, partner = await _priced(test_session, TRIAL, balance=CHARGE)
     sub, started = await _subscribe(test_session, install, app)
     await test_session.commit()
 
     assert started and sub.is_trial
     assert billing._aware(sub.current_period_end) == NOW + timedelta(days=14)
-    assert await _balance(test_session, tenant.id) == PRICE
+    assert await _balance(test_session, tenant.id) == CHARGE
     assert await _ledger_sum(test_session, partner.id) == 0
     assert await billing.is_entitled(test_session, install, app, now=NOW)
 
@@ -126,7 +127,7 @@ async def test_the_first_subscription_is_a_free_trial_then_renewal_charges(
 
 @pytest.mark.asyncio
 async def test_one_trial_per_store_and_app_even_after_reinstalling(test_session):
-    tenant, app, install, _ = await _priced(test_session, TRIAL, balance=PRICE)
+    tenant, app, install, _ = await _priced(test_session, TRIAL, balance=CHARGE)
     await _subscribe(test_session, install, app)
     await test_session.commit()
     assert not await billing.trial_available(test_session, install.store_id, app)
@@ -203,7 +204,7 @@ async def test_usage_is_charged_now_and_stops_at_the_approved_cap(test_session):
     await test_session.commit()
 
     assert await billing.usage_used_cents(test_session, sub) == 1_000
-    assert await _balance(test_session, tenant.id) == 4_000
+    assert await _balance(test_session, tenant.id) == 5_000 - 1_028
     assert await _ledger_sum(test_session, partner.id) == 480 + 320
 
     # A new period starts from zero.
@@ -222,7 +223,7 @@ async def test_a_replayed_usage_key_charges_once(test_session):
     await test_session.commit()
     assert new and not new_again and first.id == again.id
     assert await _app_charges(test_session) == 1
-    assert await _balance(test_session, tenant.id) == 4_700
+    assert await _balance(test_session, tenant.id) == 5_000 - 308
     assert await _ledger_sum(test_session, partner.id) == 240
 
 
@@ -289,7 +290,7 @@ async def test_an_app_token_only_charges_its_own_installation(
 
 @pytest.mark.asyncio
 async def test_a_refund_credits_the_wallet_and_reverses_the_share_once(test_session):
-    tenant, app, install, partner = await _seed(test_session, balance=PRICE)
+    tenant, app, install, partner = await _seed(test_session, balance=CHARGE)
     await _subscribe(test_session, install, app)
     await test_session.commit()
     charge = await test_session.scalar(
@@ -303,9 +304,9 @@ async def test_a_refund_credits_the_wallet_and_reverses_the_share_once(test_sess
         test_session, charge_id=charge.id, actor_user_id=admin, note="Refund 14 days"
     )
     await test_session.commit()
-    assert reversal.amount_cents == PRICE
+    assert reversal.amount_cents == CHARGE
     assert adjustment.amount_cents == -7_920 and adjustment.gross_cents == -PRICE
-    assert await _balance(test_session, tenant.id) == PRICE
+    assert await _balance(test_session, tenant.id) == CHARGE
     assert await _ledger_sum(test_session, partner.id) == 0
 
     assert (
@@ -315,7 +316,7 @@ async def test_a_refund_credits_the_wallet_and_reverses_the_share_once(test_sess
         is None
     )
     await test_session.commit()
-    assert await _balance(test_session, tenant.id) == PRICE
+    assert await _balance(test_session, tenant.id) == CHARGE
     assert await _ledger_sum(test_session, partner.id) == 0
     with pytest.raises(LookupError):
         await billing.refund_charge(

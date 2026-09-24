@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -30,8 +30,11 @@ from src.api.dependencies.partners import (
     require_agreed_partner,
     require_partner_program,
 )
+from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.stores.apps import AppCatalogEntry, _listing
 from src.application.services.app_manifest import (
+    CATEGORIES,
     SLUG_RE,
     ManifestV1,
     PrivateManifestV1,
@@ -40,14 +43,33 @@ from src.application.services.app_manifest import (
     semver_key,
     to_listing_manifest,
 )
+from src.application.services.app_review import (
+    REVIEW_SLA_BUSINESS_DAYS,
+    ListingContent,
+    due_at,
+    editable_listing,
+    go_live,
+    keep_names,
+    listing_manifest,
+    live_listing,
+    name_change,
+    notify_status,
+    open_review_of,
+    queue_position,
+    start_round,
+    subject_of,
+)
 from src.application.services.app_tokens import mint, store_client_secret
 from src.application.services.partner_program import partner_for_user
 from src.core.entities.app import AppStatus
+from src.core.interfaces.services.storage_service import StorageBucket
 from src.core.logging import get_logger
 from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
+    AppListingModel,
     AppModel,
     AppOAuthClientModel,
+    AppReviewModel,
     AppVersionModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
@@ -132,6 +154,57 @@ class UploadVersionRequest(BaseModel):
 
 class DevInstallRequest(BaseModel):
     store_id: UUID
+
+
+class SubmitVersionRequest(BaseModel):
+    #: Send the listing draft for review in the same round.
+    with_listing: bool = False
+
+
+class ListingDraftOut(BaseModel):
+    id: UUID
+    status: str
+    content: dict[str, Any]
+    version_id: UUID | None
+    submitted_at: datetime | None
+    updated_at: datetime
+
+
+class ListingOut(BaseModel):
+    listed: bool
+    categories: list[str]
+    live: dict[str, Any]
+    draft: ListingDraftOut | None
+    #: The draft (or the live listing) as the merchant App Store shows it.
+    preview: AppCatalogEntry
+
+
+class ReviewRoundOut(BaseModel):
+    id: UUID
+    round: int
+    subject: str
+    version: str | None
+    version_id: UUID | None
+    listing_id: UUID | None
+    status: str
+    submitted_at: datetime
+    decided_at: datetime | None
+    notes: dict | None
+    checklist: dict | None
+
+
+class OpenReviewOut(BaseModel):
+    review_id: UUID
+    position: int
+    queue_length: int
+    submitted_at: datetime
+    expected_by: datetime
+
+
+class ReviewTimeline(BaseModel):
+    rounds: list[ReviewRoundOut]
+    open: OpenReviewOut | None
+    sla_business_days: int
 
 
 # ─── Helpers ──────────────────────────────────────────────────────
@@ -251,6 +324,38 @@ async def _check_pricing(db: AsyncSession, model: str) -> None:
 
 def _conflict(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+
+async def _apply_manifest(db: AsyncSession, app: AppModel, m: dict) -> None:
+    """Copy a version's manifest onto the app row. The app keeps its name
+    and, once it has one, its live listing: the manifest never renames."""
+    live = await db.scalar(
+        select(AppListingModel).where(
+            AppListingModel.app_id == app.id, AppListingModel.status == "live"
+        )
+    )
+    built = to_listing_manifest(m, developer_name=await _developer_name(db, app))
+    app.manifest = (
+        listing_manifest(built, live.content) if live else keep_names(app, built)
+    )
+    app.description = m["tagline"]["en"]
+    app.icon_url = m["icon"]
+    app.category = m["category"]
+    app.version = m["version"]
+    if live:
+        app.description = live.content["tagline"]["en"]
+        app.category = live.content["category"]
+
+
+async def _no_open_review(db: AsyncSession, app: AppModel) -> None:
+    """One review round per app at a time: a reviewer judges a change
+    against the live app, and two queued rounds would split that."""
+    if await open_review_of(db, app.id):
+        raise _conflict("This app is already in review; wait for NUMU's decision.")
+
+
+def _draft_out(row: AppListingModel) -> ListingDraftOut:
+    return ListingDraftOut.model_validate(row, from_attributes=True)
 
 
 def _assert_public_urls(m: dict[str, Any]) -> None:
@@ -465,18 +570,16 @@ async def upload_version(
     if app.status == AppStatus.DRAFT:
         # Never published: the app row mirrors the newest upload, so a
         # dev-install on the partner's own store shows the current listing.
-        app.manifest = to_listing_manifest(
-            data, developer_name=await _developer_name(db, app)
-        )
-        app.name = manifest.name.en
-        app.description = manifest.tagline.en
-        app.icon_url = manifest.icon
-        app.category = manifest.category
-        app.version = manifest.version
+        await _apply_manifest(db, app, data)
+    renamed = name_change(app, {"name": data["name"]})
     await db.flush()
     await db.refresh(v)
     return SuccessResponse(
-        data=_version_out(v, _published_manifest(versions)), message="Version uploaded"
+        data=_version_out(v, _published_manifest(versions)),
+        message="Version uploaded. The name in numu.app.json is not used: "
+        "rename the app in its listing."
+        if renamed
+        else "Version uploaded",
     )
 
 
@@ -488,31 +591,25 @@ async def submit_version(
     version_id: UUID,
     user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    body: SubmitVersionRequest | None = None,
 ):
-    """Send a draft (or a version NUMU asked to change) for review."""
+    """Send a draft (or a version NUMU asked to change) for review, with the
+    listing draft when ``with_listing``. Each submission is a new round."""
     app = await _own_app(db, user_id, app_id)
     if app.private_store_id:
         raise _conflict("A private app is not reviewed; publish it directly.")
     v = await _version(db, app, version_id)
     if v.status not in EDITABLE:
         raise _conflict(f"a {v.status} version cannot be submitted")
-    # One version in review per app: a reviewer judges a change against the
-    # live version, and two queued versions of one app would split that.
-    in_review = await db.scalar(
-        select(AppVersionModel.version).where(
-            AppVersionModel.app_id == app.id,
-            AppVersionModel.status.in_(("submitted", "in_review")),
-        )
-    )
-    if in_review:
-        raise _conflict(
-            f"v{in_review} is already in review; wait for NUMU's decision first"
-        )
+    await _no_open_review(db, app)
+    listing = None
+    if body and body.with_listing:
+        listing = await editable_listing(db, app.id)
+        if listing is None:
+            raise _conflict("There is no listing draft to submit.")
     # The offline check ran at upload.
     _assert_public_urls(v.manifest)
-    v.status = "submitted"
-    v.submitted_at = datetime.now(UTC)
-    await db.flush()
+    await start_round(db, app, version=v, listing=listing)
     logger.info("partner_app_version_submitted", app=app.slug, version=v.version)
     return SuccessResponse(
         data=_version_out(v, _published_manifest(await _versions(db, app.id))),
@@ -551,22 +648,200 @@ async def publish_version(
         .where(AppVersionModel.app_id == app.id, AppVersionModel.status == "published")
         .values(status="superseded")
     )
-    m = v.manifest
     v.status = "published"
     v.published_at = datetime.now(UTC)
-    app.manifest = to_listing_manifest(m, developer_name=await _developer_name(db, app))
-    app.name = m["name"]["en"]
-    app.description = m["tagline"]["en"]
-    app.icon_url = m["icon"]
-    app.category = m["category"]
-    app.version = v.version
+    await _apply_manifest(db, app, v.manifest)
+    attached = await db.scalar(
+        select(AppListingModel).where(
+            AppListingModel.version_id == v.id, AppListingModel.status == "approved"
+        )
+    )
+    if attached:
+        await go_live(db, app, attached)
     app.status = AppStatus.PUBLISHED
+    await notify_status(db, app, "published", version=v.version)
     await db.flush()
     await db.refresh(app)
     logger.info("partner_app_version_published", app=app.slug, version=v.version)
     return SuccessResponse(
         data=await _app_out(db, app, PartnerAppDetail), message="Published"
     )
+
+
+# ─── Review timeline ──────────────────────────────────────────────
+
+
+@router.get("/{app_id}/reviews", response_model=SuccessResponse[ReviewTimeline])
+async def review_timeline(
+    app_id: UUID,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Every review round of the app, newest first, with NUMU's notes to the
+    partner. Staff-only notes are never part of this response."""
+    app = await _own_app(db, user_id, app_id)
+    rows = (
+        await db.execute(
+            select(AppReviewModel, AppVersionModel.version)
+            .outerjoin(AppVersionModel, AppVersionModel.id == AppReviewModel.version_id)
+            .where(AppReviewModel.app_id == app.id)
+            .order_by(AppReviewModel.round.desc())
+        )
+    ).all()
+    rounds = [
+        ReviewRoundOut(
+            id=r.id,
+            round=r.round,
+            subject=subject_of(r),
+            version=version,
+            version_id=r.version_id,
+            listing_id=r.listing_id,
+            status=r.status,
+            submitted_at=r.submitted_at,
+            decided_at=r.decided_at,
+            notes=r.notes,
+            checklist=r.checklist,
+        )
+        for r, version in rows
+    ]
+    open_row = next(
+        (r for r, _ in rows if r.status in ("submitted", "in_review")), None
+    )
+    pending = None
+    if open_row:
+        position, length = await queue_position(db, open_row)
+        pending = OpenReviewOut(
+            review_id=open_row.id,
+            position=position,
+            queue_length=length,
+            submitted_at=open_row.submitted_at,
+            expected_by=due_at(open_row.submitted_at),
+        )
+    return SuccessResponse(
+        data=ReviewTimeline(
+            rounds=rounds, open=pending, sla_business_days=REVIEW_SLA_BUSINESS_DAYS
+        )
+    )
+
+
+# ─── Listing ──────────────────────────────────────────────────────
+
+
+@router.get("/{app_id}/listing", response_model=SuccessResponse[ListingOut])
+async def get_listing(
+    app_id: UUID,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """The live listing, the partner's latest listing draft, and a preview
+    in the shape the merchant App Store page renders."""
+    app = await _own_app(db, user_id, app_id)
+    draft = await db.scalar(
+        select(AppListingModel)
+        .where(
+            AppListingModel.app_id == app.id,
+            AppListingModel.status.notin_(("live", "superseded")),
+        )
+        .order_by(AppListingModel.created_at.desc())
+        .limit(1)
+    )
+    live = live_listing(app)
+    shown = draft.content if draft else live
+    return SuccessResponse(
+        data=ListingOut(
+            listed=bool((app.listing_flags or {}).get("catalog_visible")),
+            categories=list(CATEGORIES),
+            live=live,
+            draft=_draft_out(draft) if draft else None,
+            preview=AppCatalogEntry(
+                slug=app.slug,
+                name=shown["name"]["en"],
+                description=shown["tagline"]["en"],
+                icon_url=app.icon_url,
+                version=app.version,
+                listing=_listing(listing_manifest(app.manifest or {}, shown)),
+            ),
+        )
+    )
+
+
+@router.put("/{app_id}/listing", response_model=SuccessResponse[ListingDraftOut])
+async def save_listing(
+    app_id: UUID,
+    body: ListingContent,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Save the listing draft. Nothing reaches merchants until it is reviewed."""
+    app = await _own_app(db, user_id, app_id)
+    content = body.model_dump(mode="json")
+    row = await editable_listing(db, app.id)
+    if row is None:
+        in_review = await db.scalar(
+            select(AppListingModel.id).where(
+                AppListingModel.app_id == app.id,
+                AppListingModel.status.in_(("submitted", "in_review")),
+            )
+        )
+        if in_review:
+            raise _conflict("The listing is in review; wait for NUMU's decision.")
+        row = AppListingModel(app_id=app.id, status="draft", content=content)
+        db.add(row)
+    else:
+        row.content = content
+    await db.flush()
+    await db.refresh(row)
+    return SuccessResponse(data=_draft_out(row), message="Listing saved")
+
+
+@router.post(
+    "/{app_id}/listing/submit", response_model=SuccessResponse[ListingDraftOut]
+)
+async def submit_listing(
+    app_id: UUID,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Send the listing draft for review on its own. Approved, it goes live."""
+    app = await _own_app(db, user_id, app_id)
+    row = await editable_listing(db, app.id)
+    if row is None:
+        raise _conflict("There is no listing draft to submit.")
+    await _no_open_review(db, app)
+    row.version_id = None
+    await start_round(db, app, listing=row)
+    await db.refresh(row)
+    return SuccessResponse(data=_draft_out(row), message="Submitted for review")
+
+
+SCREENSHOT_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+
+
+@router.post("/{app_id}/listing/screenshots", response_model=SuccessResponse[dict])
+async def upload_screenshot(
+    app_id: UUID,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    file: Annotated[UploadFile, File()],
+):
+    """Store one listing screenshot (PNG, JPEG or WebP, 5 MB) and return its
+    URL for the listing draft."""
+    await _own_app(db, user_id, app_id)
+    ext = SCREENSHOT_TYPES.get((file.content_type or "").lower())
+    if ext is None:
+        raise HTTPException(status_code=400, detail="Use a PNG, JPEG or WebP image.")
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="The image is over 5 MB.")
+    key = f"apps/{app_id}/screenshots/{secrets.token_hex(8)}.{ext}"
+    result = await get_storage_service().upload_file(
+        file_content=content,
+        filename=key,
+        content_type=file.content_type,
+        bucket=StorageBucket.STORES,
+        key=key,
+    )
+    return SuccessResponse(data={"url": result.url})
 
 
 # ─── Dev install ──────────────────────────────────────────────────

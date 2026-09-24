@@ -53,6 +53,7 @@ def test_admin_partner_decisions_need_2fa():
         "suspend",
         "payout",
         "adjustment",
+        "post_notice",
     }
     for route in writes:
         assert "require_admin_2fa.<locals>._check" in _names(route.dependant), (

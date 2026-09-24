@@ -36,7 +36,23 @@ from src.api.v1.schemas.tenant.marketplace import (
     InstalledListResponse,
     InstallThemeRequest,
 )
-from src.application.services.marketplace_service import MarketplaceService
+from src.application.services.app_billing import (
+    InsufficientFundsError,
+    NotPaidError,
+    WalletChargeSource,
+    purchase_theme,
+    store_purchase,
+    theme_quote,
+)
+from src.application.services.marketplace_service import (
+    MarketplaceService,
+    ThemePurchaseRequired,
+)
+from src.application.services.wallet_service import WalletSuspendedError
+from src.infrastructure.database.models.tenant.marketplace_theme import (
+    MarketplaceThemeModel,
+)
+from src.infrastructure.database.models.tenant.store import StoreModel
 from src.infrastructure.repositories import (
     MarketplaceRepository,
     StoreRepository,
@@ -91,6 +107,104 @@ async def list_installed(
     return SuccessResponse(data=InstalledListResponse(installed=items))
 
 
+def _purchase_required(e: ThemePurchaseRequired) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail={"code": "theme_purchase_required", "message": str(e)},
+    )
+
+
+async def _paid_theme(db: AsyncSession, theme_id: UUID) -> MarketplaceThemeModel:
+    theme = await db.get(MarketplaceThemeModel, theme_id)
+    if theme is None or theme.status != "published":
+        raise HTTPException(status_code=404, detail="Theme not found")
+    return theme
+
+
+@router.get("/themes/{theme_id}/purchase", response_model=SuccessResponse[dict])
+async def get_theme_purchase(
+    store_id: UUID,
+    theme_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """What buying this theme costs the store (the price plus VAT on NUMU's
+    fee), and whether the store already owns it."""
+    theme = await _paid_theme(db, theme_id)
+    q = await theme_quote(db, theme)
+    owned = await store_purchase(db, store_id, theme_id)
+    return SuccessResponse(
+        data={
+            **q.out(),
+            "currency": "EGP",
+            "paid": theme.price_cents > 0,
+            "purchased": owned is not None,
+            "purchase_id": str(owned.id) if owned else None,
+        }
+    )
+
+
+@router.post("/themes/{theme_id}/purchase", response_model=SuccessResponse[dict])
+async def buy_theme(
+    store_id: UUID,
+    theme_id: UUID,
+    svc: Annotated[MarketplaceService, Depends(_svc)],
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Buy a paid theme for this store from the NUMU wallet, then install it.
+
+    Once per store and for good: later versions are free, and buying again
+    (a double click, a retry) charges nothing. 402 with ``needed_cents`` and
+    ``balance_cents`` when the wallet can't cover it."""
+    theme = await _paid_theme(db, theme_id)
+    store = await db.get(StoreModel, store_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail="Store not found")
+    source = WalletChargeSource(db)
+    try:
+        purchase, charged = await purchase_theme(
+            db,
+            theme=theme,
+            store_id=store_id,
+            tenant_id=store.tenant_id,
+            user_id=user_id,
+            source=source,
+        )
+    except NotPaidError:
+        raise HTTPException(status_code=409, detail="This theme is free.") from None
+    except InsufficientFundsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "insufficient_wallet_balance",
+                "needed_cents": exc.needed_cents,
+                "balance_cents": exc.balance_cents,
+            },
+        ) from None
+    except WalletSuspendedError:
+        raise HTTPException(
+            status_code=409, detail="The store's wallet is suspended."
+        ) from None
+    await db.commit()
+    await source.invalidate()
+    try:
+        installed = await svc.install_theme(
+            store_id=store_id, marketplace_theme_id=theme_id, user_id=user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    await db.commit()
+    return SuccessResponse(
+        data={
+            "purchase_id": str(purchase.id),
+            "charged": charged,
+            "amount_cents": purchase.amount_cents,
+            "installation": installed,
+        },
+        message="Purchased" if charged else "Already purchased",
+    )
+
+
 @router.post(
     "/install",
     response_model=SuccessResponse[InstallationResponse],
@@ -116,6 +230,8 @@ async def install_theme(
             marketplace_theme_id=UUID(body.marketplace_theme_id),
             user_id=user_id,
         )
+    except ThemePurchaseRequired as e:
+        raise _purchase_required(e) from None
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return SuccessResponse(data=InstallationResponse(**data))
@@ -143,6 +259,8 @@ async def activate_theme(
             marketplace_theme_id=UUID(body.marketplace_theme_id),
             user_id=user_id,
         )
+    except ThemePurchaseRequired as e:
+        raise _purchase_required(e) from None
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return SuccessResponse(data=InstallationResponse(**data))
