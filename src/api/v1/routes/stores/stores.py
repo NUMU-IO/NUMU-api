@@ -33,6 +33,7 @@ from src.api.v1.schemas.tenant.store import (
     CustomDomainStatusResponse,
 )
 from src.application.dto.store import CreateStoreDTO, UpdateStoreDTO
+from src.application.services.entitlement_service import EntitlementService
 from src.application.use_cases.stores import (
     CreateStoreUseCase,
     DeleteStoreUseCase,
@@ -181,7 +182,7 @@ async def create_store(
     """Create a new store with a subdomain."""
     from datetime import datetime
 
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
     from src.infrastructure.database.models.public.user import UserModel
 
@@ -210,64 +211,30 @@ async def create_store(
     )
     plan = "trial" if trial_expires_at else "free"
 
-    # Enforce the plan's max_stores before doing any work.
+    # Enforce the store limit before doing any work.
     #
-    # PlanLimitService.check_store_limit() has existed since the plan-limits
-    # work but is called from nowhere, so every tier's ceiling was advisory —
-    # products and orders are gated, stores were not.
-    #
-    # It also cannot be used as-is: it counts stores WITHIN one tenant, and
+    # It only means anything counted across every tenant the user owns:
     # CreateStoreUseCase mints a fresh tenant per store (see
-    # api/dependencies/tenant_context.py). Every tenant therefore holds exactly
-    # one store and a per-tenant check can never trip. The limit only means
-    # anything counted across all tenants the user owns.
+    # api/dependencies/tenant_context.py), so a per-tenant count never trips.
+    # The "stores" counter counts that way, leaving out a partner's
+    # development stores, which have their own cap in the partner routes.
     #
-    # The plan comes from the owner's most relevant tenant, using the same rule
+    # The limit comes from the owner's most relevant tenant, using the same rule
     # as tenant_context resolution (non-demo first, newest first) so the ceiling
     # matches the plan the merchant sees on their Billing page.
-    from src.core.entities.plan import get_plan_features
-    from src.core.exceptions import PlanLimitExceededError
     from src.infrastructure.database.models.public.tenant import TenantModel
-    from src.infrastructure.database.models.tenant.store import StoreModel
 
-    owned = (
-        (
-            await db.execute(
-                select(TenantModel)
-                .where(
-                    TenantModel.owner_id == user_id,
-                    # A partner's development stores have their own cap
-                    # (partner routes) and never count toward, or set, the
-                    # merchant store limit.
-                    TenantModel.plan != "developer",
-                )
-                .order_by(
-                    (TenantModel.lifecycle_state == "demo").asc(),
-                    TenantModel.created_at.desc(),
-                )
-            )
+    primary = await db.scalar(
+        select(TenantModel)
+        .where(TenantModel.owner_id == user_id, TenantModel.plan != "developer")
+        .order_by(
+            (TenantModel.lifecycle_state == "demo").asc(),
+            TenantModel.created_at.desc(),
         )
-        .scalars()
-        .all()
+        .limit(1)
     )
-    if owned:
-        primary = owned[0]
-        max_stores = get_plan_features(primary.plan).max_stores
-        if max_stores != -1:
-            store_count = (
-                await db.execute(
-                    select(func.count(StoreModel.id)).where(
-                        StoreModel.tenant_id.in_([t.id for t in owned])
-                    )
-                )
-            ).scalar() or 0
-            if store_count >= max_stores:
-                raise PlanLimitExceededError(
-                    resource="stores",
-                    limit=max_stores,
-                    current=store_count,
-                    plan=primary.plan,
-                )
+    if primary is not None:
+        await EntitlementService(db).check_quota(primary, "stores")
 
     store_repo = StoreRepository(db)
     onboarding_repo = OnboardingRepository(db)

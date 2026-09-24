@@ -160,7 +160,8 @@ async def list_store_capabilities(
     session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Resolve every capability for this store against its plan and overrides."""
-    resolved = await CapabilityService(session).all_for(store)
+    service = CapabilityService(session)
+    resolved = await service.all_for(store)
     return SuccessResponse(
         data=[
             CapabilityResponse(
@@ -169,7 +170,7 @@ async def list_store_capabilities(
                 name_ar=capability.name_ar,
                 enabled=resolved[capability.key],
                 implemented=capability.implemented,
-                min_plan=capability.min_plan,
+                min_plan=await service.min_plan(capability),
             )
             for capability in CAPABILITIES.values()
         ],
@@ -216,7 +217,8 @@ async def set_store_capability(
     store.settings = settings
     await store_repo.update(store)
 
-    resolved = await CapabilityService(session).has(store, capability_key)
+    service = CapabilityService(session)
+    resolved = await service.has(store, capability_key)
     return SuccessResponse(
         data=CapabilityResponse(
             key=capability.key,
@@ -224,7 +226,7 @@ async def set_store_capability(
             name_ar=capability.name_ar,
             enabled=resolved,
             implemented=capability.implemented,
-            min_plan=capability.min_plan,
+            min_plan=await service.min_plan(capability),
         ),
         message="Capability updated successfully",
     )
