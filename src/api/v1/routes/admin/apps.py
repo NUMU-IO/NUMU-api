@@ -24,6 +24,16 @@ from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.application.services.app_manifest import Pricing, change_type, price_label
+from src.application.services.app_review import (
+    OPEN,
+    business_days_between,
+    due_at,
+    go_live,
+    live_listing,
+    name_change,
+    notify_status,
+    subject_of,
+)
 from src.application.services.audit_service import AuditService
 from src.application.services.partner_program import (
     KILL_SWITCH_KEY,
@@ -32,7 +42,9 @@ from src.application.services.partner_program import (
 from src.core.entities.app import AppStatus
 from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
+    AppListingModel,
     AppModel,
+    AppReviewModel,
     AppVersionModel,
 )
 from src.infrastructure.database.models.public.partner_account import (
@@ -41,6 +53,7 @@ from src.infrastructure.database.models.public.partner_account import (
 from src.infrastructure.database.models.public.platform_config import (
     PlatformConfigModel,
 )
+from src.infrastructure.database.models.public.user import UserModel
 
 router = APIRouter(
     prefix="/apps", tags=["Admin - Apps"], dependencies=[Depends(require_admin)]
@@ -65,44 +78,70 @@ CHECKLIST = {
 # ─── Schemas ──────────────────────────────────────────────────────
 
 
+#: A listing-only round: the checks a listing can be judged on.
+LISTING_CHECKS = ("arabic_listing", "not_misleading")
+
+
 class ReviewRow(BaseModel):
-    version_id: UUID
+    review_id: UUID
+    round: int
     app_id: UUID
     slug: str
     name: dict[str, str]
     icon: str | None
     partner: str | None
-    version: str
+    subject: str
+    version: str | None
+    version_id: UUID | None
+    listing_id: UUID | None
     status: str
     change_type: str
-    submitted_at: datetime | None
+    submitted_at: datetime
     age_days: int
+    business_days_waiting: int
+    due_at: datetime
+    overdue: bool
+    name_change: bool
 
 
-class VersionDetail(ReviewRow):
-    manifest: dict[str, Any]
+class HistoryRound(BaseModel):
+    review_id: UUID
+    round: int
+    subject: str
+    version: str | None
+    status: str
+    submitted_at: datetime
+    decided_at: datetime | None
+    reviewer: str | None
+    checklist: dict | None
+    notes: dict | None
+    internal_note: str | None
+
+
+class ReviewDetail(ReviewRow):
+    manifest: dict[str, Any] | None
     published_manifest: dict[str, Any] | None
     release_notes: dict | None
-    review_notes: dict | None
-    review_checklist: dict | None
+    listing: dict[str, Any] | None
+    live_listing: dict[str, Any]
+    name_change: dict | None  # type: ignore[assignment]
     checklist: dict[str, str]
+    required_checks: list[str]
+    history: list[HistoryRound]
 
 
 class ReviewDecision(BaseModel):
     decision: Literal["approve", "request_changes", "reject"]
     checklist: dict[str, bool] = Field(default_factory=dict)
+    #: Shown to the partner.
     notes_ar: str | None = Field(default=None, max_length=4000)
     notes_en: str | None = Field(default=None, max_length=4000)
+    #: Staff only, never shown to the partner.
+    internal_note: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def _rules(self):
-        if self.decision == "approve":
-            missing = [k for k in CHECKLIST if not self.checklist.get(k)]
-            if missing:
-                raise ValueError(
-                    f"approve needs every checklist item: {', '.join(missing)}"
-                )
-        elif not (self.notes_ar and self.notes_en):
+        if self.decision != "approve" and not (self.notes_ar and self.notes_en):
             raise ValueError(
                 "request_changes and reject need notes in Arabic and English"
             )
@@ -163,32 +202,98 @@ async def _published(db: AsyncSession, app_id: UUID) -> dict | None:
 
 
 async def _row(
-    db: AsyncSession, v: AppVersionModel, app: AppModel, cls=ReviewRow, **extra
+    db: AsyncSession, review: AppReviewModel, app: AppModel, cls=ReviewRow, **extra
 ):
+    version = (
+        await db.get(AppVersionModel, review.version_id) if review.version_id else None
+    )
+    listing = (
+        await db.get(AppListingModel, review.listing_id) if review.listing_id else None
+    )
+    now = datetime.now(UTC)
+    submitted = review.submitted_at.replace(tzinfo=review.submitted_at.tzinfo or UTC)
+    renamed = name_change(app, listing.content if listing else None)
     published = await _published(db, app.id)
-    since = v.submitted_at or v.created_at
+    if cls is ReviewDetail:
+        extra = {
+            "manifest": version.manifest if version else None,
+            "published_manifest": published,
+            "release_notes": version.release_notes if version else None,
+            "listing": listing.content if listing else None,
+            "live_listing": live_listing(app),
+            "checklist": CHECKLIST,
+            "required_checks": list(CHECKLIST) if version else list(LISTING_CHECKS),
+            **extra,
+        }
     return cls(
-        version_id=v.id,
+        review_id=review.id,
+        round=review.round,
         app_id=app.id,
         slug=app.slug,
-        name=v.manifest.get("name") or {"en": app.name},
-        icon=v.manifest.get("icon"),
+        name=live_listing(app)["name"],
+        icon=(version.manifest.get("icon") if version else None) or app.icon_url,
         partner=await _partner_name(db, app.developer_id),
-        version=v.version,
-        status=v.status,
-        change_type=change_type(v.manifest, published),
-        submitted_at=v.submitted_at,
-        age_days=(datetime.now(UTC) - since).days,
-        **({"published_manifest": published} if cls is VersionDetail else {}),
+        subject=subject_of(review),
+        version=version.version if version else None,
+        version_id=review.version_id,
+        listing_id=review.listing_id,
+        status=review.status,
+        change_type=change_type(version.manifest, published)
+        if version
+        else "listing_only",
+        submitted_at=submitted,
+        age_days=(now - submitted).days,
+        business_days_waiting=business_days_between(submitted, now),
+        due_at=due_at(submitted),
+        overdue=now > due_at(submitted),
+        name_change=renamed if cls is ReviewDetail else renamed is not None,
         **extra,
     )
 
 
-async def _load_version(db: AsyncSession, version_id: UUID):
-    v = await db.get(AppVersionModel, version_id)
-    if v is None:
-        raise HTTPException(status_code=404, detail="Version not found")
-    return v, await db.get(AppModel, v.app_id)
+async def _load_review(db: AsyncSession, review_id: UUID):
+    review = await db.get(AppReviewModel, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return review, await db.get(AppModel, review.app_id)
+
+
+async def _history(db: AsyncSession, app_id: UUID) -> list[HistoryRound]:
+    rows = (
+        await db.execute(
+            select(AppReviewModel, AppVersionModel.version, UserModel.email)
+            .outerjoin(AppVersionModel, AppVersionModel.id == AppReviewModel.version_id)
+            .outerjoin(UserModel, UserModel.id == AppReviewModel.reviewer_id)
+            .where(AppReviewModel.app_id == app_id)
+            .order_by(AppReviewModel.round.desc())
+        )
+    ).all()
+    return [
+        HistoryRound(
+            review_id=r.id,
+            round=r.round,
+            subject=subject_of(r),
+            version=version,
+            status=r.status,
+            submitted_at=r.submitted_at,
+            decided_at=r.decided_at,
+            reviewer=email,
+            checklist=r.checklist,
+            notes=r.notes,
+            internal_note=r.internal_note,
+        )
+        for r, version, email in rows
+    ]
+
+
+async def _subjects(db: AsyncSession, review: AppReviewModel):
+    version = (
+        await db.get(AppVersionModel, review.version_id) if review.version_id else None
+    )
+    listing = (
+        await db.get(AppListingModel, review.listing_id) if review.listing_id else None
+    )
+    return version, listing
 
 
 # ─── Review ───────────────────────────────────────────────────────
@@ -196,86 +301,133 @@ async def _load_version(db: AsyncSession, version_id: UUID):
 
 @router.get("/review", response_model=SuccessResponse[list[ReviewRow]])
 async def review_queue(db: Annotated[AsyncSession, Depends(get_db)]):
-    """Submitted and in-review versions, oldest first."""
+    """Open review rounds (versions and listings), oldest first, each with
+    its due date (REVIEW_SLA_BUSINESS_DAYS business days after submission)."""
     rows = (
         await db.execute(
-            select(AppVersionModel, AppModel)
-            .join(AppModel, AppModel.id == AppVersionModel.app_id)
-            .where(AppVersionModel.status.in_(("submitted", "in_review")))
-            .order_by(AppVersionModel.submitted_at)
+            select(AppReviewModel, AppModel)
+            .join(AppModel, AppModel.id == AppReviewModel.app_id)
+            .where(AppReviewModel.status.in_(OPEN))
+            .order_by(AppReviewModel.submitted_at)
         )
     ).all()
-    return SuccessResponse(data=[await _row(db, v, app) for v, app in rows])
+    return SuccessResponse(data=[await _row(db, r, app) for r, app in rows])
 
 
-@router.get("/versions/{version_id}", response_model=SuccessResponse[VersionDetail])
-async def version_detail(
-    version_id: UUID,
+@router.get("/reviews/{review_id}", response_model=SuccessResponse[ReviewDetail])
+async def review_detail(
+    review_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     admin_id: Annotated[UUID, Depends(require_admin)],
 ):
-    """Opening a submitted version claims it (in_review)."""
-    v, app = await _load_version(db, version_id)
-    if v.status == "submitted":
-        v.status = "in_review"
-        v.reviewed_by = admin_id
+    """Opening a submitted round claims it (in_review) and tells the partner."""
+    review, app = await _load_review(db, review_id)
+    if review.status == "submitted":
+        version, listing = await _subjects(db, review)
+        review.status = "in_review"
+        review.reviewer_id = admin_id
+        for item in (version, listing):
+            if item is not None and item.status == "submitted":
+                item.status = "in_review"
+        if version is not None:
+            version.reviewed_by = admin_id
         await db.flush()
+        await notify_status(
+            db,
+            app,
+            "in_review",
+            version=version.version if version else None,
+            listing=listing is not None,
+        )
     return SuccessResponse(
         data=await _row(
-            db,
-            v,
-            app,
-            VersionDetail,
-            manifest=v.manifest,
-            release_notes=v.release_notes,
-            review_notes=v.review_notes,
-            review_checklist=v.review_checklist,
-            checklist=CHECKLIST,
+            db, review, app, ReviewDetail, history=await _history(db, app.id)
         )
     )
 
 
 @router.post(
-    "/versions/{version_id}/review",
+    "/reviews/{review_id}/decision",
     response_model=SuccessResponse[ReviewRow],
     dependencies=_STEP_UP,
 )
-async def review(
-    version_id: UUID,
+async def decide(
+    review_id: UUID,
     body: ReviewDecision,
     db: Annotated[AsyncSession, Depends(get_db)],
     admin_id: Annotated[UUID, Depends(require_admin)],
 ):
-    v, app = await _load_version(db, version_id)
-    if v.status not in ("submitted", "in_review"):
+    """Approve needs every required check (all ten with a version, the
+    listing checks for a listing on its own). A listing approved on its own
+    goes live at once; one sent with a version goes live when it publishes."""
+    review, app = await _load_review(db, review_id)
+    if review.status not in OPEN:
         raise HTTPException(
-            status_code=409, detail=f"a {v.status} version is not in review"
+            status_code=409, detail=f"a {review.status} round is not in review"
         )
-    old = v.status
-    v.status = {
+    version, listing = await _subjects(db, review)
+    required = list(CHECKLIST) if version else list(LISTING_CHECKS)
+    missing = [k for k in required if not body.checklist.get(k)]
+    if body.decision == "approve" and missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"approve needs every checklist item: {', '.join(missing)}",
+        )
+    new = {
         "approve": "approved",
         "request_changes": "changes_requested",
         "reject": "rejected",
     }[body.decision]
-    v.review_checklist = body.checklist
-    v.review_notes = (
+    notes = (
         {"ar": body.notes_ar, "en": body.notes_en}
         if body.notes_ar or body.notes_en
         else None
     )
-    v.reviewed_by = admin_id
-    v.reviewed_at = datetime.now(UTC)
+    now = datetime.now(UTC)
+    old = review.status
+    review.status = new
+    review.checklist = body.checklist
+    review.notes = notes
+    review.internal_note = body.internal_note
+    review.reviewer_id = admin_id
+    review.decided_at = now
+    if version is not None:
+        version.status = new
+        version.review_checklist = body.checklist
+        version.review_notes = notes
+        version.reviewed_by = admin_id
+        version.reviewed_at = now
+    went_live = listing is not None and version is None and new == "approved"
+    if went_live:
+        await go_live(db, app, listing)
+    elif listing is not None:
+        listing.status = new
     await AuditService(db).log(
         event_type="admin.app_review",
-        action=f"app_version_{v.status}",
-        resource_type="app_version",
-        resource_id=str(v.id),
+        action=f"app_review_{new}",
+        resource_type="app_review",
+        resource_id=str(review.id),
         user_id=admin_id,
         old_value={"status": old},
-        new_value={"status": v.status, "app": app.slug, "version": v.version},
+        new_value={
+            "status": new,
+            "app": app.slug,
+            "version": version.version if version else None,
+            "listing": str(listing.id) if listing else None,
+        },
     )
     await db.flush()
-    return SuccessResponse(data=await _row(db, v, app))
+    await notify_status(
+        db,
+        app,
+        new,
+        version=version.version if version else None,
+        listing=listing is not None,
+        notes=notes,
+    )
+    if went_live:
+        await notify_status(db, app, "published", listing=True)
+    return SuccessResponse(data=await _row(db, review, app))
 
 
 # ─── Catalog ──────────────────────────────────────────────────────
@@ -383,6 +535,8 @@ async def suspend_app(
         new_value={"status": app.status.value, "reason": body.reason},
     )
     await db.flush()
+    if body.suspend:
+        await notify_status(db, app, "suspended")
     return SuccessResponse(data={"status": app.status.value})
 
 

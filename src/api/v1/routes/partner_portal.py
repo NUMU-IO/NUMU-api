@@ -15,7 +15,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.auth import get_current_user_id
@@ -40,6 +40,7 @@ from src.infrastructure.database.models.public.app import (
 )
 from src.infrastructure.database.models.public.partner_account import (
     PartnerMemberModel,
+    PartnerNotificationModel,
 )
 from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.database.models.tenant.store import StoreModel
@@ -531,3 +532,86 @@ async def accept_invitation(
     return SuccessResponse(
         data={"partner_id": str(member.partner_id)}, message="Joined"
     )
+
+
+# ─── Notifications ────────────────────────────────────────────────
+
+
+class PartnerNotificationOut(BaseModel):
+    id: UUID
+    kind: str
+    data: dict
+    app_id: UUID | None
+    link: str | None
+    read_at: datetime | None
+    created_at: datetime
+
+
+class PartnerNotificationFeed(BaseModel):
+    items: list[PartnerNotificationOut]
+    unread_count: int
+
+
+class MarkReadRequest(BaseModel):
+    #: Omitted: mark every notification read.
+    ids: list[UUID] | None = None
+
+
+@router.get(
+    "/me/notifications",
+    response_model=SuccessResponse[PartnerNotificationFeed],
+    operation_id="list_partner_notifications",
+)
+async def list_notifications(
+    ctx: Annotated[PartnerContext, Depends(partner_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    unread: bool = False,
+):
+    if ctx.account is None:
+        return SuccessResponse(data=PartnerNotificationFeed(items=[], unread_count=0))
+    mine = PartnerNotificationModel.partner_id == ctx.account.id
+    q = select(PartnerNotificationModel).where(mine)
+    if unread:
+        q = q.where(PartnerNotificationModel.read_at.is_(None))
+    rows = (
+        await db.scalars(
+            q.order_by(PartnerNotificationModel.created_at.desc()).limit(limit)
+        )
+    ).all()
+    unread_count = await db.scalar(
+        select(func.count(PartnerNotificationModel.id)).where(
+            mine, PartnerNotificationModel.read_at.is_(None)
+        )
+    )
+    return SuccessResponse(
+        data=PartnerNotificationFeed(
+            items=[
+                PartnerNotificationOut.model_validate(r, from_attributes=True)
+                for r in rows
+            ],
+            unread_count=unread_count or 0,
+        )
+    )
+
+
+@router.post(
+    "/me/notifications/read",
+    response_model=SuccessResponse[dict],
+    operation_id="mark_partner_notifications_read",
+)
+async def mark_notifications_read(
+    body: MarkReadRequest,
+    ctx: Annotated[PartnerContext, Depends(partner_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    if ctx.account is None:
+        return SuccessResponse(data={"updated": 0})
+    q = update(PartnerNotificationModel).where(
+        PartnerNotificationModel.partner_id == ctx.account.id,
+        PartnerNotificationModel.read_at.is_(None),
+    )
+    if body.ids is not None:
+        q = q.where(PartnerNotificationModel.id.in_(body.ids))
+    result = await db.execute(q.values(read_at=datetime.now(UTC)))
+    return SuccessResponse(data={"updated": result.rowcount or 0})

@@ -340,3 +340,82 @@ class AppAccessTokenModel(Base, UUIDMixin):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class AppListingModel(Base, UUIDMixin, TimestampMixin):
+    """A Partner App's store listing, reviewed apart from its manifest.
+
+    ``content`` is ``ListingContent`` (name, tagline, description,
+    screenshots, video_url, category, keywords). ``draft → submitted →
+    in_review → approved | changes_requested | rejected → live →
+    superseded``. A listing submitted with a version (``version_id``) goes
+    live when that version is published; one submitted on its own goes live
+    when approved.
+    """
+
+    __tablename__ = "app_listings"
+    __table_args__ = (
+        Index("ix_app_listings_app_status", "app_id", "status"),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    version_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AppReviewModel(Base, UUIDMixin, TimestampMixin):
+    """One review round of a Partner App: a version, a listing, or both.
+
+    Every submission opens a new round, so a resubmission after
+    ``changes_requested`` keeps the earlier rounds as history. ``notes`` are
+    shown to the partner ({"ar", "en"}); ``internal_note`` never is.
+    """
+
+    __tablename__ = "app_reviews"
+    __table_args__ = (
+        Index("ix_app_reviews_status_submitted", "status", "submitted_at"),
+        Index("ix_app_reviews_app", "app_id"),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_versions.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    listing_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_listings.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    round: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    #: submitted | in_review | approved | changes_requested | rejected
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="submitted")
+    checklist: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    notes: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    internal_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewer_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

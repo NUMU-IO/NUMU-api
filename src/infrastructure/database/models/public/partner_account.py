@@ -117,3 +117,32 @@ class PartnerMemberModel(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="invited")
+
+
+class PartnerNotificationModel(Base, UUIDMixin, TimestampMixin):
+    """One item in a partner's notification feed. Written only by
+    ``partner_notifications.emit_partner_notification``; the portal renders
+    the copy from ``kind`` and ``data``."""
+
+    __tablename__ = "partner_notifications"
+    __table_args__ = (
+        Index("ix_partner_notifications_partner_created", "partner_id", "created_at"),
+        {"schema": "public"},
+    )
+
+    partner_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.partner_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    app_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    link: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
