@@ -64,7 +64,15 @@ APP_SCOPES = (
 #: The read scope an app needs to receive each event: an order event carries
 #: the shopper's name, phone and address. Built from every subscribable event,
 #: so a new event domain fails here at import instead of reaching apps unscoped.
-_EVENT_DOMAIN_SCOPES = {"order": "orders:read", "product": "catalog:read"}
+_EVENT_DOMAIN_SCOPES = {
+    "order": "orders:read",
+    "refund": "orders:read",
+    "shipment": "orders:read",
+    "checkout": "orders:read",
+    "product": "catalog:read",
+    "inventory": "catalog:read",
+    "customer": "customers:read",
+}
 EVENT_SCOPES = {
     e.value: _EVENT_DOMAIN_SCOPES[e.value.split(".", 1)[0]]
     for e in SUBSCRIBABLE_EVENT_TYPES
@@ -392,6 +400,31 @@ class ManifestV1(_Strict):
             )
         if self.pricing.model == "external" and not self.pricing.label:
             raise ValueError("pricing.label is required for an external price")
+        return self
+
+
+class PrivateManifestV1(ManifestV1):
+    """A private (custom) app's manifest. It is never listed, so the listing
+    fields default from the name, and it is free: NUMU never bills it."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _listing_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            name = data.get("name")
+            data = {
+                "tagline": name,
+                "description": name,
+                "category": "other",
+                "pricing": {"model": "free"},
+                **data,
+            }
+        return data
+
+    @model_validator(mode="after")
+    def _free(self):
+        if self.pricing.model != "free":
+            raise ValueError("pricing.model must be free for a private app")
         return self
 
 

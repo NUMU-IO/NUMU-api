@@ -18,9 +18,8 @@ class WebhookEventType(StrEnum):
     promise the platform silently breaks; they are gone until their domain
     events exist.
 
-    Shipping is carried by ``order.status_changed``: it reports the new status
-    (``shipped``, ``delivered``, …) and the tracking number on the same
-    payload, which is what a shipping integration reads.
+    ``order.status_changed`` reports the order's status and tracking number;
+    ``shipment.*`` reports each shipment's own carrier status.
     """
 
     ORDER_CREATED = "order.created"
@@ -29,6 +28,14 @@ class WebhookEventType(StrEnum):
     PRODUCT_CREATED = "product.created"
     PRODUCT_UPDATED = "product.updated"
     PRODUCT_DELETED = "product.deleted"
+    CUSTOMER_CREATED = "customer.created"
+    CUSTOMER_UPDATED = "customer.updated"
+    REFUND_CREATED = "refund.created"
+    REFUND_COMPLETED = "refund.completed"
+    SHIPMENT_CREATED = "shipment.created"
+    SHIPMENT_STATUS_CHANGED = "shipment.status_changed"
+    INVENTORY_LEVEL_CHANGED = "inventory.level_changed"
+    CHECKOUT_ABANDONED = "checkout.abandoned"
     #: Delivered only by the test endpoint, never by an event. Not
     #: subscribable — see ``SUBSCRIBABLE_EVENT_TYPES``.
     PING = "webhook.ping"

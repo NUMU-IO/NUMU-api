@@ -35,6 +35,14 @@ def test_only_events_that_are_published_can_be_subscribed_to():
         "product.created",
         "product.updated",
         "product.deleted",
+        "customer.created",
+        "customer.updated",
+        "refund.created",
+        "refund.completed",
+        "shipment.created",
+        "shipment.status_changed",
+        "inventory.level_changed",
+        "checkout.abandoned",
     }
 
 
