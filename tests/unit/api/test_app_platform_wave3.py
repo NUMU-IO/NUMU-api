@@ -63,6 +63,9 @@ class TestInstallationStatusHonesty:
         assert out.slug == "variant-swatches"
         assert out.settings == {"a": 1}
 
+    def test_a_draft_app_on_its_partners_dev_store_is_live(self):
+        assert _installation(app(status=AppStatus.DRAFT), install()).is_live is True
+
     def test_a_disabled_install_is_not_live(self):
         assert _installation(app(), install(is_enabled=False)).is_live is False
 

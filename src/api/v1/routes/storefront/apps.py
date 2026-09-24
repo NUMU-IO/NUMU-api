@@ -87,7 +87,7 @@ async def list_installed_apps(store_id: UUID):
             .where(
                 AppInstallationModel.store_id == store_id,
                 AppInstallationModel.is_enabled.is_(True),
-                AppModel.status == AppStatus.PUBLISHED,
+                AppModel.status != AppStatus.SUSPENDED,
             )
         )
         rows = (await session.execute(stmt)).all()
@@ -138,7 +138,7 @@ async def get_installed_app(store_id: UUID, slug: str):
                 AppInstallationModel.store_id == store_id,
                 AppInstallationModel.is_enabled.is_(True),
                 AppModel.slug == slug,
-                AppModel.status == AppStatus.PUBLISHED,
+                AppModel.status != AppStatus.SUSPENDED,
             )
         )
         row = (await session.execute(stmt)).one_or_none()
