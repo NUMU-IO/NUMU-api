@@ -26,9 +26,11 @@ from src.application.services.capability_service import (
     CAPABILITIES,
     CapabilityService,
 )
+from src.application.services.entitlement_service import EntitlementService
 from src.application.services.sector_preset_service import SectorPresetService
 from src.core.entities.store import Store
 from src.core.sector_presets import SECTOR_PRESETS, get_preset
+from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.repositories.category_repository import CategoryRepository
 from src.infrastructure.repositories.metafield_repository import (
     MetafieldDefinitionRepository,
@@ -209,6 +211,10 @@ async def set_store_capability(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Capability '{capability_key}' is not available yet",
         )
+    if request.enabled and capability.entitlement and store.tenant_id:
+        tenant = await session.get(TenantModel, store.tenant_id)
+        if tenant is not None:
+            await EntitlementService(session).require(tenant, capability.entitlement)
 
     settings = dict(store.settings or {})
     capabilities = dict(settings.get("capabilities") or {})
