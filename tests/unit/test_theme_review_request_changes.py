@@ -46,9 +46,9 @@ async def test_request_changes_closes_the_version_and_reopens_the_listing():
 
     result = await svc.review_version(uuid4(), version.id, "request_changes", "fix RTL")
 
-    assert result["status"] == MarketplaceVersionStatus.REJECTED.value
+    assert result["status"] == MarketplaceVersionStatus.CHANGES_REQUESTED.value
     update = repo.update_version.await_args.args[1]
-    assert update["review_notes"] == "[changes requested] fix RTL"
+    assert update["review_notes"] == "fix RTL"
     repo.update_theme.assert_awaited_once_with(
         version.theme_id, {"status": MarketplaceThemeStatus.DRAFT.value}
     )

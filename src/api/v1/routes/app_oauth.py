@@ -45,8 +45,10 @@ from src.application.services.app_tokens import (
     signed_params,
     verify_client_secret,
 )
+from src.application.services.entitlement_service import EntitlementService
 from src.application.services.partner_program import partner_apps_enabled
 from src.core.entities.app import AppStatus
+from src.core.entitlements import UNLIMITED
 from src.core.logging import get_logger
 from src.infrastructure.database.models.public.app import (
     AppAccessTokenModel,
@@ -90,6 +92,8 @@ class ConsentApp(BaseModel):
     #: ``trial_available`` (this store has not had the app's free trial).
     pricing: dict | None
     privacy_policy_url: str | None
+    #: A custom app a partner built for this one store.
+    private: bool = False
 
 
 class Consent(BaseModel):
@@ -163,6 +167,8 @@ async def _consentable(
         raise HTTPException(status_code=404, detail="Store not found")
     if app.status == AppStatus.SUSPENDED or not await partner_apps_enabled(db):
         raise _bad("This app is not available right now.")
+    if app.private_store_id and app.private_store_id != store.id:
+        raise _bad("This is a custom app for another store.")
     if app.status != AppStatus.PUBLISHED:
         # An unpublished app installs only on its partner's own dev stores.
         plan = await db.scalar(
@@ -242,6 +248,7 @@ async def authorize(
                     "trial_available": await trial_available(db, store.id, app),
                 },
                 privacy_policy_url=(m.get("app") or {}).get("privacy_policy_url"),
+                private=app.private_store_id is not None,
             ),
             store_id=store.id,
             store_name=store.name,
@@ -254,17 +261,16 @@ async def authorize(
 
 
 async def _check_app_cap(db: AsyncSession, store, app: AppModel) -> None:
-    """The store's plan may cap how many Partner Apps it installs (OD-7,
-    ``PlanFeatures.max_partner_apps``; -1 = no cap). A re-consent on an app
-    already installed never counts twice."""
-    from src.core.entities.plan import get_plan_features
-    from src.infrastructure.database.models.public.tenant import TenantModel
-
-    plan = await db.scalar(
-        select(TenantModel.plan).where(TenantModel.id == store.tenant_id)
+    """The store's plan may cap how many Partner Apps it installs (OD-7, the
+    ``partner_apps`` entitlement). A re-consent on an app already installed
+    never counts twice."""
+    tenant = await db.get(TenantModel, store.tenant_id)
+    cap = (
+        await EntitlementService(db).limit(tenant, "partner_apps")
+        if tenant
+        else UNLIMITED
     )
-    cap = get_plan_features(plan or "trial").max_partner_apps
-    if cap < 0:
+    if cap == UNLIMITED:
         return
     installed = (
         (

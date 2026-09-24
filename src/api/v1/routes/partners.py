@@ -75,6 +75,12 @@ class PartnerAccountOut(BaseModel):
     reviewed_at: datetime | None
     created_at: datetime
     share_bps: int | None = None
+    referral_bps: int
+    referral_months: int
+    directory_listed: bool
+    directory_profile: dict | None
+    verified: bool
+    directory_hidden: bool
 
 
 class PartnerInvitationOut(BaseModel):
@@ -105,6 +111,22 @@ class _Profile(BaseModel):
     support_phone: str | None = Field(default=None, max_length=40)
 
 
+class DirectoryProfile(BaseModel):
+    """What the public "Hire an expert" profile shows, besides the display
+    name, website and the partner's published apps and themes."""
+
+    logo_url: str | None = Field(default=None, max_length=2048, pattern=r"^https://")
+    bio_ar: str | None = Field(default=None, max_length=600)
+    bio_en: str | None = Field(default=None, max_length=600)
+    services: list[Literal["apps", "themes", "setup", "marketing"]] = Field(
+        default_factory=list, max_length=4
+    )
+    languages: list[Literal["ar", "en", "fr"]] = Field(
+        default_factory=list, max_length=3
+    )
+    city: str | None = Field(default=None, max_length=80)
+
+
 class ApplyRequest(_Profile):
     kind: Literal["individual", "company"]
     #: Must be the current AGREEMENT_VERSION, accepted explicitly.
@@ -114,7 +136,12 @@ class ApplyRequest(_Profile):
 
 #: Profile fields a partner can change but not clear (NOT NULL columns). An
 #: explicit null on any other field clears it (e.g. ``website_url``).
-_REQUIRED_PROFILE = frozenset({"display_name", "country", "support_email"})
+_REQUIRED_PROFILE = frozenset({
+    "display_name",
+    "country",
+    "support_email",
+    "directory_listed",
+})
 
 
 class UpdateProfileRequest(BaseModel):
@@ -126,6 +153,9 @@ class UpdateProfileRequest(BaseModel):
     support_phone: str | None = Field(default=None, max_length=40)
     #: Re-accept a newer agreement.
     accept_agreement_version: str | None = None
+    #: Opt in to (or out of) the public partner directory.
+    directory_listed: bool | None = None
+    directory_profile: DirectoryProfile | None = None
 
 
 class DevStoreOut(BaseModel):

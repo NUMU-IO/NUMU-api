@@ -15,9 +15,11 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from src.application.services.entitlement_service import EntitlementService
 from src.application.services.notification_feed import (
     emit_notification_standalone,
 )
+from src.core.entitlements import UNLIMITED
 from src.core.events.order_events import (
     OrderCreatedEvent,
     OrderPaidEvent,
@@ -27,7 +29,9 @@ from src.core.events.payment_events import PaymentProofSubmittedEvent
 from src.core.events.risk_events import TrustKillSwitchFiredEvent
 from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
+from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.database.models.tenant.store import StoreModel
 
 logger = get_logger(__name__)
 
@@ -89,6 +93,35 @@ async def handle_order_created_notification(event: OrderCreatedEvent) -> None:
         entity_type="order",
         entity_id=event.order_id,
         dedupe_key=f"order.new:{event.order_id}",
+    )
+
+
+async def handle_order_limit_notice(event: OrderCreatedEvent) -> None:
+    """The monthly order limit never refuses an order (decision D2). The
+    first order past it in a month tells the merchant instead."""
+    async with AsyncSessionLocal() as session:
+        tenant = await session.scalar(
+            select(TenantModel)
+            .join(StoreModel, StoreModel.tenant_id == TenantModel.id)
+            .where(StoreModel.id == event.store_id)
+        )
+        if tenant is None:
+            return
+        ents = EntitlementService(session)
+        if await ents.limit(tenant, "orders_per_month") == UNLIMITED:
+            return
+        usage = await ents.usage(tenant, "orders_per_month")
+    if usage["used"] <= usage["limit"]:
+        return
+    await emit_notification_standalone(
+        store_id=event.store_id,
+        tenant_id=tenant.id,
+        category="system",
+        kind="plan.orders_over_limit",
+        data={"limit": usage["limit"], "resets_at": usage["resets_at"]},
+        link="/billing",
+        important=True,
+        dedupe_key=f"plan.orders_over_limit:{usage['resets_at']}",
     )
 
 

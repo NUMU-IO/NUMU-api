@@ -19,10 +19,11 @@ import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote
-from uuid import UUID
+from uuid import UUID, uuid4
 
+import jwt
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -131,6 +132,35 @@ def sign_params(params: dict[str, str], secret: str) -> str:
 def signed_params(params: dict[str, str], secret: str) -> dict[str, str]:
     stamped = {**params, "timestamp": str(int(datetime.now(UTC).timestamp()))}
     return {**stamped, "hmac": sign_params(stamped, secret)}
+
+
+# ─── Embedded app session tokens ───────────────────────────────────
+
+SESSION_TOKEN_ISSUER = "numueg.app"
+SESSION_TOKEN_TTL = timedelta(seconds=60)
+
+
+def session_token(
+    secret: str, *, client_id: str, user_id: UUID, store_id: UUID, locale: str
+) -> str:
+    """HS256 JWT an embedded app verifies with its client secret: who (``sub``)
+    is using the app on which store (``dest``), valid for 60 seconds."""
+    now = datetime.now(UTC)
+    return jwt.encode(
+        {
+            "iss": SESSION_TOKEN_ISSUER,
+            "aud": client_id,
+            "sub": str(user_id),
+            "dest": str(store_id),
+            "iat": now,
+            "nbf": now,
+            "exp": now + SESSION_TOKEN_TTL,
+            "jti": uuid4().hex,
+            "locale": locale,
+        },
+        secret,
+        algorithm="HS256",
+    )
 
 
 # ─── Resolution ────────────────────────────────────────────────────

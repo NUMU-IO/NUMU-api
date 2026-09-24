@@ -26,6 +26,14 @@ from src.infrastructure.database.models.public.currency_rate import CurrencyRate
 from src.infrastructure.database.models.public.customizer_undo_entry import (
     CustomizerUndoEntryModel,
 )
+from src.infrastructure.database.models.public.entitlements import (
+    EntitlementOverrideModel,
+    FeatureFlagModel,
+    FeatureFlagTargetModel,
+    FeatureModel,
+    PlanEntitlementModel,
+    UsageCounterModel,
+)
 from src.infrastructure.database.models.public.feedback import FeedbackModel
 from src.infrastructure.database.models.public.merchant_business_profile import (
     MerchantBusinessProfileModel,
@@ -43,6 +51,7 @@ from src.infrastructure.database.models.public.onboarding import StoreOnboarding
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
     PartnerMemberModel,
+    PartnerReferralModel,
 )
 from src.infrastructure.database.models.public.personal_access_token import (
     PersonalAccessTokenModel,
@@ -89,6 +98,7 @@ __all__ = [
     "PartnerLedgerEntryModel",
     "PartnerAccountModel",
     "PartnerMemberModel",
+    "PartnerReferralModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",
     "FeedbackModel",
@@ -114,6 +124,13 @@ __all__ = [
     "SubscriptionPaymentProofModel",
     "WhatsAppAccessRequestModel",
     "WhatsAppAccessStatus",
+    # Entitlements, release flags, usage
+    "FeatureModel",
+    "PlanEntitlementModel",
+    "EntitlementOverrideModel",
+    "FeatureFlagModel",
+    "FeatureFlagTargetModel",
+    "UsageCounterModel",
     # Omnichannel
     "ChannelConnectionModel",
     "MessageThreadModel",

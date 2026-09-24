@@ -25,6 +25,7 @@ async def _sync_shipments() -> dict:
         map_carrier_status,
         service_for_carrier,
     )
+    from src.application.services.partner_carriers import is_app_carrier
     from src.core.entities.shipment import ShipmentStatus
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.repositories.shipment_repository import ShipmentRepository
@@ -53,6 +54,8 @@ async def _sync_shipments() -> dict:
         store_cache: dict = {}
 
         for (store_id, carrier), shipments in by_store_carrier.items():
+            if is_app_carrier(carrier):
+                continue
             if store_id not in store_cache:
                 store_cache[store_id] = await store_repo.get_by_id(store_id)
             store = store_cache[store_id]
