@@ -47,6 +47,8 @@ from src.api.utils.upload_validation import (
     _detect_image_mime,
 )
 from src.application.services import admin_notifications
+from src.application.services.partner_notifications import emit_partner_notification
+from src.application.services.partner_program import partner_for_user
 from src.config import settings
 from src.core.entities.app import AppStatus
 from src.core.entities.store import Store
@@ -155,6 +157,28 @@ async def partner_email(db: AsyncSession, developer_id: UUID | None) -> str | No
         select(PartnerAccountModel.support_email).where(
             PartnerAccountModel.user_id == developer_id
         )
+    )
+
+
+async def notify_partner(
+    db: AsyncSession,
+    *,
+    kind: str,
+    data: dict[str, Any],
+    link: str,
+    app_id: UUID | None = None,
+    developer_id: UUID | None = None,
+    partner_id: UUID | None = None,
+) -> None:
+    """A feed row for the partner, in the caller's transaction. Sent before
+    the email, so a mail outage never costs the in-portal notification."""
+    if partner_id is None and developer_id is not None:
+        account = await partner_for_user(db, developer_id)
+        partner_id = account.id if account else None
+    if partner_id is None:
+        return
+    await emit_partner_notification(
+        db, partner_id=partner_id, kind=kind, data=data, app_id=app_id, link=link
     )
 
 
@@ -406,6 +430,22 @@ async def _notify(
     """Tell the other side of the thread."""
     t, app_name, app_slug, store_name, partner_name = row
     subject = t.subject
+    if role in ("merchant", "staff"):
+        await notify_partner(
+            db,
+            kind="support_ticket_new" if new else "support_reply",
+            partner_id=t.partner_id,
+            app_id=t.app_id,
+            link=f"/support/{t.id}",
+            data={
+                "ticket_id": str(t.id),
+                "subject": subject,
+                "app_id": str(t.app_id) if t.app_id else None,
+                "app_name": app_name,
+                "store_name": store_name,
+                "from": role,
+            },
+        )
     if t.kind == "partner" and role == "partner":
         admin_notifications.notify(
             db,

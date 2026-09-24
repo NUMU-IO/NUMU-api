@@ -30,6 +30,7 @@ from src.api.dependencies.partners import (
 from src.api.dependencies.services import get_email_service
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.app_support import (
+    notify_partner,
     partner_email,
     partners_url,
     send_bilingual,
@@ -314,6 +315,20 @@ async def merchant_upsert(
     await db.flush()
     await db.refresh(review)
     if created:
+        await notify_partner(
+            db,
+            kind="review_new",
+            developer_id=app.developer_id,
+            app_id=app.id,
+            link=f"/reviews?app={app.id}",
+            data={
+                "review_id": str(review.id),
+                "app_id": str(app.id),
+                "app_name": app.name,
+                "rating": body.rating,
+                "store_name": store.name,
+            },
+        )
         await send_bilingual(
             email_service,
             await partner_email(db, app.developer_id),
@@ -504,6 +519,21 @@ async def admin_moderate(
     review = await db.get(AppRatingModel, review_id)
     if review is None:
         raise HTTPException(status_code=404, detail="Review not found")
+    if body.action == "hide" and not review.is_hidden:
+        app = await db.get(AppModel, review.app_id)
+        await notify_partner(
+            db,
+            kind="review_reported_hidden",
+            developer_id=app.developer_id if app else None,
+            app_id=review.app_id,
+            link=f"/reviews?app={review.app_id}",
+            data={
+                "review_id": str(review.id),
+                "app_id": str(review.app_id),
+                "app_name": app.name if app else None,
+                "rating": review.rating,
+            },
+        )
     if body.action != "dismiss":
         review.is_hidden = body.action == "hide"
     review.reported_at = None

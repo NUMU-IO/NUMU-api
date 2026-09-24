@@ -22,12 +22,19 @@ from src.infrastructure.database.models.public.partner_account import (
 #: review_status {app_id, app_name, subject, version, status};
 #: payout_recorded {amount_cents, currency, reference};
 #: platform_notice {notice_id, notice_kind, title, body, link};
-#: subscription_past_due {app_id, app_name} (no emitter yet).
+#: subscription_past_due {app_id, app_name} (no emitter yet);
+#: review_new / review_reported_hidden {review_id, app_id, app_name, rating,
+#: store_name}; support_ticket_new / support_reply {ticket_id, subject,
+#: app_id, app_name, store_name, from}.
 PARTNER_NOTIFICATION_KINDS = frozenset({
     "review_status",
     "payout_recorded",
     "platform_notice",
     "subscription_past_due",
+    "review_new",
+    "review_reported_hidden",
+    "support_ticket_new",
+    "support_reply",
 })
 
 

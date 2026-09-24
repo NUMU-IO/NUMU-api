@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, UploadFile
+from sqlalchemy import select
 
 from src.api.dependencies.partners import partner_context
 from src.api.v1.routes import app_reviews as reviews
@@ -23,6 +24,7 @@ from src.infrastructure.database.models.public.app import (
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
     PartnerMemberModel,
+    PartnerNotificationModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.user import UserModel
@@ -501,3 +503,113 @@ async def test_partner_to_numu_ticket_is_answered_by_staff(test_session):
     store = await _store(test_session)
     with pytest.raises(HTTPException):
         await support.merchant_get(thread.ticket.id, store=store, db=test_session)
+
+
+# ─── Partner notifications ────────────────────────────────────────
+
+
+class _BrokenMail:
+    async def send_email(self, message):
+        raise RuntimeError("smtp down")
+
+
+async def _feed(s, account):
+    rows = (
+        await s.execute(
+            select(PartnerNotificationModel.kind, PartnerNotificationModel.link).where(
+                PartnerNotificationModel.partner_id == account.id
+            )
+        )
+    ).all()
+    return sorted(tuple(r) for r in rows)
+
+
+async def test_a_new_review_notifies_only_its_partner_even_if_email_fails(
+    test_session,
+):
+    owner, account = await _partner(test_session)
+    _, other = await _partner(test_session)
+    app = await _app(test_session, owner.id)
+    store = await _store(test_session)
+    await _install(test_session, app, store)
+    await _review(test_session, app, store, mail=_BrokenMail())
+    await _review(test_session, app, store, rating=5)
+    assert await _feed(test_session, account) == [
+        ("review_new", f"/reviews?app={app.id}")
+    ]
+    assert await _feed(test_session, other) == []
+
+
+async def test_hiding_a_review_notifies_the_partner_once(test_session):
+    owner, account = await _partner(test_session)
+    app = await _app(test_session, owner.id)
+    store = await _store(test_session)
+    await _install(test_session, app, store)
+    review = await _review(test_session, app, store)
+    for _ in range(2):
+        await reviews.admin_moderate(
+            review.id,
+            reviews.ModerateIn(action="hide"),
+            admin_id=uuid4(),
+            db=test_session,
+        )
+    kinds = [k for k, _ in await _feed(test_session, account)]
+    assert kinds.count("review_reported_hidden") == 1
+
+
+async def test_support_events_notify_the_partner_once_each(test_session):
+    owner, account = await _partner(test_session)
+    _, other = await _partner(test_session)
+    app = await _app(test_session, owner.id)
+    store = await _store(test_session)
+    thread = await _open(test_session, store, app, _BrokenMail())
+    tid = thread.ticket.id
+    await support.merchant_reply(
+        tid,
+        store=store,
+        user_id=store.owner_id,
+        db=test_session,
+        email_service=_Mail(),
+        storage=_Storage(),
+        body="Any news?",
+    )
+    await support.partner_reply(
+        tid,
+        ctx=await _ctx(test_session, owner),
+        db=test_session,
+        email_service=_Mail(),
+        storage=_Storage(),
+        body="Looking",
+    )
+    assert await _feed(test_session, account) == [
+        ("support_reply", f"/support/{tid}"),
+        ("support_ticket_new", f"/support/{tid}"),
+    ]
+    assert await _feed(test_session, other) == []
+
+
+async def test_a_staff_reply_notifies_the_asking_partner(test_session):
+    owner, account = await _partner(test_session)
+    ctx = await _ctx(test_session, owner)
+    thread = (
+        await support.partner_create(
+            ctx=ctx,
+            db=test_session,
+            email_service=_Mail(),
+            storage=_Storage(),
+            subject="Payouts",
+            body="When?",
+        )
+    ).data
+    assert await _feed(test_session, account) == []
+    await support.admin_reply(
+        thread.ticket.id,
+        admin_id=owner.id,
+        db=test_session,
+        email_service=_BrokenMail(),
+        storage=_Storage(),
+        body="Monthly",
+    )
+    assert await _feed(test_session, account) == [
+        ("support_reply", f"/support/{thread.ticket.id}")
+    ]
