@@ -83,6 +83,14 @@ class ScreenshotOut(BaseModel):
     viewport: str = "desktop"  # "mobile" | "desktop"
 
 
+class ScreenshotIn(ScreenshotOut):
+    """A partner-supplied screenshot; the URL must be on the image allowlist."""
+
+    _check_url = field_validator("url")(
+        lambda cls, v: _validate_marketplace_image_url(v)  # type: ignore[misc]
+    )
+
+
 class HighlightOut(BaseModel):
     """One Shopify-style highlight tile."""
 
@@ -94,8 +102,10 @@ class HighlightOut(BaseModel):
 class MarketplaceThemeOut(BaseModel):
     id: str
     name: str
+    name_ar: str | None = None
     slug: str
     description: str | None = None
+    description_ar: str | None = None
     short_description: str | None = None
     price_cents: int = 0
     currency: str = "USD"
@@ -143,8 +153,11 @@ class ThemeDetailResponse(MarketplaceThemeOut):
 
 class CreateListingRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    name_ar: str | None = Field(default=None, max_length=255)
     slug: str = Field(min_length=3, max_length=64)
     description: str | None = None
+    description_ar: str | None = None
+    screenshots: list[ScreenshotIn] = Field(default_factory=list, max_length=10)
     short_description: str | None = Field(default=None, max_length=500)
     price_cents: int = Field(default=0, ge=0)
     currency: str = Field(default="USD", min_length=3, max_length=10)
@@ -172,7 +185,10 @@ class CreateListingRequest(BaseModel):
 
 class UpdateListingRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    name_ar: str | None = Field(default=None, max_length=255)
     description: str | None = None
+    description_ar: str | None = None
+    screenshots: list[ScreenshotIn] | None = Field(default=None, max_length=10)
     short_description: str | None = Field(default=None, max_length=500)
     price_cents: int | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, min_length=3, max_length=10)
@@ -218,6 +234,7 @@ class VersionStatusResponse(BaseModel):
     version_string: str | None = None
     status: str
     build_log: str | None = None
+    review_notes: str | None = None
     bundle_url: str | None = None
     css_url: str | None = None
     size_bytes: int | None = None
@@ -233,6 +250,11 @@ class VersionSummaryOut(BaseModel):
     css_url: str | None = None
     checksum: str | None = None
     created_at: str | None = None
+    review_notes: str | None = None
+    build_log: str | None = None
+    lint_status: str | None = None
+    lint_issues: dict[str, Any] | None = None
+    certification_tier: str | None = None
 
 
 # ── Admin ─────────────────────────────────────────────────────────────────────
@@ -272,6 +294,9 @@ class PendingReviewItem(BaseModel):
 
     # Listing metadata
     theme_name: str | None = None
+    theme_name_ar: str | None = None
+    theme_description_ar: str | None = None
+    theme_screenshots: list[ScreenshotOut] = Field(default_factory=list)
     theme_slug: str | None = None
     theme_description: str | None = None
     theme_short_description: str | None = None
@@ -312,7 +337,7 @@ class PendingReviewListResponse(BaseModel):
 
 
 class ReviewDecisionRequest(BaseModel):
-    decision: str = Field(description="'approve' or 'reject'")
+    decision: str = Field(description="'approve', 'reject' or 'request_changes'")
     notes: str | None = Field(default=None, max_length=2000)
     override_certification: bool = Field(
         default=False,

@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.partner_referrals import credit_invoice
 from src.application.services.paymob_recurring_billing_service import (
     PaymobRecurringBillingService,
     RecurringChargeFailure,
@@ -166,6 +167,7 @@ class SubscribeUseCase:
             paid_at=now,
         )
         self.db.add(invoice)
+        await credit_invoice(self.db, invoice)
 
         # Activate tenant
         tenant.lifecycle_state = TenantLifecycleState.ACTIVE

@@ -59,7 +59,15 @@ class TenantAdmin(ModelView, model=TenantModel):
         TenantModel.is_active,
     ]
     column_default_sort = ("created_at", True)
-    form_excluded_columns = [TenantModel.created_at, TenantModel.updated_at]
+    # Plan and flags are not hand-editable here: a raw edit skips validation,
+    # the audit log and entitlement cache invalidation.
+    form_excluded_columns = [
+        TenantModel.created_at,
+        TenantModel.updated_at,
+        TenantModel.plan,
+        TenantModel.feature_flags,
+        TenantModel.entitlements_version,
+    ]
     column_filters = [
         BooleanFilter(TenantModel.is_active),
         AllUniqueStringValuesFilter(TenantModel.plan),

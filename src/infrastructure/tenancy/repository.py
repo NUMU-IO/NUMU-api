@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.interfaces.repositories.tenant_repository import ITenantRepository
@@ -46,6 +46,16 @@ class TenantRepository(ITenantRepository):
         self.session.add(tenant)
         await self.session.flush()
         return tenant
+
+    async def bump_entitlements_version(self, tenant_id: UUID) -> None:
+        """Invalidate the tenant's cached entitlements. Call it inside the
+        transaction that changes an override, add-on or flag target, so the
+        change and the new version commit together."""
+        await self.session.execute(
+            update(TenantModel)
+            .where(TenantModel.id == tenant_id)
+            .values(entitlements_version=TenantModel.entitlements_version + 1)
+        )
 
     async def deactivate(self, tenant_id: UUID) -> bool:
         """Deactivate a tenant (soft delete)."""

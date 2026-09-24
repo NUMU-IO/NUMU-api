@@ -82,6 +82,13 @@ class AppModel(Base, UUIDMixin, TimestampMixin):
         JSONB, nullable=False, default=dict
     )
     category: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    #: A private (custom) app: installs on this one store only, never listed,
+    #: never reviewed, never billed by NUMU.
+    private_store_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
+        nullable=True,
+    )
 
 
 class AppInstallationModel(Base, UUIDMixin, TimestampMixin, TenantMixin):

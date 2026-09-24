@@ -26,9 +26,11 @@ from src.application.services.capability_service import (
     CAPABILITIES,
     CapabilityService,
 )
+from src.application.services.entitlement_service import EntitlementService
 from src.application.services.sector_preset_service import SectorPresetService
 from src.core.entities.store import Store
 from src.core.sector_presets import SECTOR_PRESETS, get_preset
+from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.repositories.category_repository import CategoryRepository
 from src.infrastructure.repositories.metafield_repository import (
     MetafieldDefinitionRepository,
@@ -160,7 +162,8 @@ async def list_store_capabilities(
     session: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Resolve every capability for this store against its plan and overrides."""
-    resolved = await CapabilityService(session).all_for(store)
+    service = CapabilityService(session)
+    resolved = await service.all_for(store)
     return SuccessResponse(
         data=[
             CapabilityResponse(
@@ -169,7 +172,7 @@ async def list_store_capabilities(
                 name_ar=capability.name_ar,
                 enabled=resolved[capability.key],
                 implemented=capability.implemented,
-                min_plan=capability.min_plan,
+                min_plan=await service.min_plan(capability),
             )
             for capability in CAPABILITIES.values()
         ],
@@ -208,6 +211,10 @@ async def set_store_capability(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Capability '{capability_key}' is not available yet",
         )
+    if request.enabled and capability.entitlement and store.tenant_id:
+        tenant = await session.get(TenantModel, store.tenant_id)
+        if tenant is not None:
+            await EntitlementService(session).require(tenant, capability.entitlement)
 
     settings = dict(store.settings or {})
     capabilities = dict(settings.get("capabilities") or {})
@@ -216,7 +223,8 @@ async def set_store_capability(
     store.settings = settings
     await store_repo.update(store)
 
-    resolved = await CapabilityService(session).has(store, capability_key)
+    service = CapabilityService(session)
+    resolved = await service.has(store, capability_key)
     return SuccessResponse(
         data=CapabilityResponse(
             key=capability.key,
@@ -224,7 +232,7 @@ async def set_store_capability(
             name_ar=capability.name_ar,
             enabled=resolved,
             implemented=capability.implemented,
-            min_plan=capability.min_plan,
+            min_plan=await service.min_plan(capability),
         ),
         message="Capability updated successfully",
     )

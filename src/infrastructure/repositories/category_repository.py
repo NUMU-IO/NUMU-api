@@ -158,6 +158,23 @@ class CategoryRepository(ICategoryRepository):
         result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(m) for m in result.scalars().all()]
 
+    async def search_by_name(
+        self, store_id: UUID, query: str, limit: int
+    ) -> list[Category]:
+        """Active categories whose name contains ``query``, case-insensitive."""
+        stmt = (
+            select(CategoryModel)
+            .where(
+                CategoryModel.store_id == store_id,
+                CategoryModel.is_active.is_(True),
+                func.lower(CategoryModel.name).contains(query.lower(), autoescape=True),
+            )
+            .order_by(CategoryModel.position, CategoryModel.name)
+            .limit(limit)
+        )
+        result = await self.session.execute(self._tenant_filter(stmt))
+        return [self._to_entity(m) for m in result.scalars().all()]
+
     async def get_by_slug(self, store_id: UUID, slug: str) -> Category | None:
         query = select(CategoryModel).where(
             CategoryModel.store_id == store_id,

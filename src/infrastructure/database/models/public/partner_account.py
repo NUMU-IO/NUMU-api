@@ -15,10 +15,12 @@ from typing import Any
 from uuid import UUID as PyUUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     UniqueConstraint,
 )
@@ -44,6 +46,7 @@ class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
             "kind IN ('individual', 'company')", name="ck_partner_accounts_kind"
         ),
         Index("ix_partner_accounts_status", "status"),
+        Index("uq_partner_accounts_referral_code", "referral_code", unique=True),
         {"schema": "public"},
     )
 
@@ -74,6 +77,53 @@ class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
         UUID(as_uuid=True), nullable=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: What a referral link carries (``numueg.app/signup?ref=``). Minted on
+    #: first use; 10 characters, so it never collides with a lead's 8.
+    referral_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: Share of a referred merchant's plan payments, in basis points, for
+    #: ``referral_months`` after that merchant's first paid invoice.
+    referral_bps: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    referral_months: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
+    #: Public "Hire an expert" profile, opt-in by the partner.
+    directory_listed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    #: logo_url, bio {ar, en}, services, languages, city.
+    directory_profile: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    #: Admin-granted badge, and the admin's override to hide a listing.
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    directory_hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+
+
+class PartnerReferralModel(Base, UUIDMixin, TimestampMixin):
+    """The partner that brought a merchant. One per tenant, first touch;
+    only an admin changes it afterwards. ``first_paid_at`` starts the
+    commission window."""
+
+    __tablename__ = "partner_referrals"
+    __table_args__ = (
+        Index("ix_partner_referrals_partner", "partner_id"),
+        {"schema": "public"},
+    )
+
+    partner_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.partner_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tenant_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    first_paid_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

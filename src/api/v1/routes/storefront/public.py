@@ -24,6 +24,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +89,7 @@ from src.core.value_objects.email import Email
 from src.infrastructure.cache import (
     MISSING_SENTINEL,
     ProductCacheService,
+    RedisCacheService,
     StorefrontCache,
 )
 from src.infrastructure.external_services import PasswordService, TokenService
@@ -863,37 +865,13 @@ async def _read_installed_apps(session, *, store_id) -> list[dict]:
     hiccup must degrade to "no apps installed" — themes then render their own
     markup — rather than take down the storefront.
     """
-    from sqlalchemy import select as _select
-
-    from src.api.v1.routes.storefront.app_public import public_settings
-    from src.core.entities.app import AppStatus
-    from src.infrastructure.database.models.public.app import (
-        AppInstallationModel,
-        AppModel,
+    from src.api.v1.routes.storefront.app_public import (
+        public_settings,
+        visible_installs,
     )
 
     try:
-        from src.application.services.numu_apps import NUMU_APPS
-        from src.application.services.partner_program import partner_apps_enabled
-
-        stmt = (
-            _select(AppModel, AppInstallationModel)
-            .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
-            .where(
-                AppInstallationModel.store_id == store_id,
-                AppInstallationModel.is_enabled.is_(True),
-                # A Partner App mid-consent has no token yet: not live.
-                AppInstallationModel.status == "active",
-                AppModel.status == AppStatus.PUBLISHED,
-            )
-        )
-        if not await partner_apps_enabled(session):
-            # The Partner-apps kill switch: only NUMU Apps stay on storefronts.
-            stmt = stmt.where(AppModel.developer_id.is_(None))
-        # WhatsApp and the Inbox are hub-only NUMU Apps: nothing on a storefront
-        # renders them, and listing them here would tell every visitor which
-        # tools the merchant uses (and ignore the ff_numu_apps rollout flag).
-        stmt = stmt.where(AppModel.slug.notin_(NUMU_APPS))
+        stmt = await visible_installs(session, store_id)
         rows = (await session.execute(stmt)).all()
     except Exception:  # pragma: no cover - defensive; see docstring
         from src.core.logging import get_logger
@@ -993,7 +971,11 @@ def _serialize_public_store(
         "contact_email": getattr(store, "contact_email", None),
         "contact_phone": getattr(store, "contact_phone", None),
         "use_nextjs_storefront": getattr(store, "use_nextjs_storefront", False),
-        "tenant_feature_flags": tenant_feature_flags or {},
+        # Rollout keys only: the map also holds per-merchant grants and
+        # billing exemptions, and this payload is public.
+        "tenant_feature_flags": {
+            k: v for k, v in (tenant_feature_flags or {}).items() if k.startswith("ff_")
+        },
         # Enabled app installs, each `{slug, settings}` filtered to the
         # manifest's `public_settings` allowlist.
         #
@@ -2284,6 +2266,16 @@ async def browse_categories(
     """List active categories for a store (public)."""
     from src.application.use_cases.categories import ListCategoriesUseCase
 
+    # Every storefront page asks for this, and requests that carry a cart or
+    # session cookie skip the CDN. Same freshness as the CDN's max-age.
+    # ponytail: TTL only, no invalidation; add a bust on category writes if
+    # 60s of staleness after an edit becomes a complaint.
+    cache = RedisCacheService()
+    cache_key = f"storefront:categories:{store_id}"
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return SuccessResponse(data=cached, message="Categories retrieved successfully")
+
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
@@ -2322,6 +2314,8 @@ async def browse_categories(
             ),
         })
 
+    data = jsonable_encoder(data)
+    await cache.set(cache_key, data, expire=60)
     return SuccessResponse(data=data, message="Categories retrieved successfully")
 
 
