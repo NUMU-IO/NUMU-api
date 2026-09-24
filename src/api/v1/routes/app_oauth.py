@@ -86,6 +86,8 @@ class ConsentApp(BaseModel):
     partner: str | None
     pricing: dict | None
     privacy_policy_url: str | None
+    #: A custom app a partner built for this one store.
+    private: bool = False
 
 
 class Consent(BaseModel):
@@ -159,6 +161,8 @@ async def _consentable(
         raise HTTPException(status_code=404, detail="Store not found")
     if app.status == AppStatus.SUSPENDED or not await partner_apps_enabled(db):
         raise _bad("This app is not available right now.")
+    if app.private_store_id and app.private_store_id != store.id:
+        raise _bad("This is a custom app for another store.")
     if app.status != AppStatus.PUBLISHED:
         # An unpublished app installs only on its partner's own dev stores.
         plan = await db.scalar(
@@ -231,6 +235,7 @@ async def authorize(
                 partner=partner,
                 pricing=m.get("pricing"),
                 privacy_policy_url=(m.get("app") or {}).get("privacy_policy_url"),
+                private=app.private_store_id is not None,
             ),
             store_id=store.id,
             store_name=store.name,

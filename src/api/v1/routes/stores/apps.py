@@ -282,6 +282,7 @@ async def list_catalog(store_id: UUID):
         stmt = select(AppModel).where(
             AppModel.status == AppStatus.PUBLISHED,
             AppModel.slug.notin_(hidden),
+            AppModel.private_store_id.is_(None),
             or_(AppModel.developer_id.is_(None), partner_listed),
         )
         rows = (await session.execute(stmt)).scalars().all()
