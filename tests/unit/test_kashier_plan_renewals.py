@@ -1,8 +1,8 @@
-"""Kashier saved-card plan renewals: signing, the CONTAUTH charge, the adapter.
+"""Kashier saved-card plan renewals: signing, the token charge, the adapter.
 
 The first plan payment saves the card under a recurring agreement, signed
 with the tenant as Kashier customer reference; renewals charge the token
-server-side with interactionSource CONTAUTH and no 3-D Secure.
+server-side (CONTAUTH with an agreement, RECURRING without) and no 3-D Secure.
 """
 
 import asyncio
@@ -43,9 +43,18 @@ def test_saving_a_card_signs_the_customer_reference_and_sets_the_agreement():
     assert params["card_extra"]["agreement"]["type"] == "RECURRING"
 
 
-def test_monthly_plans_get_a_monthly_agreement_and_annual_ones_card_on_file():
-    assert platform_kashier._agreement("monthly")["paymentFrequency"] == "MONTHLY"
-    assert platform_kashier._agreement("annual")["type"] == "UNSCHEDULED"
+def test_a_saved_plan_card_sends_no_agreement():
+    """Kashier answers "invalid credentials" to any agreement on this account."""
+    with patch.object(platform_kashier, "_platform_service", _service):
+        params = platform_kashier.platform_card_params(
+            reference="SUB-ABC123",
+            amount_cents=25000,
+            description="d",
+            redirect_url="https://r",
+            save_for="tenant-1",
+        )
+    assert params["card_extra"] == {"save": True}
+    assert params["body"]["customer"] == {"reference": "tenant-1"}
 
 
 class _Response:
@@ -135,3 +144,36 @@ def test_the_adapter_unpacks_the_stored_secret():
     assert calls["customer_reference"] == "tenant-1"
     assert calls["reference"] == "REN-1"
     assert json.loads(secret) == {"t": "tok-1", "a": "agr-1", "c": "tenant-1"}
+
+
+def test_a_renewal_without_an_agreement_is_a_recurring_charge():
+    sent = {}
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, url, json, headers, timeout):
+            sent.update(body=json)
+            return _Response({"response": {"status": "SUCCESS"}})
+
+    with patch(
+        "src.infrastructure.external_services.kashier.payment_service.httpx.AsyncClient",
+        _Client,
+    ):
+        asyncio.run(
+            _service().charge_recurring_token(
+                card_token="tok-1",
+                agreement_id=None,
+                customer_reference="tenant-1",
+                reference="REN-1",
+                amount_cents=25000,
+                currency="EGP",
+                webhook_url="https://w",
+            )
+        )
+    assert sent["body"]["interactionSource"] == "RECURRING"
+    assert "agreement" not in sent["body"]["paymentMethod"]["card"]

@@ -397,10 +397,10 @@ class KashierPaymentService(IPaymentService):
         currency: str,
         webhook_url: str,
     ) -> PaymentResult:
-        """Merchant-initiated charge of a saved card (Kashier ``CONTAUTH``).
+        """Merchant-initiated charge of a saved card, no customer, no 3-D Secure.
 
-        No customer present and no 3-D Secure; the recurring agreement set up
-        with the first payment authorises it.
+        ``CONTAUTH`` when a recurring agreement exists; otherwise ``RECURRING``,
+        Kashier's pay-with-token source for merchant-initiated charges.
         """
         amount = f"{amount_cents / 100:.2f}"
         card: dict = {"cardToken": card_token, "enable3DS": False}
@@ -412,7 +412,7 @@ class KashierPaymentService(IPaymentService):
             "paymentMethod": {"type": "CARD", "card": card},
             "order": {"reference": reference, "amount": amount, "currency": currency},
             "customer": {"reference": customer_reference},
-            "interactionSource": "CONTAUTH",
+            "interactionSource": "CONTAUTH" if agreement_id else "RECURRING",
             "reconciliation": {"webhookUrl": webhook_url, "redirect": False},
         }
         try:
