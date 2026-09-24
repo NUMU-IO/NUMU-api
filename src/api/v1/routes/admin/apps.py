@@ -642,6 +642,7 @@ async def list_charges(
                 "amount_cents": -c.amount_cents,
                 "currency": c.currency,
                 "note": c.note,
+                "theme_id": (c.meta or {}).get("theme_id"),
                 "created_at": c.created_at,
                 "refunded": f"app-refund:{c.id}" in refunded,
             }

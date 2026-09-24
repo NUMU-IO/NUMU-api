@@ -449,6 +449,7 @@ async def earnings(
         app_labels,
         partner_balance,
         partner_payable,
+        theme_labels,
     )
     from src.infrastructure.database.models.public.app_billing import (
         PartnerLedgerEntryModel,
@@ -477,6 +478,7 @@ async def earnings(
         .all()
     )
     apps = await app_labels(db, [e.app_id for e in rows])
+    apps.update(await theme_labels(db, [e.theme_id for e in rows]))
     return SuccessResponse(
         data={
             "balance_cents": await partner_balance(db, account.id),
@@ -493,8 +495,9 @@ async def earnings(
                     "discount_cents": e.discount_cents,
                     "vat_cents": e.vat_cents,
                     "app_id": str(e.app_id) if e.app_id else None,
-                    "app_name": apps.get(e.app_id, {}).get("name"),
-                    "app_slug": apps.get(e.app_id, {}).get("slug"),
+                    "theme_id": str(e.theme_id) if e.theme_id else None,
+                    "app_name": apps.get(e.theme_id or e.app_id, {}).get("name"),
+                    "app_slug": apps.get(e.theme_id or e.app_id, {}).get("slug"),
                     "reference": e.reference,
                     "created_at": e.created_at,
                 }

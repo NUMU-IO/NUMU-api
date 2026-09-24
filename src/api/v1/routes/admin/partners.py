@@ -334,7 +334,7 @@ class PayoutRequest(BaseModel):
 
 
 def _entry_out(e, apps: dict | None = None) -> dict:
-    app = (apps or {}).get(e.app_id) or {}
+    app = (apps or {}).get(e.theme_id or e.app_id) or {}
     return {
         "id": str(e.id),
         "kind": e.kind,
@@ -346,6 +346,7 @@ def _entry_out(e, apps: dict | None = None) -> dict:
         "vat_cents": e.vat_cents,
         "currency": e.currency,
         "app_id": str(e.app_id) if e.app_id else None,
+        "theme_id": str(e.theme_id) if e.theme_id else None,
         "app_name": app.get("name"),
         "app_slug": app.get("slug"),
         "reference": e.reference,
@@ -367,6 +368,7 @@ async def ledger(
         charge_ids,
         partner_balance,
         partner_payable,
+        theme_labels,
     )
     from src.infrastructure.database.models.public.app_billing import (
         PartnerLedgerEntryModel,
@@ -386,6 +388,7 @@ async def ledger(
         .all()
     )
     apps = await app_labels(db, [e.app_id for e in rows])
+    apps.update(await theme_labels(db, [e.theme_id for e in rows]))
     charges = await charge_ids(
         db, [e.idempotency_key for e in rows if e.kind == "sale"]
     )

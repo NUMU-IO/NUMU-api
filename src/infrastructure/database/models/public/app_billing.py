@@ -185,6 +185,11 @@ class PartnerLedgerEntryModel(Base, UUIDMixin):
     share_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discount_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     vat_cents: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    theme_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketplace_themes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EGP")
     app_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -308,6 +313,11 @@ class AppFeeInvoiceModel(Base, UUIDMixin):
         UUID(as_uuid=True),
         ForeignKey("public.wallet_transactions.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    theme_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.marketplace_themes.id", ondelete="SET NULL"),
+        nullable=True,
     )
     original_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),

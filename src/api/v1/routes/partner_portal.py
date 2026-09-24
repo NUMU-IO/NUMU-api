@@ -176,7 +176,7 @@ async def dashboard(
             ).where(
                 PartnerLedgerEntryModel.partner_id == ctx.account.id,
                 PartnerLedgerEntryModel.kind == "sale",
-                PartnerLedgerEntryModel.app_id.in_(apps),
+                *([PartnerLedgerEntryModel.app_id == app_id] if app_id else []),
                 *_in_range(PartnerLedgerEntryModel.created_at, start, end),
             )
         )

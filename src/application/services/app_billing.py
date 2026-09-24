@@ -72,6 +72,10 @@ from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
 )
 from src.infrastructure.database.models.public.wallet import WalletTransactionModel
+from src.infrastructure.database.models.tenant.marketplace_theme import (
+    MarketplaceThemeModel,
+    MarketplaceThemePurchaseModel,
+)
 
 logger = get_logger(__name__)
 
@@ -665,6 +669,7 @@ async def issue_fee_invoice(
     description: str,
     now: datetime,
     original: AppFeeInvoiceModel | None = None,
+    theme_id: UUID | None = None,
 ) -> AppFeeInvoiceModel:
     """NUMU's numbered invoice for its fee and VAT on one wallet charge, or
     (``credit_note``, negative amounts) the one reversing it. One per wallet
@@ -685,6 +690,7 @@ async def issue_fee_invoice(
         tenant_id=tx.tenant_id,
         store_id=store_id,
         app_id=app_id,
+        theme_id=theme_id,
         wallet_transaction_id=tx.id,
         original_id=original.id if original else None,
         list_price_cents=sign * q.list_cents,
@@ -1033,6 +1039,15 @@ async def refund_charge(
     )
     if reversal is None:
         return None
+    purchase = await db.scalar(
+        select(MarketplaceThemePurchaseModel).where(
+            MarketplaceThemePurchaseModel.wallet_transaction_id == charge.id
+        )
+    )
+    if purchase is not None:
+        purchase.status = "refunded"
+        purchase.refunded_amount_cents = purchase.amount_cents
+        purchase.refund_reason = note
     invoice = await db.scalar(
         select(AppFeeInvoiceModel).where(
             AppFeeInvoiceModel.wallet_transaction_id == charge.id,
@@ -1054,6 +1069,7 @@ async def refund_charge(
             ),
             store_id=invoice.store_id,
             app_id=invoice.app_id,
+            theme_id=invoice.theme_id,
             description=invoice.description,
             now=_now(),
             original=invoice,
@@ -1078,6 +1094,7 @@ async def refund_charge(
         vat_cents=-(sale.vat_cents or 0),
         currency=sale.currency,
         app_id=sale.app_id,
+        theme_id=sale.theme_id,
         subscription_id=sale.subscription_id,
         idempotency_key=reference,
         reference=reference,
@@ -1107,6 +1124,22 @@ async def _credit_partner(
         # the money until an admin records an adjustment.
         logger.error("partner_ledger_no_partner_account", app=app.slug, key=key)
         return None
+    return await _ledger_sale(
+        db, q, currency, key, collected_at, app_id=app.id, subscription_id=sub.id
+    )
+
+
+async def _ledger_sale(
+    db: AsyncSession,
+    q: Quote,
+    currency: str,
+    key: str,
+    collected_at: datetime,
+    *,
+    app_id: UUID | None = None,
+    subscription_id: UUID | None = None,
+    theme_id: UUID | None = None,
+) -> PartnerLedgerEntryModel | None:
     entry = PartnerLedgerEntryModel(
         partner_id=q.partner_id,
         kind="sale",
@@ -1117,8 +1150,9 @@ async def _credit_partner(
         discount_cents=q.discount_cents,
         vat_cents=q.vat_cents,
         currency=currency,
-        app_id=app.id,
-        subscription_id=sub.id,
+        app_id=app_id,
+        subscription_id=subscription_id,
+        theme_id=theme_id,
         idempotency_key=key,
         # The 30-day hold counts from when NUMU collected the money.
         created_at=collected_at,
@@ -1130,6 +1164,136 @@ async def _credit_partner(
     except IntegrityError:
         return None  # this charge was already credited
     return entry
+
+
+THEME_CURRENCY = "EGP"
+
+
+async def theme_quote(db: AsyncSession, theme: MarketplaceThemeModel) -> Quote:
+    """A theme purchase: the partner's share of the price, NUMU's fee and VAT
+    on it. A NUMU theme (its developer is no partner) keeps it all."""
+    account = await db.scalar(
+        select(PartnerAccountModel).where(
+            PartnerAccountModel.user_id == theme.developer_id
+        )
+    )
+    return quote(
+        theme.price_cents,
+        effective_share_bps(account) if account else 0,
+        partner_id=account.id if account else None,
+    )
+
+
+async def store_purchase(
+    db: AsyncSession, store_id: UUID, theme_id: UUID
+) -> MarketplaceThemePurchaseModel | None:
+    return await db.scalar(
+        select(MarketplaceThemePurchaseModel).where(
+            MarketplaceThemePurchaseModel.store_id == store_id,
+            MarketplaceThemePurchaseModel.marketplace_theme_id == theme_id,
+            MarketplaceThemePurchaseModel.status == "succeeded",
+        )
+    )
+
+
+async def purchase_theme(
+    db: AsyncSession,
+    *,
+    theme: MarketplaceThemeModel,
+    store_id: UUID,
+    tenant_id: UUID,
+    user_id: UUID,
+    source: ChargeSource,
+    now: datetime | None = None,
+) -> tuple[MarketplaceThemePurchaseModel, bool]:
+    """Buy a paid theme for one store, once and for good (later versions are
+    free). Returns ``(purchase, charged)``; a store that already owns it is
+    charged nothing. The price plus VAT on NUMU's fee comes from the wallet
+    (InsufficientFundsError otherwise); the partner is credited their share
+    and NUMU issues its fee invoice. Caller owns the commit."""
+    now = now or _now()
+    if theme.price_cents <= 0:
+        raise NotPaidError(theme.slug)
+    await db.execute(
+        select(MarketplaceThemeModel.id)
+        .where(MarketplaceThemeModel.id == theme.id)
+        .with_for_update()
+    )
+    owned = await store_purchase(db, store_id, theme.id)
+    if owned is not None:
+        return owned, False
+    earlier = await db.scalar(
+        select(func.count(MarketplaceThemePurchaseModel.id)).where(
+            MarketplaceThemePurchaseModel.store_id == store_id,
+            MarketplaceThemePurchaseModel.marketplace_theme_id == theme.id,
+        )
+    )
+    key = f"theme-purchase:{store_id}:{theme.id}:{earlier or 0}"
+    q = await theme_quote(db, theme)
+    tx = await source.charge(
+        tenant_id=tenant_id,
+        amount_cents=q.total_cents,
+        currency=THEME_CURRENCY,
+        key=key,
+        note=f"theme {theme.slug}"[:255],
+        meta={
+            **q.out(),
+            "share_bps": q.share_bps,
+            "fee_cents": q.fee_cents,
+            "theme_id": str(theme.id),
+        },
+    )
+    if tx is None:
+        raise RuntimeError(f"theme charge {key} already taken")
+    purchase = MarketplaceThemePurchaseModel(
+        user_id=user_id,
+        marketplace_theme_id=theme.id,
+        amount_cents=q.total_cents,
+        currency=THEME_CURRENCY,
+        status="succeeded",
+        store_id=store_id,
+        tenant_id=tenant_id,
+        wallet_transaction_id=tx.id,
+        purchase_metadata={"theme_slug": theme.slug, "rail": "wallet", **q.out()},
+    )
+    db.add(purchase)
+    await db.flush()
+    if q.partner_id is not None:
+        await _ledger_sale(db, q, THEME_CURRENCY, key, now, theme_id=theme.id)
+    await issue_fee_invoice(
+        db,
+        tx=tx,
+        kind="invoice",
+        q=q,
+        store_id=store_id,
+        app_id=None,
+        theme_id=theme.id,
+        description=f"Theme: {theme.name}"[:255],
+        now=now,
+    )
+    logger.info(
+        "theme_purchased",
+        theme=theme.slug,
+        store_id=str(store_id),
+        total_cents=q.total_cents,
+    )
+    return purchase, True
+
+
+async def theme_labels(
+    db: AsyncSession, theme_ids: list[UUID | None]
+) -> dict[UUID, dict[str, str]]:
+    ids = {i for i in theme_ids if i}
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(
+            MarketplaceThemeModel.id,
+            MarketplaceThemeModel.name,
+            MarketplaceThemeModel.slug,
+        ).where(MarketplaceThemeModel.id.in_(ids))
+    )
+    return {r.id: {"name": r.name, "slug": r.slug} for r in rows}
 
 
 async def app_labels(
@@ -1335,6 +1499,7 @@ async def partner_statement(
     others = [e for e in entries if e.kind == "adjustment" and not is_refund(e)]
     payouts = [e for e in entries if e.kind == "payout"]
     apps = await app_labels(db, [e.app_id for e in entries])
+    apps.update(await theme_labels(db, [e.theme_id for e in entries]))
     return {
         "month": month,
         "currency": "EGP",
@@ -1358,8 +1523,9 @@ async def partner_statement(
                 "share_bps": e.share_bps,
                 "discount_cents": e.discount_cents,
                 "vat_cents": e.vat_cents,
-                "app_name": apps.get(e.app_id, {}).get("name"),
-                "app_slug": apps.get(e.app_id, {}).get("slug"),
+                "item": "theme" if e.theme_id else "app",
+                "app_name": apps.get(e.theme_id or e.app_id, {}).get("name"),
+                "app_slug": apps.get(e.theme_id or e.app_id, {}).get("slug"),
                 "reference": e.reference,
                 "created_at": _aware(e.created_at).isoformat(),
             }
@@ -1394,6 +1560,7 @@ def statement_csv(statement: dict[str, Any]) -> str:
     cols = [
         "created_at",
         "kind",
+        "item",
         "app_slug",
         "gross_cents",
         "discount_cents",

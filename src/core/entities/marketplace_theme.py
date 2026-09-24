@@ -70,6 +70,7 @@ class MarketplaceTheme(BaseEntity):
     description_ar: str | None = None
     short_description: str | None = Field(default=None, max_length=500)
     price_cents: int = 0  # 0 = free
+    pending_price_cents: int | None = None
     currency: str = "USD"
     status: MarketplaceThemeStatus = MarketplaceThemeStatus.DRAFT
     thumbnail_url: str | None = None

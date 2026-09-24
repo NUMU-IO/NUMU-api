@@ -33,6 +33,13 @@ from src.infrastructure.external_services.resend import ResendEmailService
 logger = logging.getLogger(__name__)
 
 PAID_THEMES_UNAVAILABLE = "Paid themes are coming soon; list the theme as free."
+THEME_PRICE_RANGE = "A paid theme costs between EGP 5 and EGP 100,000."
+PURCHASE_REQUIRED = "This theme must be bought for this store before it is installed."
+
+
+class ThemePurchaseRequired(ValueError):
+    """A paid theme the store has not bought."""
+
 
 _STATUS_EMAIL_COPY = {
     MarketplaceVersionStatus.PENDING_REVIEW.value: (
@@ -163,8 +170,7 @@ class MarketplaceService:
         """
         slug = data.get("slug", "").strip().lower()
         _validate_slug(slug)
-        if data.get("price_cents"):
-            raise ValueError(PAID_THEMES_UNAVAILABLE)
+        pending = await self._pending_price(data.get("price_cents"))
         if await self._marketplace_repo.get_theme_by_slug(slug):
             raise ValueError(f"slug already taken: {slug!r}")
 
@@ -177,8 +183,9 @@ class MarketplaceService:
             "description_ar": data.get("description_ar"),
             "screenshots": data.get("screenshots") or [],
             "short_description": data.get("short_description"),
-            "price_cents": data.get("price_cents", 0),
-            "currency": data.get("currency", "USD"),
+            "price_cents": 0,
+            "pending_price_cents": pending,
+            "currency": "EGP" if pending else data.get("currency", "USD"),
             "status": MarketplaceThemeStatus.DRAFT.value,
             "thumbnail_url": data.get("thumbnail_url"),
             "preview_url": data.get("preview_url"),
@@ -217,14 +224,53 @@ class MarketplaceService:
             "description_ar",
             "screenshots",
         }
-        if fields.get("price_cents"):
-            raise ValueError(PAID_THEMES_UNAVAILABLE)
         clean = {k: v for k, v in fields.items() if k in allowed}
+        if "price_cents" in fields:
+            price = fields["price_cents"] or 0
+            clean["pending_price_cents"] = (
+                None if price == theme.price_cents else await self._pending_price(price)
+            )
         if not clean:
             return self._theme_dict(theme)
         clean["updated_at"] = datetime.now(UTC)
         updated = await self._marketplace_repo.update_theme(theme_id, clean)
         return self._theme_dict(updated)
+
+    async def _pending_price(self, price: int | None) -> int | None:
+        """A partner's price waits for review (applied when an admin approves
+        the next version). Paid needs NUMU billing for partners switched on."""
+        if price is None:
+            return None
+        if price == 0:
+            return 0
+        from src.application.services.partner_program import partner_billing_enabled
+
+        session = getattr(self._marketplace_repo, "_session", None)
+        if session is None or not await partner_billing_enabled(session):
+            raise ValueError(PAID_THEMES_UNAVAILABLE)
+        if not 500 <= price <= 10_000_000:
+            raise ValueError(THEME_PRICE_RANGE)
+        return price
+
+    async def require_purchase(
+        self, theme: Any, store_id: UUID, user_id: UUID | None
+    ) -> None:
+        """Paid themes install and activate only on a store that bought them
+        (or for the theme's own developer, or a legacy per-user purchase)."""
+        if not theme.price_cents or theme.price_cents <= 0:
+            return
+        if user_id is not None and theme.developer_id == user_id:
+            return
+        from src.application.services.app_billing import store_purchase
+
+        session = getattr(self._marketplace_repo, "_session", None)
+        if session is not None and await store_purchase(session, store_id, theme.id):
+            return
+        if user_id is not None and await self._marketplace_repo.has_active_purchase(
+            user_id, theme.id
+        ):
+            return
+        raise ThemePurchaseRequired(PURCHASE_REQUIRED)
 
     async def list_my_themes(self, developer_id: UUID) -> list[dict[str, Any]]:
         themes = await self._marketplace_repo.list_by_developer(developer_id)
@@ -533,6 +579,7 @@ class MarketplaceService:
                 ),
                 "theme_status": theme.status.value if theme else None,
                 "price_cents": theme.price_cents if theme else 0,
+                "pending_price_cents": theme.pending_price_cents if theme else None,
                 "currency": theme.currency if theme else "USD",
                 # Marketing
                 "thumbnail_url": theme.thumbnail_url if theme else None,
@@ -761,6 +808,15 @@ class MarketplaceService:
         )
 
         theme = await self._marketplace_repo.get_theme_by_id(version.theme_id)
+        if decision == "approve" and theme and theme.pending_price_cents is not None:
+            theme = await self._marketplace_repo.update_theme(
+                theme.id,
+                {
+                    "price_cents": theme.pending_price_cents,
+                    "pending_price_cents": None,
+                    **({"currency": "EGP"} if theme.pending_price_cents else {}),
+                },
+            )
         if (
             decision == "reject"
             and theme
@@ -974,19 +1030,7 @@ class MarketplaceService:
         if not theme or theme.status != MarketplaceThemeStatus.PUBLISHED:
             raise ValueError("theme not found or not published")
 
-        if theme.price_cents > 0:
-            if user_id is None:
-                raise ValueError(
-                    "Paid themes require an authenticated user_id at install time"
-                )
-            owns = await self._marketplace_repo.has_active_purchase(
-                user_id, marketplace_theme_id
-            )
-            if not owns:
-                raise ValueError(
-                    "This theme requires a purchase. Buy it via /checkout-session "
-                    "before installing."
-                )
+        await self.require_purchase(theme, store_id, user_id)
 
         version = await self._marketplace_repo.get_latest_published_version(
             marketplace_theme_id
@@ -1050,6 +1094,9 @@ class MarketplaceService:
         )
         if not installation or installation.uninstalled_at is not None:
             raise ValueError("theme is not installed for this store")
+        theme = await self._marketplace_repo.get_theme_by_id(marketplace_theme_id)
+        if theme is not None:
+            await self.require_purchase(theme, store_id, user_id)
 
         # ADR-6: an unreviewed developer preview is time-boxed. Activation is
         # the moment it would start serving real shoppers, so an expired one
@@ -1542,6 +1589,7 @@ class MarketplaceService:
         }
         if not public:
             base["developer_id"] = str(t.developer_id)
+            base["pending_price_cents"] = getattr(t, "pending_price_cents", None)
         return base
 
     async def _revalidate(self, store_id: UUID) -> None:
