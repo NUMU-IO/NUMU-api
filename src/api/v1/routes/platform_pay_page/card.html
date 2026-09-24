@@ -6,44 +6,102 @@
 <meta name="referrer" content="no-referrer">
 <title>NUMU payment</title>
 <style>
+  :root { color-scheme: light; --navy: #0d355f; --navy-dark: #082643; --ink: #10243e; --muted: #63738a; --line: #d9e1ea; --soft: #f5f8fb; --success: #087f5b; }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 4px; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; color: #0f172a; background: transparent; }
+  body { margin: 0; padding: 3px; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; color: var(--ink); background: transparent; }
   [hidden] { display: none !important; }
-  label { display: block; font-size: 12px; font-weight: 600; margin: 0 0 6px; }
-  .field { margin-bottom: 12px; }
+  form { display: grid; gap: 16px; }
+  .payment-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid #dce7f1; border-radius: 14px; background: linear-gradient(135deg, #f7fbff 0%, #eef6fb 100%); }
+  .payment-heading__copy { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .payment-heading__icon { display: grid; flex: 0 0 38px; width: 38px; height: 38px; place-items: center; border-radius: 11px; color: #fff; background: var(--navy); }
+  .payment-heading__icon svg { width: 19px; height: 19px; }
+  .eyebrow { margin: 0 0 2px; color: var(--success); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+  .payment-heading h1 { margin: 0; font-size: 15px; line-height: 1.25; }
+  .amount { flex: 0 0 auto; margin: 0; padding: 6px 9px; border-radius: 9px; color: var(--navy); background: #fff; box-shadow: 0 0 0 1px rgba(13, 53, 95, .1); font-size: 13px; font-weight: 800; }
+  .fields { display: grid; gap: 13px; }
+  .field { min-width: 0; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  input { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; direction: ltr; background: #fff; }
-  input:focus { outline: 2px solid #0f172a; outline-offset: -1px; }
-  button { width: 100%; height: 42px; border: 0; border-radius: 8px; background: #0f172a; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  .note { font-size: 11px; color: #64748b; text-align: center; margin-top: 10px; }
-  .msg { text-align: center; padding: 32px 8px; }
-  .err { color: #b91c1c; }
-  iframe { width: 100%; height: 460px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+  label { display: flex; align-items: center; justify-content: space-between; min-height: 18px; margin: 0 0 6px; font-size: 12px; font-weight: 700; }
+  .field-hint { color: #8795a8; font-size: 10px; font-weight: 600; }
+  .input-wrap { position: relative; }
+  input { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #c7d3e0; border-radius: 10px; color: var(--ink); background: #fff; font: inherit; direction: ltr; transition: border-color .15s, box-shadow .15s; }
+  input::placeholder { color: #9aa8b8; }
+  input:hover { border-color: #9eb0c3; }
+  input:focus { border-color: var(--navy); outline: 0; box-shadow: 0 0 0 3px rgba(13, 53, 95, .11); }
+  #cc-number { padding-inline-end: 66px; }
+  .card-brand { position: absolute; inset-inline-end: 9px; top: 50%; min-width: 42px; padding: 4px 6px; transform: translateY(-50%); border-radius: 6px; color: #718096; background: var(--soft); font-size: 9px; font-weight: 800; letter-spacing: .04em; text-align: center; }
+  .actions { display: grid; gap: 10px; }
+  button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 46px; border: 0; border-radius: 11px; color: #fff; background: var(--navy); box-shadow: 0 8px 18px rgba(13, 53, 95, .18); font: inherit; font-weight: 800; cursor: pointer; transition: background .15s, transform .15s, opacity .15s; }
+  button:hover:not(:disabled) { background: var(--navy-dark); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:focus-visible { outline: 3px solid rgba(13, 53, 95, .2); outline-offset: 2px; }
+  button:disabled { opacity: .48; box-shadow: none; cursor: default; }
+  button svg { width: 15px; height: 15px; }
+  .trust { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .trust-item { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 8px 9px; border-radius: 9px; color: var(--muted); background: var(--soft); font-size: 10px; font-weight: 650; }
+  .trust-item svg { flex: 0 0 14px; width: 14px; height: 14px; color: var(--success); }
+  .note { margin: 0; color: var(--muted); font-size: 10px; text-align: center; }
+  .msg { margin: 0; padding: 48px 12px; color: var(--ink); font-weight: 700; text-align: center; }
+  .err { color: #b42318; }
+  #three-ds > p { margin: 0 0 10px; font-weight: 700; }
+  iframe { width: 100%; height: 430px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+  html[dir="rtl"] .payment-heading__copy, html[dir="rtl"] .trust-item { text-align: right; }
+  @media (max-width: 360px) {
+    .payment-heading { align-items: flex-start; }
+    .amount { font-size: 12px; }
+    .row { gap: 9px; }
+    .trust { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
   <form id="card-form" autocomplete="on" novalidate>
-    <div class="field">
-      <label for="cc-number" data-t="number"></label>
-      <input id="cc-number" inputmode="numeric" autocomplete="cc-number" placeholder="1234 1234 1234 1234" maxlength="23">
+    <div class="payment-heading">
+      <div class="payment-heading__copy">
+        <span class="payment-heading__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg>
+        </span>
+        <div>
+          <p class="eyebrow" data-t="secure"></p>
+          <h1 data-t="heading"></h1>
+        </div>
+      </div>
+      <p id="amount" class="amount"></p>
     </div>
-    <div class="row">
+    <div class="fields">
       <div class="field">
-        <label for="cc-exp" data-t="expiry"></label>
-        <input id="cc-exp" inputmode="numeric" autocomplete="cc-exp" placeholder="MM/YY" maxlength="5">
+        <label for="cc-number"><span data-t="number"></span><span class="field-hint" data-t="cards"></span></label>
+        <div class="input-wrap">
+          <input id="cc-number" inputmode="numeric" autocomplete="cc-number" placeholder="1234 1234 1234 1234" maxlength="23" aria-describedby="card-security-note">
+          <span id="card-brand" class="card-brand" aria-live="polite">CARD</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="cc-exp" data-t="expiry"></label>
+          <input id="cc-exp" inputmode="numeric" autocomplete="cc-exp" placeholder="MM/YY" maxlength="5">
+        </div>
+        <div class="field">
+          <label for="cc-csc"><span>CVC</span><span class="field-hint" data-t="cvcHint"></span></label>
+          <input id="cc-csc" type="password" inputmode="numeric" autocomplete="cc-csc" placeholder="123" maxlength="4">
+        </div>
       </div>
       <div class="field">
-        <label for="cc-csc">CVC</label>
-        <input id="cc-csc" type="password" inputmode="numeric" autocomplete="cc-csc" placeholder="123" maxlength="4">
+        <label for="cc-name" data-t="name"></label>
+        <input id="cc-name" autocomplete="cc-name" data-placeholder="namePlaceholder">
       </div>
     </div>
-    <div class="field">
-      <label for="cc-name" data-t="name"></label>
-      <input id="cc-name" autocomplete="cc-name">
+    <div class="actions">
+      <button id="pay" type="submit" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        <span id="pay-label"></span>
+      </button>
+      <div class="trust" aria-hidden="true">
+        <span class="trust-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg><span data-t="encrypted"></span></span>
+        <span class="trust-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg><span data-t="notStored"></span></span>
+      </div>
+      <p id="card-security-note" class="note" data-t="note"></p>
     </div>
-    <button id="pay" type="submit" disabled></button>
-    <p class="note" data-t="note"></p>
   </form>
   <div id="three-ds" hidden></div>
   <p id="status" class="msg" hidden></p>
