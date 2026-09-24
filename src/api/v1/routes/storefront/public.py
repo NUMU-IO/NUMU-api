@@ -24,6 +24,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +89,7 @@ from src.core.value_objects.email import Email
 from src.infrastructure.cache import (
     MISSING_SENTINEL,
     ProductCacheService,
+    RedisCacheService,
     StorefrontCache,
 )
 from src.infrastructure.external_services import PasswordService, TokenService
@@ -2284,6 +2286,16 @@ async def browse_categories(
     """List active categories for a store (public)."""
     from src.application.use_cases.categories import ListCategoriesUseCase
 
+    # Every storefront page asks for this, and requests that carry a cart or
+    # session cookie skip the CDN. Same freshness as the CDN's max-age.
+    # ponytail: TTL only, no invalidation; add a bust on category writes if
+    # 60s of staleness after an edit becomes a complaint.
+    cache = RedisCacheService()
+    cache_key = f"storefront:categories:{store_id}"
+    cached = await cache.get(cache_key)
+    if cached is not None:
+        return SuccessResponse(data=cached, message="Categories retrieved successfully")
+
     store = await store_repo.get_by_id(store_id)
     if not store:
         raise EntityNotFoundError("Store", str(store_id))
@@ -2322,6 +2334,8 @@ async def browse_categories(
             ),
         })
 
+    data = jsonable_encoder(data)
+    await cache.set(cache_key, data, expire=60)
     return SuccessResponse(data=data, message="Categories retrieved successfully")
 
 
