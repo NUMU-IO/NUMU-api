@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from src.api.responses import SuccessResponse
@@ -30,6 +30,9 @@ from src.api.v1.routes.storefront.app_public import (
     public_settings,
     visible_installs,
 )
+from src.application.services import app_proxy
+from src.application.services.app_tokens import read_client_secret
+from src.core.entities.app import AppStatus
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.database.models.public.app import AppModel
 
@@ -158,3 +161,47 @@ async def get_installed_app(store_id: UUID, slug: str):
         ),
         message="App resolved",
     )
+
+
+async def _proxy_target(store_id: UUID, slug: str) -> tuple[str, str] | None:
+    """``(app_proxy.url, client secret)`` of a live Partner App install."""
+    async with AsyncSessionLocal() as session:
+        stmt = (await visible_installs(session, store_id)).where(
+            AppModel.slug == slug,
+            AppModel.status == AppStatus.PUBLISHED,
+            AppModel.developer_id.is_not(None),
+        )
+        row = (await session.execute(stmt)).first()
+        app = row[0] if row else None
+        proxy = (
+            (((app.manifest or {}).get("app") or {}).get("app_proxy")) if app else None
+        )
+        if not proxy:
+            return None
+        secret = await read_client_secret(session, app.id)
+    return (proxy["url"], secret) if secret else None
+
+
+@router.api_route(
+    "/apps/{slug}/proxy/{path:path}",
+    methods=["GET", "POST"],
+    include_in_schema=False,
+)
+async def proxy_app_request(store_id: UUID, slug: str, path: str, request: Request):
+    """``https://<store>/apps/<slug>/<path>``, relayed to the app's
+    ``app_proxy.url`` with a signed query string (see ``app_proxy``)."""
+    target = await _proxy_target(store_id, slug)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    res = await app_proxy.forward(
+        base_url=target[0],
+        secret=target[1],
+        store_id=str(store_id),
+        slug=slug,
+        path=path,
+        method=request.method,
+        query=dict(request.query_params),
+        headers=dict(request.headers),
+        body=await request.body(),
+    )
+    return Response(content=res.body, status_code=res.status, headers=res.headers)

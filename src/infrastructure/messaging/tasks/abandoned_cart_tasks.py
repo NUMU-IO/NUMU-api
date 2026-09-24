@@ -267,7 +267,7 @@ async def _sweep_anonymous_phone_checkouts(
                 # Feed row for the hub bell — before the WhatsApp gate, so a
                 # merchant with nudges off still sees the abandoned cart.
                 # dedupe on the checkout row: one notification per cart.
-                await emit_notification_standalone(
+                noticed = await emit_notification_standalone(
                     store_id=row.store_id,
                     category="abandoned_carts",
                     kind="cart.abandoned",
@@ -286,6 +286,16 @@ async def _sweep_anonymous_phone_checkouts(
                     entity_id=row.id,
                     dedupe_key=f"cart.abandoned:anon:{row.id}",
                 )
+                if noticed.written:
+                    await _publish_abandoned(
+                        store_id=row.store_id,
+                        checkout_id=row.id,
+                        items_count=sum(
+                            (li.get("quantity") or 0) for li in (row.line_items or [])
+                        ),
+                        total_cents=int(row.total or 0),
+                        currency=row.currency or "EGP",
+                    )
                 if not await _recovery_included(session, store):
                     stats["skipped"] += 1
                     continue
@@ -357,6 +367,21 @@ async def _sweep_anonymous_phone_checkouts(
                 )
 
     return stats
+
+
+async def _publish_abandoned(**fields) -> None:
+    """``checkout.abandoned``, once per cart the merchant is told about: the
+    notification's dedupe key is the event's. Awaited, not published on the
+    bus, so it is sent before the task's loop stops."""
+    from src.core.events.commerce_events import CheckoutAbandonedEvent
+    from src.infrastructure.events.handlers.webhook_handler import (
+        handle_webhook_checkout_abandoned,
+    )
+
+    try:
+        await handle_webhook_checkout_abandoned(CheckoutAbandonedEvent(**fields))
+    except Exception:
+        logger.exception("checkout_abandoned_webhook_failed")
 
 
 def _queue_abandoned_cart_notification(
@@ -479,7 +504,7 @@ async def _send_notification(
             emit_notification_standalone,
         )
 
-        await emit_notification_standalone(
+        noticed = await emit_notification_standalone(
             store_id=UUID(store_id),
             category="abandoned_carts",
             kind="cart.abandoned",
@@ -497,6 +522,14 @@ async def _send_notification(
                 f"cart.abandoned:{customer_id}:{datetime.now(UTC).strftime('%Y%m%d')}"
             ),
         )
+        if noticed.written:
+            await _publish_abandoned(
+                store_id=UUID(store_id),
+                customer_id=UUID(customer_id),
+                items_count=cart_items_count,
+                total_cents=int(cart_subtotal),
+                currency=cart_currency,
+            )
         customer_phone = customer.phone
         customer_email = customer.email
         store_name = store.name

@@ -52,3 +52,19 @@ def retry_pending_webhook_deliveries(self) -> dict:
     except Exception as exc:
         logger.error("webhook_retry_task_failed", error=str(exc))
         return {"processed": 0, "error": str(exc)}
+
+
+@celery_app.task(name="tasks.send_inventory_level_webhook", bind=True, max_retries=2)
+def send_inventory_level_task(
+    self, store_id: str, product_id: str, variant_id: str
+) -> None:
+    """``inventory.level_changed`` when its debounce window closes."""
+    from src.infrastructure.events.handlers.webhook_handler import (
+        send_inventory_level,
+    )
+
+    try:
+        _run_async(send_inventory_level(store_id, product_id, variant_id))
+    except Exception as exc:
+        logger.exception("inventory_level_webhook_failed")
+        raise self.retry(exc=exc, countdown=60)
