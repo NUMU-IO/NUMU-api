@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.partners import DEV_PLAN, PartnerAccountOut
+from src.application.services.app_billing import partner_statement, statement_csv
 from src.application.services.audit_service import AuditService
 from src.application.services.partner_program import (
     program_enabled,
@@ -352,6 +354,7 @@ async def ledger(
     entries: sales at the partner's 80% share, and payouts."""
     from src.application.services.app_billing import (
         app_labels,
+        charge_ids,
         partner_balance,
         partner_payable,
     )
@@ -373,12 +376,18 @@ async def ledger(
         .all()
     )
     apps = await app_labels(db, [e.app_id for e in rows])
+    charges = await charge_ids(
+        db, [e.idempotency_key for e in rows if e.kind == "sale"]
+    )
     return SuccessResponse(
         data={
             "balance_cents": await partner_balance(db, partner_id),
             "payable_cents": await partner_payable(db, partner_id),
             "currency": "EGP",
-            "entries": [_entry_out(e, apps) for e in rows],
+            "entries": [
+                {**_entry_out(e, apps), "charge_id": charges.get(e.idempotency_key)}
+                for e in rows
+            ],
         }
     )
 
@@ -470,6 +479,37 @@ async def adjustment(
             "entry": _entry_out(entry),
             "balance_cents": await partner_balance(db, a.id),
         }
+    )
+
+
+async def _statement(db: AsyncSession, partner_id: UUID, month: str) -> dict:
+    await _load(db, partner_id)
+    try:
+        return await partner_statement(db, partner_id, month)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/{partner_id}/statements", response_model=SuccessResponse[dict])
+async def admin_statement(
+    partner_id: UUID, month: str, db: Annotated[AsyncSession, Depends(get_db)]
+):
+    """The partner's statement for one month (``YYYY-MM``), as they see it."""
+    return SuccessResponse(data=await _statement(db, partner_id, month))
+
+
+@router.get("/{partner_id}/statements/{month}.csv")
+async def admin_statement_csv(
+    partner_id: UUID, month: str, db: Annotated[AsyncSession, Depends(get_db)]
+):
+    return Response(
+        content=statement_csv(await _statement(db, partner_id, month)),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="partner-{partner_id}-{month}.csv"'
+            )
+        },
     )
 
 

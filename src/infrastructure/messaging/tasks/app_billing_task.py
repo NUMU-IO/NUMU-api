@@ -30,16 +30,39 @@ def _run_async(coro):
 
 async def _renew() -> dict:
     from src.application.services.app_billing import WalletChargeSource, renew_due
+    from src.application.services.notification_feed import (
+        emit_notification_standalone,
+    )
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.tenancy.rls import enable_rls_bypass
+
+    notices: list[dict] = []
+    async with AsyncSessionLocal() as session:
+        await enable_rls_bypass(session)
+        source = WalletChargeSource(session)
+        stats = await renew_due(session, source=source, notices=notices)
+        await session.commit()
+        await source.invalidate()
+    for n in notices:
+        await emit_notification_standalone(**n)
+    return stats
+
+
+async def _warn_trials() -> int:
+    from src.application.services.app_billing import trial_ending_notices
+    from src.application.services.notification_feed import (
+        emit_notification_standalone,
+    )
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.tenancy.rls import enable_rls_bypass
 
     async with AsyncSessionLocal() as session:
         await enable_rls_bypass(session)
-        source = WalletChargeSource(session)
-        stats = await renew_due(session, source=source)
-        await session.commit()
-        await source.invalidate()
-        return stats
+        notices = await trial_ending_notices(session)
+    sent = 0
+    for n in notices:
+        sent += bool(await emit_notification_standalone(**n))
+    return sent
 
 
 @celery_app.task(
@@ -57,4 +80,14 @@ def renew_app_subscriptions_task(self):
         return stats
     except Exception as exc:
         logger.exception("app_subscription_renewal_failed")
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(name="tasks.warn_app_trials_ending", bind=True, max_retries=2)
+def warn_app_trials_ending_task(self):
+    """Tell merchants a paid app's free trial ends within 3 days (once each)."""
+    try:
+        return {"sent": _run_async(_warn_trials())}
+    except Exception as exc:
+        logger.exception("app_trial_warning_failed")
         raise self.retry(exc=exc)

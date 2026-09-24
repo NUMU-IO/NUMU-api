@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.app_billing import app_price, trial_available
 from src.application.services.app_manifest import app_subscriptions
 from src.application.services.app_tokens import (
     APP_TOKEN_PREFIX,
@@ -86,6 +87,9 @@ class ConsentApp(BaseModel):
     tagline: dict[str, str]
     icon: str | None
     partner: str | None
+    #: The listing's pricing, plus ``charged_from_wallet`` (NUMU charges the
+    #: store's wallet once the merchant subscribes after install) and
+    #: ``trial_available`` (this store has not had the app's free trial).
     pricing: dict | None
     privacy_policy_url: str | None
     #: A custom app a partner built for this one store.
@@ -235,7 +239,11 @@ async def authorize(
                 },
                 icon=app.icon_url,
                 partner=partner,
-                pricing=m.get("pricing"),
+                pricing={
+                    **(m.get("pricing") or {}),
+                    "charged_from_wallet": app_price(app) is not None,
+                    "trial_available": await trial_available(db, store.id, app),
+                },
                 privacy_policy_url=(m.get("app") or {}).get("privacy_policy_url"),
                 private=app.private_store_id is not None,
             ),

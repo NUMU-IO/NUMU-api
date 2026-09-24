@@ -241,10 +241,10 @@ async def _check_pricing(db: AsyncSession, model: str) -> None:
     Partner App is ``free`` or ``external`` (partner_program.BILLING_KEY)."""
     from src.application.services.partner_program import partner_billing_enabled
 
-    if model == "recurring" and not await partner_billing_enabled(db):
+    if model in ("recurring", "usage") and not await partner_billing_enabled(db):
         raise HTTPException(
             status_code=422,
-            detail="pricing.model: recurring is not available yet, because NUMU "
+            detail=f"pricing.model: {model} is not available yet, because NUMU "
             "billing for Partner Apps is not live. Use free or external.",
         )
 
