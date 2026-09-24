@@ -1,5 +1,5 @@
 """Partner portal (partners.numueg.app): dashboard, webhook deliveries, team,
-referrals.
+subscriptions, app coupons and referrals.
 
 URL: /api/v1/partners. Hidden while the Partner program is closed, like the
 rest of the portal. Every read is scoped to the caller's partner through
@@ -15,7 +15,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,18 @@ from src.api.middleware.token_activity import (
     p95_from_buckets,
 )
 from src.api.responses import SuccessResponse
+from src.application.services.app_billing import (
+    COUPON_CODE_RE,
+    app_price,
+    coupon_discount,
+    coupon_out,
+    effective_share_bps,
+    normalize_code,
+    partner_balance,
+    partner_payable,
+    quote,
+    redemption_count,
+)
 from src.application.services.partner_program import partner_membership
 from src.application.services.partner_referrals import (
     SIGNUP_LINK,
@@ -51,7 +63,10 @@ from src.infrastructure.database.models.public.app import (
     AppUninstallEventModel,
 )
 from src.infrastructure.database.models.public.app_billing import (
+    AppCouponModel,
+    AppCouponRedemptionModel,
     AppSubscriptionModel,
+    PartnerLedgerEntryModel,
 )
 from src.infrastructure.database.models.public.partner_account import (
     PartnerMemberModel,
@@ -119,6 +134,9 @@ class PartnerDashboard(BaseModel):
     uninstalled: int
     monthly: list[MonthBucket]
     latest: list[LatestInstall]
+    net_sales_cents: int = 0
+    balance_cents: int = 0
+    payable_cents: int = 0
 
 
 @router.get(
@@ -127,13 +145,13 @@ class PartnerDashboard(BaseModel):
     operation_id="get_partner_dashboard",
 )
 async def dashboard(
-    owner_id: Annotated[UUID, Depends(require_approved_partner)],
+    ctx: Annotated[PartnerContext, Depends(partner_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
     start: Annotated[date | None, Query(alias="from")] = None,
     end: Annotated[date | None, Query(alias="to")] = None,
     app_id: UUID | None = None,
 ):
-    apps = _apps_of(owner_id, app_id)
+    apps = _apps_of(ctx.owner_id, app_id)
     rows = (
         await db.execute(
             select(
@@ -161,8 +179,26 @@ async def dashboard(
             *_in_range(AppUninstallEventModel.created_at, start, end),
         )
     )
+    money = {}
+    if ctx.account is not None:
+        net_sales = await db.scalar(
+            select(
+                func.coalesce(func.sum(PartnerLedgerEntryModel.amount_cents), 0)
+            ).where(
+                PartnerLedgerEntryModel.partner_id == ctx.account.id,
+                PartnerLedgerEntryModel.kind == "sale",
+                *([PartnerLedgerEntryModel.app_id == app_id] if app_id else []),
+                *_in_range(PartnerLedgerEntryModel.created_at, start, end),
+            )
+        )
+        money = {
+            "net_sales_cents": int(net_sales or 0),
+            "balance_cents": await partner_balance(db, ctx.account.id),
+            "payable_cents": await partner_payable(db, ctx.account.id),
+        }
     return SuccessResponse(
         data=PartnerDashboard(
+            **money,
             installs_total=len(rows),
             active=states["active"],
             disabled=states["disabled"],
@@ -849,6 +885,231 @@ async def accept_invitation(
     logger.info("partner_invitation_accepted", partner_id=str(member.partner_id))
     return SuccessResponse(
         data={"partner_id": str(member.partner_id)}, message="Joined"
+    )
+
+
+# ─── Subscriptions ────────────────────────────────────────────────
+
+
+def _sub_status(sub: AppSubscriptionModel) -> str:
+    return "trial" if sub.status == "active" and sub.is_trial else sub.status
+
+
+@router.get(
+    "/me/subscriptions",
+    response_model=SuccessResponse[dict],
+    operation_id="list_partner_subscriptions",
+)
+async def list_subscriptions(
+    owner_id: Annotated[UUID, Depends(require_approved_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    app_id: UUID | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+):
+    """Stores subscribed to your paid apps: counts by status (``trial`` is
+    an active subscription in its free trial) and the latest subscriptions."""
+    rows = (
+        await db.execute(
+            select(AppSubscriptionModel, AppModel.name, StoreModel.name)
+            .join(AppModel, AppModel.id == AppSubscriptionModel.app_id)
+            .outerjoin(StoreModel, StoreModel.id == AppSubscriptionModel.store_id)
+            .where(AppSubscriptionModel.app_id.in_(_apps_of(owner_id, app_id)))
+            .order_by(AppSubscriptionModel.created_at.desc())
+        )
+    ).all()
+    counts = Counter(_sub_status(sub) for sub, _, _ in rows)
+    return SuccessResponse(
+        data={
+            "counts": {
+                k: counts[k] for k in ("active", "trial", "past_due", "cancelled")
+            },
+            "total": len(rows),
+            "items": [
+                {
+                    "id": str(sub.id),
+                    "app_id": str(sub.app_id),
+                    "app_name": app_name,
+                    "store_name": store_name,
+                    "status": _sub_status(sub),
+                    "price_cents": sub.price_cents,
+                    "currency": sub.currency,
+                    "cycle": sub.cycle,
+                    "current_period_end": sub.current_period_end,
+                    "cancel_at_period_end": sub.cancel_at_period_end,
+                    "created_at": sub.created_at,
+                }
+                for sub, app_name, store_name in rows[:limit]
+            ],
+        }
+    )
+
+
+# ─── Coupons ──────────────────────────────────────────────────────
+
+
+class AppCouponCreate(BaseModel):
+    app_id: UUID
+    code: str = Field(min_length=3, max_length=40)
+    percent_off: int | None = Field(default=None, ge=1, le=100)
+    amount_off_cents: int | None = Field(default=None, gt=0)
+    duration_cycles: int | None = Field(default=None, ge=1, le=120)
+    max_redemptions: int | None = Field(default=None, ge=1)
+    expires_at: datetime | None = None
+    store_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _check(self):
+        self.code = normalize_code(self.code)
+        if not COUPON_CODE_RE.match(self.code):
+            raise ValueError("code: letters, digits, - and _ only")
+        if (self.percent_off is None) == (self.amount_off_cents is None):
+            raise ValueError("Set percent_off or amount_off_cents, not both.")
+        return self
+
+
+class AppCouponUpdate(BaseModel):
+    active: bool
+
+
+def _cap(c: AppCouponModel, app: AppModel, share_bps: int) -> dict:
+    """What the coupon takes off the app's current price, capped at your
+    share: NUMU's fee and its VAT are always on the full price."""
+    price = app_price(app)
+    list_cents = price.price_cents if price else 0
+    q = quote(list_cents, share_bps, coupon_discount(c, list_cents))
+    return {
+        "list_price_cents": list_cents,
+        "discount_cents": q.discount_cents,
+        "max_discount_cents": list_cents - q.fee_cents,
+        "capped": q.capped,
+    }
+
+
+async def _coupon(db: AsyncSession, ctx: PartnerContext, coupon_id: UUID):
+    c = await db.get(AppCouponModel, coupon_id)
+    if c is None or ctx.account is None or c.partner_id != ctx.account.id:
+        raise HTTPException(status_code=404, detail="Coupon not found")
+    return c
+
+
+@router.get(
+    "/me/coupons",
+    response_model=SuccessResponse[list[dict]],
+    operation_id="list_partner_coupons",
+)
+async def list_coupons(
+    ctx: Annotated[PartnerContext, Depends(partner_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    if ctx.account is None:
+        return SuccessResponse(data=[])
+    share = effective_share_bps(ctx.account)
+    rows = await db.execute(
+        select(AppCouponModel, AppModel, redemption_count())
+        .join(AppModel, AppModel.id == AppCouponModel.app_id)
+        .where(AppCouponModel.partner_id == ctx.account.id)
+        .order_by(AppCouponModel.created_at.desc())
+    )
+    return SuccessResponse(
+        data=[
+            {**coupon_out(c, app.name, used or 0), **_cap(c, app, share)}
+            for c, app, used in rows
+        ]
+    )
+
+
+@router.post(
+    "/me/coupons",
+    response_model=SuccessResponse[dict],
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_partner_coupon",
+)
+async def create_coupon(
+    body: AppCouponCreate,
+    ctx: Annotated[PartnerContext, Depends(require_partner_manager)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """A discount code for one of your paid apps. You fund it: it comes out
+    of your share, never NUMU's fee, and a discount larger than your share
+    is capped at it (``capped``)."""
+    app = await db.get(AppModel, body.app_id)
+    if app is None or app.developer_id != ctx.owner_id:
+        raise HTTPException(status_code=404, detail="App not found")
+    price = app_price(app)
+    if price is None or not price.price_cents:
+        raise HTTPException(
+            status_code=422, detail={"code": "coupon_app_not_recurring"}
+        )
+    exists = await db.scalar(
+        select(AppCouponModel.id).where(
+            AppCouponModel.app_id == app.id, AppCouponModel.code == body.code
+        )
+    )
+    if exists is not None:
+        raise HTTPException(status_code=409, detail={"code": "coupon_code_taken"})
+    c = AppCouponModel(partner_id=ctx.account.id, **body.model_dump())
+    db.add(c)
+    await db.flush()
+    return SuccessResponse(
+        data={
+            **coupon_out(c, app.name, 0),
+            **_cap(c, app, effective_share_bps(ctx.account)),
+        }
+    )
+
+
+@router.patch(
+    "/me/coupons/{coupon_id}",
+    response_model=SuccessResponse[dict],
+    operation_id="update_partner_coupon",
+)
+async def update_coupon(
+    coupon_id: UUID,
+    body: AppCouponUpdate,
+    ctx: Annotated[PartnerContext, Depends(require_partner_manager)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Disable (or re-enable) a coupon. Stores that already redeemed it keep
+    their discount for the periods it covers."""
+    c = await _coupon(db, ctx, coupon_id)
+    c.active = body.active
+    await db.flush()
+    app = await db.get(AppModel, c.app_id)
+    used = await db.scalar(
+        select(func.count(AppCouponRedemptionModel.id)).where(
+            AppCouponRedemptionModel.coupon_id == c.id
+        )
+    )
+    return SuccessResponse(data=coupon_out(c, app.name if app else None, used or 0))
+
+
+@router.get(
+    "/me/coupons/{coupon_id}/redemptions",
+    response_model=SuccessResponse[list[dict]],
+    operation_id="list_partner_coupon_redemptions",
+)
+async def list_redemptions(
+    coupon_id: UUID,
+    ctx: Annotated[PartnerContext, Depends(partner_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    c = await _coupon(db, ctx, coupon_id)
+    rows = await db.execute(
+        select(AppCouponRedemptionModel, StoreModel.name)
+        .outerjoin(StoreModel, StoreModel.id == AppCouponRedemptionModel.store_id)
+        .where(AppCouponRedemptionModel.coupon_id == c.id)
+        .order_by(AppCouponRedemptionModel.created_at.desc())
+    )
+    return SuccessResponse(
+        data=[
+            {
+                "id": str(r.id),
+                "store_id": str(r.store_id),
+                "store_name": store_name,
+                "created_at": r.created_at,
+            }
+            for r, store_name in rows
+        ]
     )
 
 

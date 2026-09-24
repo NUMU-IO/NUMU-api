@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -47,6 +48,7 @@ class MarketplaceThemeModel(Base, UUIDMixin):
     price_cents: Mapped[int] = mapped_column(
         Integer, server_default="0", nullable=False
     )
+    pending_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     currency: Mapped[str] = mapped_column(
         String(10), server_default="USD", nullable=False
     )
@@ -351,7 +353,17 @@ class MarketplaceThemePurchaseModel(Base, UUIDMixin):
     """
 
     __tablename__ = "marketplace_theme_purchases"
-    __table_args__ = {"schema": "public"}
+    __table_args__ = (
+        Index(
+            "uq_theme_purchase_store_succeeded",
+            "store_id",
+            "marketplace_theme_id",
+            unique=True,
+            postgresql_where=text("store_id IS NOT NULL AND status = 'succeeded'"),
+            sqlite_where=text("store_id IS NOT NULL AND status = 'succeeded'"),
+        ),
+        {"schema": "public"},
+    )
 
     user_id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True),
@@ -380,6 +392,17 @@ class MarketplaceThemePurchaseModel(Base, UUIDMixin):
         Integer, server_default="0", nullable=False
     )
     refund_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    store_id: Mapped[PyUUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    tenant_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    wallet_transaction_id: Mapped[PyUUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.wallet_transactions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # Renamed from `metadata` because SQLAlchemy reserves that attribute
     # name on declarative classes. The DB column keeps the conventional
     # name via `name=`.

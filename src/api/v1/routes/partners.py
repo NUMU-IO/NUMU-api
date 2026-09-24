@@ -74,6 +74,7 @@ class PartnerAccountOut(BaseModel):
     review_notes: dict | None
     reviewed_at: datetime | None
     created_at: datetime
+    share_bps: int | None = None
     referral_bps: int
     referral_months: int
     directory_listed: bool
@@ -478,6 +479,7 @@ async def earnings(
         app_labels,
         partner_balance,
         partner_payable,
+        theme_labels,
     )
     from src.infrastructure.database.models.public.app_billing import (
         PartnerLedgerEntryModel,
@@ -506,6 +508,7 @@ async def earnings(
         .all()
     )
     apps = await app_labels(db, [e.app_id for e in rows])
+    apps.update(await theme_labels(db, [e.theme_id for e in rows]))
     return SuccessResponse(
         data={
             "balance_cents": await partner_balance(db, account.id),
@@ -518,9 +521,13 @@ async def earnings(
                     "amount_cents": e.amount_cents,
                     "gross_cents": e.gross_cents,
                     "platform_fee_cents": e.platform_fee_cents,
+                    "share_bps": e.share_bps,
+                    "discount_cents": e.discount_cents,
+                    "vat_cents": e.vat_cents,
                     "app_id": str(e.app_id) if e.app_id else None,
-                    "app_name": apps.get(e.app_id, {}).get("name"),
-                    "app_slug": apps.get(e.app_id, {}).get("slug"),
+                    "theme_id": str(e.theme_id) if e.theme_id else None,
+                    "app_name": apps.get(e.theme_id or e.app_id, {}).get("name"),
+                    "app_slug": apps.get(e.theme_id or e.app_id, {}).get("slug"),
                     "reference": e.reference,
                     "created_at": e.created_at,
                 }
@@ -553,9 +560,10 @@ async def statement(
     user_id: Annotated[UUID, Depends(require_approved_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """One month (``YYYY-MM``, UTC) of your ledger: sales (gross, NUMU's 20%
-    fee, your 80%), refunds, adjustments, payouts, and the opening and
-    closing balance NUMU owes you."""
+    """One month (``YYYY-MM``, UTC) of your ledger: sales (gross, NUMU's fee,
+    your share, at the share each sale was booked with), refunds,
+    adjustments, payouts, your coupon discounts, NUMU's VAT on its fee
+    (informational), and the opening and closing balance NUMU owes you."""
     return SuccessResponse(data=await _my_statement(db, user_id, month))
 
 

@@ -79,6 +79,7 @@ class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    share_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     #: What a referral link carries (``numueg.app/signup?ref=``). Minted on
     #: first use; 10 characters, so it never collides with a lead's 8.
     referral_code: Mapped[str | None] = mapped_column(String(16), nullable=True)

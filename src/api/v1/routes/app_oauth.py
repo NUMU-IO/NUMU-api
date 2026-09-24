@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
-from src.application.services.app_billing import app_price, trial_available
+from src.application.services.app_billing import app_price, quote_for, trial_available
 from src.application.services.app_manifest import app_subscriptions
 from src.application.services.app_tokens import (
     APP_TOKEN_PREFIX,
@@ -229,6 +229,8 @@ async def authorize(
             PartnerAccountModel.user_id == app.developer_id
         )
     )
+    price = app_price(app)
+    vat = (await quote_for(db, app, price.price_cents, None)).vat_cents if price else 0
     return SuccessResponse(
         data=Consent(
             app=ConsentApp(
@@ -241,7 +243,8 @@ async def authorize(
                 partner=partner,
                 pricing={
                     **(m.get("pricing") or {}),
-                    "charged_from_wallet": app_price(app) is not None,
+                    "charged_from_wallet": price is not None,
+                    "vat_cents": vat,
                     "trial_available": await trial_available(db, store.id, app),
                 },
                 privacy_policy_url=(m.get("app") or {}).get("privacy_policy_url"),

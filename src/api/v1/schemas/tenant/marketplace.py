@@ -108,6 +108,7 @@ class MarketplaceThemeOut(BaseModel):
     description_ar: str | None = None
     short_description: str | None = None
     price_cents: int = 0
+    pending_price_cents: int | None = None
     currency: str = "USD"
     status: str
     thumbnail_url: str | None = None
@@ -306,6 +307,7 @@ class PendingReviewItem(BaseModel):
     theme_supported_features: dict[str, Any] = {}
     theme_status: str | None = None
     price_cents: int = 0
+    pending_price_cents: int | None = None
     currency: str = "USD"
 
     # Marketing assets

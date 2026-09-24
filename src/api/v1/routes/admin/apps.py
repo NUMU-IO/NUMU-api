@@ -46,6 +46,7 @@ from src.infrastructure.database.models.public.app import (
     AppVersionModel,
 )
 from src.infrastructure.database.models.public.app_billing import (
+    AppFeeInvoiceModel,
     AppSubscriptionModel,
     PartnerLedgerEntryModel,
 )
@@ -550,8 +551,9 @@ async def revenue(
     months: Annotated[int, Query(ge=1, le=36)] = 12,
 ):
     """App revenue by month (UTC): what merchants paid net of refunds
-    (gross), the partners' share (80% of Partner App sales, net of refunds)
-    and NUMU's (the rest, including all of NUMU Apps' revenue)."""
+    (gross, VAT included), the VAT on NUMU's fee, the partners' share (their
+    share of Partner App sales, net of refunds) and NUMU's (the rest before
+    VAT, including all of NUMU Apps' revenue)."""
     now = datetime.now(UTC)
     first = now.year * 12 + now.month - months
     since = datetime(first // 12, first % 12 + 1, 1, tzinfo=UTC)
@@ -583,18 +585,28 @@ async def revenue(
             .group_by(ledger_month)
         )
     }
+    invoice_month = func.date_trunc("month", AppFeeInvoiceModel.created_at)
+    vat = {
+        m.strftime("%Y-%m"): int(total)
+        for m, total in await db.execute(
+            select(invoice_month, func.sum(AppFeeInvoiceModel.vat_cents))
+            .where(AppFeeInvoiceModel.created_at >= since)
+            .group_by(invoice_month)
+        )
+    }
     rows = [
         {
             "month": m,
             "gross_cents": gross.get(m, 0),
+            "vat_cents": vat.get(m, 0),
             "partner_cents": partner.get(m, 0),
-            "numu_cents": gross.get(m, 0) - partner.get(m, 0),
+            "numu_cents": gross.get(m, 0) - vat.get(m, 0) - partner.get(m, 0),
         }
-        for m in sorted(set(gross) | set(partner), reverse=True)
+        for m in sorted(set(gross) | set(partner) | set(vat), reverse=True)
     ]
     totals = {
         k: sum(r[k] for r in rows)
-        for k in ("gross_cents", "partner_cents", "numu_cents")
+        for k in ("gross_cents", "vat_cents", "partner_cents", "numu_cents")
     }
     return SuccessResponse(data={"currency": "EGP", "months": rows, "totals": totals})
 
@@ -637,6 +649,7 @@ async def list_charges(
                 "amount_cents": -c.amount_cents,
                 "currency": c.currency,
                 "note": c.note,
+                "theme_id": (c.meta or {}).get("theme_id"),
                 "created_at": c.created_at,
                 "refunded": f"app-refund:{c.id}" in refunded,
             }
