@@ -78,6 +78,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.numu_app_purge_task",
         # Partner Apps: store.redact 48h after an uninstall (countdown task).
         "src.infrastructure.messaging.tasks.app_redact_task",
+        # Partner Apps: 14-day retention of per-app API logs (daily).
+        "src.infrastructure.messaging.tasks.app_api_log_retention_task",
         # Paid apps: hourly renewal of subscriptions whose period ended.
         "src.infrastructure.messaging.tasks.app_billing_task",
         # backend-030 / US6 — 90-day dead-letter purge (daily at 03:00 UTC).
@@ -665,6 +667,11 @@ celery_app.conf.beat_schedule = {
     "purge-uninstalled-numu-apps": {
         "task": "tasks.purge_uninstalled_numu_apps",
         "schedule": crontab(hour=3, minute=20),  # Daily at 03:20 UTC
+    },
+    # Partner Apps: drop per-app API log entries older than 14 days.
+    "trim-app-api-logs": {
+        "task": "tasks.trim_app_api_logs",
+        "schedule": crontab(hour=3, minute=25),  # Daily at 03:25 UTC
     },
     "poll-whatsapp-pending-templates": {
         "task": "numu_api.whatsapp.poll_pending_templates",

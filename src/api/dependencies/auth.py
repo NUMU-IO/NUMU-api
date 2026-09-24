@@ -453,6 +453,7 @@ async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
             "store_id": store_id,
             "tenant_id": str(installation.tenant_id),
             "app_slug": principal.app.slug,
+            "app_id": str(principal.app.id),
         }
 
         # Defense in depth, as for PATs: the token only acts on the tenant its

@@ -6,7 +6,7 @@ import uuid
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.api.middleware.token_activity import record_token_request
+from src.api.middleware.token_activity import record_in_background
 from src.core.logging import (
     bind_request_context,
     clear_request_context,
@@ -78,7 +78,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Process-Time"] = str(process_time_ms)
 
-            await record_token_request(request, response.status_code, process_time_ms)
+            record_in_background(request, response.status_code, process_time_ms)
             return response
 
         except Exception as e:
@@ -91,7 +91,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 error_type=type(e).__name__,
                 duration_ms=process_time_ms,
             )
-            await record_token_request(request, 500, process_time_ms)
+            record_in_background(request, 500, process_time_ms)
             raise
 
         finally:

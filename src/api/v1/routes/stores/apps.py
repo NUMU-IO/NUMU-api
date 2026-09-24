@@ -19,10 +19,10 @@ only ever see *published* apps in the catalog.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import false, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -61,6 +61,18 @@ router = APIRouter(
 
 
 # ─── Schemas ───────────────────────────────────────────────────────
+
+UninstallReason = Literal[
+    "not_needed",
+    "missing_features",
+    "too_expensive",
+    "bugs",
+    "hard_to_use",
+    "poor_support",
+    "switched_app",
+    "temporary",
+    "other",
+]
 
 
 class AppListing(BaseModel):
@@ -528,6 +540,8 @@ async def uninstall_app(
     store_id: UUID,
     slug: str,
     store: Annotated[Store, Depends(verify_store_ownership)] = None,  # type: ignore[assignment]
+    reason: UninstallReason | None = None,
+    reason_text: Annotated[str | None, Query(max_length=500)] = None,
 ):
     async with AsyncSessionLocal() as session:
         row = (
@@ -552,7 +566,15 @@ async def uninstall_app(
             )
 
             await deliver_app_event(session, app, store_id, "app.uninstalled", {})
-            session.add(AppUninstallEventModel(app_id=app.id, store_id=store_id))
+            session.add(
+                AppUninstallEventModel(
+                    app_id=app.id,
+                    store_id=store_id,
+                    installed_at=row.created_at,
+                    reason=reason,
+                    reason_text=(reason_text or "").strip() or None,
+                )
+            )
             try:
                 from src.infrastructure.messaging.tasks.app_redact_task import (
                     app_store_redact_task,
