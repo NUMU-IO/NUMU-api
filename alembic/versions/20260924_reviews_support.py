@@ -80,11 +80,18 @@ def upgrade() -> None:
         )
         """
     )
-    for column in ("store_id", "app_id", "partner_id"):
-        op.execute(
-            f"CREATE INDEX IF NOT EXISTS ix_support_tickets_{column.removesuffix('_id')} "
-            f"ON public.support_tickets ({column})"
-        )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_support_tickets_store "
+        "ON public.support_tickets (store_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_support_tickets_app "
+        "ON public.support_tickets (app_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_support_tickets_partner "
+        "ON public.support_tickets (partner_id)"
+    )
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS public.support_messages (
