@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services.carrier_registry import get_spec
 from src.application.services.funnel_emit_service import emit_order_delivered
+from src.application.services.shipment_status_sync import announce_order_transition
 from src.config import settings
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
@@ -327,6 +328,8 @@ async def bosta_callback(
     if tenant_id:
         await narrow_to_tenant(session, tenant_id)
 
+    old_status = order.status if order else None
+
     # Process based on delivery state
     if state == "DELIVERED":
         log.info("delivery_completed")
@@ -403,6 +406,10 @@ async def bosta_callback(
             shipment_repo=shipment_repo,
         )
 
+        await announce_order_transition(
+            session, order, old_status, reason="Delivered by Bosta"
+        )
+
         try:
             await session.commit()
         except Exception as e:
@@ -426,6 +433,10 @@ async def bosta_callback(
                 log.error("pickup_order_update_failed", error=str(e))
 
         await _update_shipment_status(shipment, shipment_repo, state, log)
+
+        await announce_order_transition(
+            session, order, old_status, reason="Picked up by Bosta"
+        )
 
         try:
             await session.commit()
@@ -483,6 +494,10 @@ async def bosta_callback(
             log,
             order_repo=order_repo,
             shipment_repo=shipment_repo,
+        )
+
+        await announce_order_transition(
+            session, order, old_status, reason="Returned by carrier (Bosta)"
         )
 
         try:
@@ -566,6 +581,10 @@ async def bosta_callback(
                 log.error("cancel_order_update_failed", error=str(e))
 
         await _update_shipment_status(shipment, shipment_repo, state, log)
+
+        await announce_order_transition(
+            session, order, old_status, reason="Cancelled via Bosta"
+        )
 
         try:
             await session.commit()

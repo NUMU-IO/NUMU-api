@@ -158,6 +158,41 @@ class UpdateOrderStatusUseCase:
             reason=dto.reason,
         )
 
+        await self.after_status_change(
+            updated_order, old_status, new_status, store, dto.reason, dto.source
+        )
+
+        return OrderDTO.from_entity(updated_order)
+
+    async def after_status_change(
+        self,
+        updated_order,
+        old_status: str,
+        new_status: OrderStatus,
+        store,
+        reason: str | None = None,
+        source: str | None = None,
+    ) -> None:
+        """Everything a saved status change sets off, exactly once.
+
+        ``execute`` calls this after its own transition. Carrier webhooks
+        that move the order themselves call it too, so their changes reach
+        the same network events, Autopilot supersede, funnel step and
+        ``OrderStatusChangedEvent``. A no-op when the status did not change,
+        which keeps a replayed callback from re-announcing anything.
+        """
+        if old_status == new_status.value:
+            return
+        log = logger.bind(
+            order_id=str(updated_order.id),
+            store_id=str(updated_order.store_id),
+            old_status=old_status,
+            new_status=new_status.value,
+        )
+        dto = UpdateOrderStatusDTO(
+            status=new_status.value, reason=reason, source=source
+        )
+
         # Cross-merchant network reputation: fire delivery/RTO event for
         # COD orders. Idempotent + fail-open — never breaks the status
         # update. Bosta webhook also stamps the same flag, so the path
@@ -190,8 +225,6 @@ class UpdateOrderStatusUseCase:
         await self._publish_status_event(
             updated_order, old_status, new_status, store, dto.reason, log
         )
-
-        return OrderDTO.from_entity(updated_order)
 
     async def _restock_order_stock(self, order, reason: str | None, log) -> None:
         """Replay the order's checkout debit manifest via the stock service.

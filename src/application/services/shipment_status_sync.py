@@ -20,6 +20,7 @@ See ``docs/Plans/Shipping/SHIPPING-UNIFIED-LAYER.md`` § P1.5.
 from typing import Any
 
 from src.application.services.carrier_resolver import map_carrier_status
+from src.application.services.cod_autopilot_service import _build_status_use_case
 from src.core.entities.shipment import ShipmentStatus
 from src.core.logging import get_logger
 
@@ -102,4 +103,42 @@ async def apply_carrier_status(
     return new_status
 
 
-__all__ = ["apply_carrier_status"]
+def _status_use_case(session: Any) -> Any:
+    return _build_status_use_case(session)
+
+
+async def announce_order_transition(
+    session: Any, order: Any, old_status: Any, *, reason: str
+) -> bool:
+    """Run the dashboard's post-transition path for a carrier-driven change.
+
+    Carrier webhooks keep their own status mapping and move the order
+    themselves; this hands the saved change to
+    ``UpdateOrderStatusUseCase.after_status_change`` so it fires
+    ``OrderStatusChangedEvent`` (merchant webhooks, notifications,
+    WhatsApp, CAPI triggers), network events and the Autopilot supersede,
+    once. Returns False, doing nothing, when the status did not move.
+    Fail-open: never breaks the webhook.
+    """
+    if order is None or old_status is None or order.status == old_status:
+        return False
+    try:
+        use_case = _status_use_case(session)
+        store = await use_case.store_repository.get_by_id(order.store_id)
+        if store is None:
+            return False
+        await use_case.after_status_change(
+            order,
+            getattr(old_status, "value", old_status),
+            order.status,
+            store,
+            reason,
+            "carrier_webhook",
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — the carrier update already stands
+        logger.warning("carrier_order_transition_announce_failed", error=str(exc))
+        return False
+
+
+__all__ = ["announce_order_transition", "apply_carrier_status"]
