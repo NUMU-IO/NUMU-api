@@ -35,6 +35,7 @@ from src.application.services.app_manifest import (
     SLUG_RE,
     ManifestV1,
     change_type,
+    manifest_urls,
     semver_key,
     to_listing_manifest,
 )
@@ -463,12 +464,7 @@ async def submit_version(
     m = v.manifest
     # The offline check ran at upload; now resolve DNS the way webhook
     # delivery will, so a URL that points inside the network is refused.
-    urls = {
-        m["app_url"],
-        *m["oauth"]["redirect_urls"],
-        *(w["url"] for w in m["webhooks"]),
-    }
-    for url in sorted(urls):
+    for url in sorted(manifest_urls(m)):
         try:
             assert_webhook_target(url)
         except UnsafeUrlError as exc:
