@@ -100,6 +100,15 @@ def _tenant_stores(tenant: TenantModel) -> Select[Any]:
     return select(StoreModel.id).where(StoreModel.tenant_id == tenant.id)
 
 
+async def tenant_for_store(db: AsyncSession, store_id: UUID) -> TenantModel | None:
+    """The tenant that owns a store; every store has its own tenant."""
+    return await db.scalar(
+        select(TenantModel)
+        .join(StoreModel, StoreModel.tenant_id == TenantModel.id)
+        .where(StoreModel.id == store_id)
+    )
+
+
 async def _count_products(
     db: AsyncSession, tenant: TenantModel, since: datetime | None
 ) -> int:

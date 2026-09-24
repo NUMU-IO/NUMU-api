@@ -14,6 +14,10 @@ from functools import lru_cache
 from uuid import UUID, uuid4
 
 from src.application.dto.coupon import CreateCouponDTO
+from src.application.services.entitlement_service import (
+    EntitlementService,
+    tenant_for_store,
+)
 from src.application.services.theme_v3_service import StaleEtagError
 from src.application.use_cases.coupons.create_coupon import CreateCouponUseCase
 from src.core.agent.entities import (
@@ -25,6 +29,9 @@ from src.core.exceptions import (
     AuthorizationError,
     EntityAlreadyExistsError,
     EntityNotFoundError,
+    FeatureDisabledError,
+    FeatureNotAvailableError,
+    PlanLimitExceededError,
     ValidationError,
 )
 from src.core.logging import get_logger
@@ -234,6 +241,9 @@ async def _authorising_user(session, store_id: UUID) -> UUID:
 async def _apply_create_discount(
     session, *, store_id: UUID, staff_id: UUID, params: dict
 ) -> dict:
+    tenant = await tenant_for_store(session, store_id)
+    if tenant is not None:
+        await EntitlementService(session).require(tenant, "discount_codes")
     use_case = CreateCouponUseCase(
         coupon_repository=CouponRepository(session),
         store_repository=StoreRepository(session),
@@ -690,6 +700,9 @@ async def _apply_action_proposal(
         AuthorizationError,
         EntityNotFoundError,
         EntityAlreadyExistsError,
+        FeatureNotAvailableError,
+        FeatureDisabledError,
+        PlanLimitExceededError,
     ) as exc:
         # Domain rejection at apply time is still one immutable audit record.
         await audit_repo.add(
