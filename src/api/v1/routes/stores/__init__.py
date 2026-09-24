@@ -44,6 +44,7 @@ from src.api.v1.routes.stores import customers as customers_module
 from src.api.v1.routes.stores import customizer_undo as customizer_undo_module
 from src.api.v1.routes.stores import dashboard as dashboard_module
 from src.api.v1.routes.stores import email_templates as email_templates_module
+from src.api.v1.routes.stores import entitlements as entitlements_module
 from src.api.v1.routes.stores import feedback as feedback_module
 from src.api.v1.routes.stores import gift_cards as gift_cards_module
 from src.api.v1.routes.stores import inventory as inventory_module
@@ -213,6 +214,7 @@ router.include_router(shipments_module.router, tags=["Store Shipments"])
 router.include_router(shipping_module.router, tags=["Store Shipping"])
 router.include_router(payments_module.router, tags=["Store Payments"])
 router.include_router(plan_module.router, tags=["Store Plan"])
+router.include_router(entitlements_module.router, tags=["Store Entitlements"])
 router.include_router(upsells_module.router, tags=["Store Upsells"])
 router.include_router(bundles_module.router, tags=["Store Bundles"])
 router.include_router(social_module.router, tags=["Store Social Import"])

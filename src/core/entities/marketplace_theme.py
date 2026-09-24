@@ -30,6 +30,7 @@ class MarketplaceVersionStatus(StrEnum):
     BUILD_FAILED = "build_failed"
     PENDING_REVIEW = "pending_review"
     APPROVED = "approved"
+    CHANGES_REQUESTED = "changes_requested"
     REJECTED = "rejected"
     PUBLISHED = "published"
 
@@ -63,8 +64,10 @@ class MarketplaceTheme(BaseEntity):
 
     developer_id: UUID
     name: str = Field(max_length=255)
+    name_ar: str | None = None
     slug: str = Field(max_length=255)
     description: str | None = None
+    description_ar: str | None = None
     short_description: str | None = Field(default=None, max_length=500)
     price_cents: int = 0  # 0 = free
     currency: str = "USD"

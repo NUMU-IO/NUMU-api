@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
 
 from src.api.dependencies import get_current_user_id, verify_store_ownership
+from src.api.dependencies.entitlements import require_feature
 from src.api.dependencies.repositories import (
     get_product_repository,
     get_store_repository,
@@ -1678,6 +1679,7 @@ def _coupon_to_response(c: Coupon) -> CampaignCouponResponse:
     status_code=status.HTTP_201_CREATED,
     summary="Issue a discount code attached to a campaign",
     operation_id="issue_campaign_coupon",
+    dependencies=[require_feature("discount_codes")],
 )
 async def issue_campaign_coupon(
     store_id: UUID,

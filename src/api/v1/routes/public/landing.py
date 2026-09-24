@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.entitlement_service import plan_grants
+from src.core.entitlements import UNLIMITED
 from src.infrastructure.database.models.public.platform_config import (
     DEFAULT_LANDING_CONFIG,
     PlatformConfigModel,
@@ -359,10 +361,11 @@ async def get_public_pricing_plans(
     stored = config.value if config else DEFAULT_PRICING_PLANS
     plans = [dict(p) for p in stored.get("plans", [])]
     signup = await get_signup_settings(db)
+    grants = await plan_grants(db)
 
     # LIVE CATALOG MERGE: public prices, order limits, and trial length must
     # match what the platform enforces even when old admin card copy remains
-    # stored in JSONB.
+    # stored in JSONB. Order limits come from the entitlement catalog.
     for p in plans:
         key = p.get("key")
         if key in ("trial", "starter", "pro", "enterprise"):
@@ -371,16 +374,17 @@ async def get_public_pricing_plans(
                 p["price_monthly"] = f.monthly_price_piasters // 100
             if f.annual_price_piasters > 0:
                 p["price_annual"] = f.annual_price_piasters // 100
+            orders = grants.get(key, {}).get("orders_per_month", UNLIMITED)
             order_feature = {
                 "en": (
                     "Unlimited orders"
-                    if f.max_orders_per_month == -1
-                    else f"{f.max_orders_per_month:,} orders/month"
+                    if orders == UNLIMITED
+                    else f"{orders:,} orders/month"
                 ),
                 "ar": (
                     "أوردرات بلا حدود"
-                    if f.max_orders_per_month == -1
-                    else f"{f.max_orders_per_month:,} أوردر شهريًا"
+                    if orders == UNLIMITED
+                    else f"{orders:,} أوردر شهريًا"
                 ),
             }
             features = p.get("features", [])

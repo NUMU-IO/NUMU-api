@@ -70,7 +70,8 @@ async def submit_review(
     svc: Annotated[MarketplaceService, Depends(_svc)],
     admin_id: Annotated[UUID, Depends(require_admin)],
 ):
-    """Approve or reject a version. Approval publishes the listing."""
+    """Approve, reject or request changes. The partner publishes an approved
+    version from the partner portal."""
     try:
         data = await svc.review_version(
             reviewer_id=admin_id,

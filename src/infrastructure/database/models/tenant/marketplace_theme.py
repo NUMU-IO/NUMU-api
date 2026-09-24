@@ -40,7 +40,9 @@ class MarketplaceThemeModel(Base, UUIDMixin):
     slug: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False, index=True
     )
+    name_ar: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description_ar: Mapped[str | None] = mapped_column(Text, nullable=True)
     short_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     price_cents: Mapped[int] = mapped_column(
         Integer, server_default="0", nullable=False

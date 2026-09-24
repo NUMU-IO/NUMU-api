@@ -2,6 +2,11 @@
 
 Defines what each tenant plan tier allows. All limit values of -1 mean unlimited.
 
+Limits and switches that are entitlements (``LEGACY_FIELDS`` in
+entitlement_service) are enforced from the ``plan_entitlements`` catalog, which
+admins edit; their fields here only seeded it and go away in Phase 3. Prices,
+display names and ``commission_bps`` still live here.
+
 Pricing model:
 
 * **Subscriptions are the primary model.** New signups go to ``trial`` and
@@ -99,7 +104,7 @@ PLAN_LIMITS: dict[str, PlanFeatures] = {
     # ─── Paid plans ───────────────────────────────────────────────────────
     "starter": PlanFeatures(
         display_name="Starter",
-        max_products=100,
+        max_products=-1,
         max_orders_per_month=-1,  # subscription, not metered
         max_stores=1,
         max_staff_members=3,

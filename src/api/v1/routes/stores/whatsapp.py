@@ -37,6 +37,10 @@ from src.api.v1.schemas.stores.whatsapp_connection import (
     WhatsAppStatus,
 )
 from src.application.services import admin_notifications
+from src.application.services.entitlement_service import (
+    EntitlementService,
+    tenant_for_store,
+)
 from src.application.services.meta_platform_credentials import (
     get_meta_platform_credentials,
 )
@@ -564,6 +568,7 @@ async def update_notification_settings(
     request: UpdateNotificationSettingsRequest,
     store: Annotated[Store, Depends(get_current_store)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Toggle individual notification types on/off.
 
@@ -571,6 +576,10 @@ async def update_notification_settings(
     path the backend handlers read at send-time. Partial update: only
     keys present (non-None) in the request body are written.
     """
+    if request.abandoned_cart:
+        tenant = await tenant_for_store(db, store.id)
+        if tenant is not None:
+            await EntitlementService(db).require(tenant, "abandoned_cart")
     store_settings = store.settings or {}
     toggles = store_settings.setdefault("whatsapp_notifications", {})
 

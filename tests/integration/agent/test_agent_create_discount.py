@@ -14,7 +14,10 @@ from src.application.agent.proposals import ACTION_APPLIERS
 from src.application.agent.tool_registry import build_default_registry
 from src.application.agent.tools import ToolContext
 from src.core.agent.entities import RiskTier
+from src.core.exceptions import FeatureNotAvailableError
 from src.infrastructure.agent.tools.create_discount import create_discount
+from src.infrastructure.database.models.public.tenant import TenantModel
+from src.infrastructure.database.models.tenant.store import StoreModel
 
 
 def _ctx(*, allow: bool = True) -> ToolContext:
@@ -73,3 +76,32 @@ def test_registered_as_confirm_tool_with_applier():
     assert spec.required_permission == "coupon.create"
     # The confirm path knows how to apply it.
     assert "create_discount" in ACTION_APPLIERS
+
+
+@pytest.mark.asyncio
+async def test_a_plan_without_discount_codes_cannot_apply_one(test_session):
+    tenant = TenantModel(
+        id=uuid4(),
+        name="Free",
+        subdomain=f"t-{uuid4().hex[:8]}",
+        plan="free",
+        lifecycle_state="active",
+        owner_id=uuid4(),
+    )
+    store = StoreModel(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        owner_id=tenant.owner_id,
+        name="Free",
+        slug=f"s-{uuid4().hex[:8]}",
+        subdomain=tenant.subdomain,
+    )
+    test_session.add_all([tenant, store])
+    await test_session.commit()
+    with pytest.raises(FeatureNotAvailableError):
+        await ACTION_APPLIERS["create_discount"](
+            test_session,
+            store_id=store.id,
+            staff_id=uuid4(),
+            params={"code": "X", "discount_type": "fixed", "value": 5},
+        )

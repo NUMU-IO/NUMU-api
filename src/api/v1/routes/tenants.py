@@ -4,12 +4,13 @@ Public routes for tenant/store registration and admin routes for management.
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -25,8 +26,14 @@ from src.api.v1.schemas.public.tenant import (
     TenantResponse,
     UpdateTenantRequest,
 )
-from src.application.services.api_access import GRANT_FLAG, api_access_for_tenant
+from src.application.services.api_access import FEATURE as API_FEATURE
+from src.application.services.api_access import decide as decide_api_access
+from src.application.services.audit_service import AuditService
+from src.application.services.entitlement_service import plan_grants
 from src.config import settings
+from src.infrastructure.database.models.public.entitlements import (
+    EntitlementOverrideModel,
+)
 from src.infrastructure.tenancy.repository import TenantRepository
 from src.infrastructure.tenancy.service import TenantService
 
@@ -249,17 +256,18 @@ async def patch_tenant_api_access(
     tenant_id: UUID,
     body: ApiAccessPatch,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[UUID, Depends(require_admin)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
 ) -> SuccessResponse[dict]:
     """Switch the public API on for a merchant whose plan does not include it.
 
-    A thin, named wrapper over the ``api_access`` feature flag: the plan matrix
-    is too blunt for a partner on a pilot or an agency integrating one Starter
-    merchant, and "flip this JSON key" is not an operation anyone should have
-    to remember. Revoking takes effect immediately — existing tokens are
-    checked on every request, and webhook deliveries stop with them.
+    A thin, named wrapper over an ``api_access`` entitlement override: the
+    plan matrix is too blunt for a partner on a pilot or an agency integrating
+    one Starter merchant. A grant is open-ended, so it is a ``contract``
+    override; revoking ends it. Either takes effect on the next request —
+    existing tokens are checked on every request, and webhook deliveries stop
+    with them.
 
-    A tenant whose PLAN includes the API keeps it regardless of this flag.
+    A tenant whose PLAN includes the API keeps it regardless of this grant.
     """
     await db.execute(text("SET search_path TO public"))
 
@@ -271,15 +279,48 @@ async def patch_tenant_api_access(
             detail="Tenant not found",
         )
 
-    flags = dict(tenant.feature_flags or {})
-    flags[GRANT_FLAG] = body.enabled
-    tenant.feature_flags = flags
-    flag_modified(tenant, "feature_flags")
-    await db.commit()
-
-    access = await api_access_for_tenant(
-        db, tenant_id, plan=tenant.plan, feature_flags=flags
+    now = datetime.now(UTC)
+    live = await db.scalar(
+        select(EntitlementOverrideModel)
+        .where(
+            EntitlementOverrideModel.tenant_id == tenant_id,
+            EntitlementOverrideModel.feature_key == API_FEATURE,
+            EntitlementOverrideModel.revoked_at.is_(None),
+        )
+        .with_for_update()
     )
+    if live is not None:
+        live.revoked_at, live.revoked_by = now, admin_id
+    if body.enabled:
+        db.add(
+            EntitlementOverrideModel(
+                tenant_id=tenant_id,
+                feature_key=API_FEATURE,
+                value=True,
+                starts_at=now,
+                source="contract",
+                reason=(body.note or "").strip() or "Public API granted by NUMU",
+                created_by=admin_id,
+            )
+        )
+    await tenant_repo.bump_entitlements_version(tenant_id)
+    await AuditService(db).log(
+        event_type="entitlement.override.create"
+        if body.enabled
+        else "entitlement.override.revoke",
+        action="create" if body.enabled else "revoke",
+        resource_type="feature",
+        resource_id=API_FEATURE,
+        tenant_id=tenant_id,
+        user_id=admin_id,
+        old_value={"granted": live is not None and live.value is True},
+        new_value={"granted": body.enabled},
+        details={"reason": body.note},
+    )
+    await db.commit()
+    await db.refresh(tenant)
+
+    access = await decide_api_access(db, tenant)
     logger.info(
         "tenant api access patched",
         extra={
@@ -319,7 +360,7 @@ async def update_tenant(
     tenant_id: UUID,
     request: UpdateTenantRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[UUID, Depends(require_admin)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
 ) -> TenantResponse:
     """Update tenant settings (admin only)."""
     await db.execute(text("SET search_path TO public"))
@@ -336,7 +377,25 @@ async def update_tenant(
     # Update fields
     if request.name is not None:
         tenant.name = request.name
-    if request.plan is not None:
+    if request.plan is not None and request.plan != tenant.plan:
+        # Only plans the entitlement catalog knows: an unknown plan would get
+        # nothing but feature defaults.
+        known = {k for k in await plan_grants(db) if not k.startswith("addon:")}
+        if request.plan not in known:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown plan '{request.plan}'. Known: {sorted(known)}",
+            )
+        await AuditService(db).log(
+            event_type="admin.tenant.plan_change",
+            action="update",
+            resource_type="tenant",
+            resource_id=str(tenant_id),
+            tenant_id=tenant_id,
+            user_id=admin_id,
+            old_value={"plan": tenant.plan},
+            new_value={"plan": request.plan},
+        )
         tenant.plan = request.plan
     if request.is_active is not None:
         tenant.is_active = request.is_active

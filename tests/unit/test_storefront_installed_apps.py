@@ -52,6 +52,58 @@ def test_hub_only_numu_apps_never_reach_the_storefront_payload():
     assert {"'whatsapp'", "'inbox'"} <= {s.strip() for s in not_in.group(1).split(",")}
 
 
+def test_pending_consent_installs_never_reach_the_storefront_payload():
+    session = _CapturingSession()
+    asyncio.run(_read_installed_apps(session, store_id=uuid4()))
+    assert "app_installations.status = 'active'" in _where_sql(session)
+
+
+def test_the_storefront_app_routes_apply_the_same_visibility_rules(monkeypatch):
+    # The public /storefront/.../apps routes used to filter only on is_enabled,
+    # so they listed pending_auth installs, hub-only NUMU Apps and Partner Apps
+    # with the kill switch off, while the store payload hid all three.
+    from src.api.v1.routes.storefront import apps as routes
+
+    session = _CapturingSession()
+
+    class _Ctx:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(routes, "AsyncSessionLocal", _Ctx)
+    session.execute_one = None
+
+    async def _execute(stmt):
+        session.statements.append(stmt)
+
+        class _Rows:
+            def all(self):
+                return []
+
+            def one_or_none(self):
+                return None
+
+        return _Rows()
+
+    session.execute = _execute
+    store_id = uuid4()
+
+    asyncio.run(routes.list_installed_apps(store_id))
+    listed = _where_sql(session)
+    try:
+        asyncio.run(routes.get_installed_app(store_id, "some-app"))
+    except Exception:
+        pass
+    detail = _where_sql(session)
+
+    for sql in (listed, detail):
+        assert "app_installations.status = 'active'" in sql
+        assert re.search(r"apps\.slug NOT IN \([^)]*'whatsapp'", sql), sql
+
+
 def test_other_installs_are_still_read():
     # The exclusion is a filter on the query, not an early return: apps with a
     # storefront surface (e.g. variant-swatches) must still be looked up.
