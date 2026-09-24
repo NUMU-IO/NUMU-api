@@ -969,7 +969,11 @@ def _serialize_public_store(
         "contact_email": getattr(store, "contact_email", None),
         "contact_phone": getattr(store, "contact_phone", None),
         "use_nextjs_storefront": getattr(store, "use_nextjs_storefront", False),
-        "tenant_feature_flags": tenant_feature_flags or {},
+        # Rollout keys only: the map also holds per-merchant grants and
+        # billing exemptions, and this payload is public.
+        "tenant_feature_flags": {
+            k: v for k, v in (tenant_feature_flags or {}).items() if k.startswith("ff_")
+        },
         # Enabled app installs, each `{slug, settings}` filtered to the
         # manifest's `public_settings` allowlist.
         #

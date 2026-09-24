@@ -28,7 +28,7 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
-from src.api.dependencies.plan import require_order_limit
+from src.api.dependencies.entitlements import require_feature
 from src.api.dependencies.repositories import (
     get_coupon_repository,
     get_network_reputation_repository,
@@ -294,6 +294,7 @@ def _looks_like_email(value: str | None) -> bool:
     response_model=SuccessResponse[SendRecoveryEmailResponse],
     summary="Send a recovery email to the abandoned-checkout's customer",
     operation_id="send_recovery_email",
+    dependencies=[require_feature("abandoned_cart")],
 )
 async def send_recovery_email(
     checkout_id: Annotated[UUID, Path(description="Abandoned-checkout ID")],
@@ -421,7 +422,6 @@ async def mark_abandoned_checkout_recovered(
     response_model=SuccessResponse[AbandonedCheckoutResponse],
     summary="Turn an abandoned checkout into a real COD order",
     operation_id="convert_abandoned_checkout",
-    dependencies=[Depends(require_order_limit())],
 )
 async def convert_abandoned_checkout(
     checkout_id: Annotated[UUID, Path(description="Abandoned-checkout ID")],
@@ -661,6 +661,7 @@ def _recipient_name_from_checkout(c: AbandonedCheckout) -> str | None:
     response_model=NotifyWhatsAppResponse,
     summary="Send a WhatsApp abandoned-cart recovery nudge",
     operation_id="notify_abandoned_checkout_whatsapp",
+    dependencies=[require_feature("abandoned_cart")],
 )
 async def notify_whatsapp(
     checkout_id: Annotated[UUID, Path(description="Abandoned-checkout ID")],

@@ -49,6 +49,7 @@ from src.infrastructure.database.models.public.app_billing import (
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
 )
+from src.infrastructure.tenancy.repository import TenantRepository
 
 logger = get_logger(__name__)
 
@@ -176,15 +177,24 @@ def paid_through(sub: AppSubscriptionModel | None, now: datetime) -> bool:
     )
 
 
-def covers(sub: AppSubscriptionModel | None, now: datetime) -> bool:
-    """Whether the store may use the app at ``now``: a paid period, plus the
-    3-day grace after a lapse. A merchant who cancelled gets no grace."""
+def coverage_end(sub: AppSubscriptionModel | None) -> datetime | None:
+    """When the store stops being covered: the paid period's end plus the
+    3-day grace, or the bare period end once the merchant cancelled. None
+    when nothing is live. The entitlement resolver reads this too, so the
+    two can never disagree about the grace."""
     if sub is None or sub.status not in ("active", "past_due"):
-        return False
+        return None
     end = _aware(sub.current_period_end)
     if not (sub.status == "active" and sub.cancel_at_period_end):
         end += GRACE
-    return end > now
+    return end
+
+
+def covers(sub: AppSubscriptionModel | None, now: datetime) -> bool:
+    """Whether the store may use the app at ``now``: a paid period, plus the
+    3-day grace after a lapse. A merchant who cancelled gets no grace."""
+    end = coverage_end(sub)
+    return end is not None and end > now
 
 
 async def is_entitled(
@@ -230,6 +240,7 @@ async def subscribe(
     if paid_through(sub, now):
         if sub.cancel_at_period_end:
             sub.cancel_at_period_end = False  # "resume", free until the period ends
+            await TenantRepository(db).bump_entitlements_version(sub.tenant_id)
         return sub, False
 
     end = now + timedelta(days=CYCLE_DAYS[price.cycle])
@@ -259,6 +270,7 @@ async def subscribe(
     sub.current_period_end = end
     sub.cancel_at_period_end = False
     await db.flush()
+    await TenantRepository(db).bump_entitlements_version(installation.tenant_id)
     await _credit_partner(db, app, sub, price.price_cents, price.currency, key, now)
     logger.info(
         "app_subscription_started",
@@ -278,6 +290,7 @@ async def cancel(
     if sub is not None and sub.status == "active":
         sub.cancel_at_period_end = True
         await db.flush()
+        await TenantRepository(db).bump_entitlements_version(sub.tenant_id)
     return sub
 
 
@@ -294,6 +307,7 @@ async def renew_due(
     """
     now = now or _now()
     stats = {"renewed": 0, "cancelled": 0, "past_due": 0}
+    changed: set[UUID] = set()
     rows = (
         (
             await db.execute(
@@ -311,6 +325,7 @@ async def renew_due(
         .all()
     )
     for sub in rows:
+        changed.add(sub.tenant_id)
         install = await db.get(AppInstallationModel, sub.installation_id)
         app = await db.get(AppModel, sub.app_id)
         live = (
@@ -344,6 +359,8 @@ async def renew_due(
         if charged:
             await _credit_partner(db, app, sub, sub.price_cents, sub.currency, key, now)
             stats["renewed"] += 1
+    for tenant_id in changed:
+        await TenantRepository(db).bump_entitlements_version(tenant_id)
     await db.flush()
     return stats
 
