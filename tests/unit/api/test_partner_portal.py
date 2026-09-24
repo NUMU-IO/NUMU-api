@@ -13,7 +13,11 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from src.api.dependencies.partners import partner_context, require_partner_manager
+from src.api.dependencies.partners import (
+    PartnerContext,
+    partner_context,
+    require_partner_manager,
+)
 from src.api.v1.routes import partner_portal as portal
 from src.api.v1.routes.partners import get_me
 from src.core.entities.app import AppStatus
@@ -184,7 +188,11 @@ async def test_the_dashboard_counts_only_the_partners_own_installs(test_session)
     test_session.add(AppUninstallEventModel(app_id=app.id, store_id=uuid4()))
     await test_session.flush()
 
-    out = (await portal.dashboard(owner_id=owner.id, db=test_session)).data
+    out = (
+        await portal.dashboard(
+            ctx=PartnerContext(owner.id, owner.id, None, "owner"), db=test_session
+        )
+    ).data
     assert (out.installs_total, out.active, out.disabled, out.uninstalled) == (
         2,
         1,
@@ -195,7 +203,11 @@ async def test_the_dashboard_counts_only_the_partners_own_installs(test_session)
     assert {i.app_name for i in out.latest} == {"Acme App"}
 
     one = (
-        await portal.dashboard(owner_id=owner.id, db=test_session, app_id=app.id)
+        await portal.dashboard(
+            ctx=PartnerContext(owner.id, owner.id, None, "owner"),
+            db=test_session,
+            app_id=app.id,
+        )
     ).data
     assert one.installs_total == 1
 
