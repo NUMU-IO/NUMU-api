@@ -135,6 +135,8 @@ async def test_approve_then_publish_makes_the_theme_installable(test_session):
 
     versions = await developer.list_versions(theme.id, svc=svc, user_id=owner.id)
     assert versions.data[0].review_notes == "nice"
+    status = await svc.get_version_status(owner.id, version.id)
+    assert status["review_notes"] == "nice"
 
 
 async def test_publish_keeps_an_admin_hidden_theme_hidden(test_session):

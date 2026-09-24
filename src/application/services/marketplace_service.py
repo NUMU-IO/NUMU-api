@@ -329,6 +329,7 @@ class MarketplaceService:
             "version_string": version.version_string,
             "status": version.status.value,
             "build_log": version.build_log,
+            "review_notes": version.review_notes,
             "bundle_url": version.bundle_url,
             "css_url": version.css_url,
             "size_bytes": version.size_bytes,

@@ -234,6 +234,7 @@ class VersionStatusResponse(BaseModel):
     version_string: str | None = None
     status: str
     build_log: str | None = None
+    review_notes: str | None = None
     bundle_url: str | None = None
     css_url: str | None = None
     size_bytes: int | None = None
