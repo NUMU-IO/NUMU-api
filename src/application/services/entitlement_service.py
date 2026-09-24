@@ -63,8 +63,12 @@ from src.infrastructure.database.models.public.entitlements import (
     PlanEntitlementModel,
     UsageCounterModel,
 )
+from src.infrastructure.database.models.public.staff_invitation import (
+    StaffInvitationModel,
+)
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.tenant_membership import (
+    MembershipStatus,
     TenantMembershipModel,
 )
 from src.infrastructure.database.models.tenant.order import OrderModel
@@ -148,18 +152,30 @@ async def _count_stores(
 async def _count_staff(
     db: AsyncSession, tenant: TenantModel, since: datetime | None
 ) -> int:
-    return int(
-        await db.scalar(
-            select(func.count())
-            .select_from(TenantMembershipModel)
-            .where(
-                TenantMembershipModel.tenant_id == tenant.id,
-                TenantMembershipModel.is_owner.is_(False),
-                TenantMembershipModel.deleted_at.is_(None),
-            )
+    # A seat is a staff member who was not removed (removal marks the row
+    # REVOKED and keeps it) or an invitation still waiting for an answer, so
+    # a full team cannot send ten invitations and have all of them accepted.
+    members = await db.scalar(
+        select(func.count())
+        .select_from(TenantMembershipModel)
+        .where(
+            TenantMembershipModel.tenant_id == tenant.id,
+            TenantMembershipModel.is_owner.is_(False),
+            TenantMembershipModel.deleted_at.is_(None),
+            TenantMembershipModel.status != MembershipStatus.REVOKED,
         )
-        or 0
     )
+    invited = await db.scalar(
+        select(func.count())
+        .select_from(StaffInvitationModel)
+        .where(
+            StaffInvitationModel.tenant_id == tenant.id,
+            StaffInvitationModel.accepted_at.is_(None),
+            StaffInvitationModel.revoked_at.is_(None),
+            StaffInvitationModel.expires_at > datetime.now(UTC),
+        )
+    )
+    return int(members or 0) + int(invited or 0)
 
 
 async def _count_partner_apps(
