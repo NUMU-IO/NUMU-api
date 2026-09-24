@@ -257,7 +257,7 @@ class MarketplaceService:
     ) -> None:
         """Paid themes install and activate only on a store that bought them
         (or for the theme's own developer, or a legacy per-user purchase)."""
-        if not theme.price_cents or theme.price_cents <= 0:
+        if (getattr(theme, "price_cents", 0) or 0) <= 0:
             return
         if user_id is not None and theme.developer_id == user_id:
             return
