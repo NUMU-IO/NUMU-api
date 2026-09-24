@@ -64,7 +64,15 @@ APP_SCOPES = (
 #: The read scope an app needs to receive each event: an order event carries
 #: the shopper's name, phone and address. Built from every subscribable event,
 #: so a new event domain fails here at import instead of reaching apps unscoped.
-_EVENT_DOMAIN_SCOPES = {"order": "orders:read", "product": "catalog:read"}
+_EVENT_DOMAIN_SCOPES = {
+    "order": "orders:read",
+    "refund": "orders:read",
+    "shipment": "orders:read",
+    "checkout": "orders:read",
+    "product": "catalog:read",
+    "inventory": "catalog:read",
+    "customer": "customers:read",
+}
 EVENT_SCOPES = {
     e.value: _EVENT_DOMAIN_SCOPES[e.value.split(".", 1)[0]]
     for e in SUBSCRIBABLE_EVENT_TYPES
@@ -242,6 +250,29 @@ class AppProxy(_Strict):
         return _https(v)
 
 
+class Carrier(_Strict):
+    """Category ``shipping`` only: the app is a courier merchants ship with.
+
+    NUMU POSTs to these URLs, signed like webhook deliveries. Tracking comes
+    back through the app-token endpoint ``POST /stores/{id}/shipments/carrier-events``.
+    """
+
+    create_shipment_url: str
+    rates_url: str | None = None
+    cancel_url: str | None = None
+    labels: bool = False
+    cod: bool = True
+
+    @field_validator("create_shipment_url", "rates_url", "cancel_url")
+    @classmethod
+    def _urls(cls, v: str | None) -> str | None:
+        return _https(v) if v else v
+
+
+#: A carrier creates shipments from order data and pushes their status back.
+CARRIER_SCOPES = frozenset({"orders:read", "orders:write"})
+
+
 CYCLE_LABELS = {
     "monthly": {"ar": "في الشهر", "en": "/ month"},
     "annual": {"ar": "في السنة", "en": "/ year"},
@@ -318,6 +349,7 @@ class ManifestV1(_Strict):
     webhooks: list[Webhook] = Field(min_length=1)
     settings_schema: list[dict[str, Any]] = Field(default_factory=list, max_length=60)
     pricing: Pricing
+    carrier: Carrier | None = None
     languages: list[Literal["ar", "en"]] = Field(default_factory=lambda: ["ar", "en"])
     # Accept the editor hint without it being a field of the manifest itself.
     schema_: str | None = Field(default=None, alias="$schema")
@@ -416,8 +448,39 @@ class ManifestV1(_Strict):
             raise ValueError("app_proxy.subpath must be the app's slug")
         if self.embedded_path and not self.embedded:
             raise ValueError("embedded_path needs embedded: true")
+        if self.carrier is not None:
+            if self.category != "shipping":
+                raise ValueError("carrier is only for category shipping")
+            missing = sorted(CARRIER_SCOPES - set(self.oauth.scopes))
+            if missing:
+                raise ValueError(f"a carrier needs oauth.scopes: {', '.join(missing)}")
         if self.pricing.model == "external" and not self.pricing.label:
             raise ValueError("pricing.label is required for an external price")
+        return self
+
+
+class PrivateManifestV1(ManifestV1):
+    """A private (custom) app's manifest. It is never listed, so the listing
+    fields default from the name, and it is free: NUMU never bills it."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _listing_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            name = data.get("name")
+            data = {
+                "tagline": name,
+                "description": name,
+                "category": "other",
+                "pricing": {"model": "free"},
+                **data,
+            }
+        return data
+
+    @model_validator(mode="after")
+    def _free(self):
+        if self.pricing.model != "free":
+            raise ValueError("pricing.model must be free for a private app")
         return self
 
 
@@ -428,12 +491,14 @@ def semver_key(version: str) -> tuple[int, int, int]:
 
 def manifest_urls(m: dict[str, Any]) -> set[str]:
     oauth = m.get("oauth") or {}
+    carrier = m.get("carrier") or {}
     return (
         {m.get("app_url") or ""}
         | set(oauth.get("redirect_urls") or [])
         | {w.get("url") for w in m.get("webhooks") or []}
-        | {(m.get("app_proxy") or {}).get("url") or ""}
-    ) - {""}
+        | {(m.get("app_proxy") or {}).get("url")}
+        | {carrier.get(k) for k in ("create_shipment_url", "rates_url", "cancel_url")}
+    ) - {None, ""}
 
 
 def _scopes(m: dict[str, Any]) -> set[str]:
@@ -512,6 +577,7 @@ def to_listing_manifest(m: dict[str, Any], *, developer_name: str) -> dict[str, 
             "webhooks": m["webhooks"],
             "privacy_policy_url": dev.get("privacy_policy_url"),
             "terms_url": dev.get("terms_url"),
+            "carrier": m.get("carrier"),
         },
     }
 

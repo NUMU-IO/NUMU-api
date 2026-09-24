@@ -23,22 +23,18 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.storefront.app_public import (
     public_manifest,
     public_settings,
+    visible_installs,
 )
 from src.application.services import app_proxy
 from src.application.services.app_tokens import read_client_secret
-from src.application.services.partner_program import partner_apps_enabled
 from src.core.entities.app import AppStatus
 from src.infrastructure.database.connection import AsyncSessionLocal
-from src.infrastructure.database.models.public.app import (
-    AppInstallationModel,
-    AppModel,
-)
+from src.infrastructure.database.models.public.app import AppModel
 
 router = APIRouter()
 
@@ -84,15 +80,7 @@ async def list_installed_apps(store_id: UUID):
     """
 
     async with AsyncSessionLocal() as session:
-        stmt = (
-            select(AppModel, AppInstallationModel)
-            .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
-            .where(
-                AppInstallationModel.store_id == store_id,
-                AppInstallationModel.is_enabled.is_(True),
-                AppModel.status == AppStatus.PUBLISHED,
-            )
-        )
+        stmt = await visible_installs(session, store_id)
         rows = (await session.execute(stmt)).all()
 
     summaries = []
@@ -134,16 +122,7 @@ async def get_installed_app(store_id: UUID, slug: str):
     """
 
     async with AsyncSessionLocal() as session:
-        stmt = (
-            select(AppModel, AppInstallationModel)
-            .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
-            .where(
-                AppInstallationModel.store_id == store_id,
-                AppInstallationModel.is_enabled.is_(True),
-                AppModel.slug == slug,
-                AppModel.status == AppStatus.PUBLISHED,
-            )
-        )
+        stmt = (await visible_installs(session, store_id)).where(AppModel.slug == slug)
         row = (await session.execute(stmt)).one_or_none()
 
     if row is None:
@@ -187,24 +166,17 @@ async def get_installed_app(store_id: UUID, slug: str):
 async def _proxy_target(store_id: UUID, slug: str) -> tuple[str, str] | None:
     """``(app_proxy.url, client secret)`` of a live Partner App install."""
     async with AsyncSessionLocal() as session:
-        app = (
-            await session.execute(
-                select(AppModel)
-                .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
-                .where(
-                    AppInstallationModel.store_id == store_id,
-                    AppInstallationModel.is_enabled.is_(True),
-                    AppInstallationModel.status == "active",
-                    AppModel.slug == slug,
-                    AppModel.status == AppStatus.PUBLISHED,
-                    AppModel.developer_id.is_not(None),
-                )
-            )
-        ).scalar_one_or_none()
+        stmt = (await visible_installs(session, store_id)).where(
+            AppModel.slug == slug,
+            AppModel.status == AppStatus.PUBLISHED,
+            AppModel.developer_id.is_not(None),
+        )
+        row = (await session.execute(stmt)).first()
+        app = row[0] if row else None
         proxy = (
             (((app.manifest or {}).get("app") or {}).get("app_proxy")) if app else None
         )
-        if not proxy or not await partner_apps_enabled(session):
+        if not proxy:
             return None
         secret = await read_client_secret(session, app.id)
     return (proxy["url"], secret) if secret else None

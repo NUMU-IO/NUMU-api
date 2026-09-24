@@ -232,7 +232,7 @@ def _installation(app: AppModel, install: AppInstallationModel) -> AppInstallati
         listing=_listing(app.manifest),
         app_status=status_value,
         is_live=bool(install.is_enabled)
-        and status_value == AppStatus.PUBLISHED.value
+        and status_value != AppStatus.SUSPENDED.value
         # Mid-consent installs are skipped by the storefront too.
         and (install.status or "active") == "active",
         granted_scopes=list(install.granted_scopes or []),
@@ -286,6 +286,7 @@ async def list_catalog(store_id: UUID):
         stmt = select(AppModel).where(
             AppModel.status == AppStatus.PUBLISHED,
             AppModel.slug.notin_(hidden),
+            AppModel.private_store_id.is_(None),
             or_(AppModel.developer_id.is_(None), partner_listed),
         )
         rows = (await session.execute(stmt)).scalars().all()
