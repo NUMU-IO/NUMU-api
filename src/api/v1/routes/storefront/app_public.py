@@ -22,6 +22,18 @@ settings is presentation.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
+
+from sqlalchemy import Select, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.application.services.numu_apps import NUMU_APPS
+from src.application.services.partner_program import partner_apps_enabled
+from src.core.entities.app import AppStatus
+from src.infrastructure.database.models.public.app import (
+    AppInstallationModel,
+    AppModel,
+)
 
 # Manifest keys a shopper's browser may see. Everything else — credentials,
 # webhook URLs, scopes, internal routing — stays server-side. An allowlist
@@ -57,3 +69,28 @@ def public_manifest(manifest: dict | None) -> dict[str, Any]:
     if not isinstance(manifest, dict):
         return {}
     return {k: v for k, v in manifest.items() if k in _PUBLIC_MANIFEST_KEYS}
+
+
+async def visible_installs(session: AsyncSession, store_id: UUID) -> Select:
+    """The (app, install) rows a shopper may see for a store.
+
+    The single definition shared by the store payload's `installed_apps` and the
+    `/storefront/.../apps` routes, so the three can never disagree again: an
+    install must be enabled and finished connecting (a Partner App mid-consent
+    is `pending_auth`), the app not suspended, Partner Apps hidden while the
+    kill switch is off, and hub-only NUMU Apps (WhatsApp, Inbox) never listed.
+    """
+    stmt = (
+        select(AppModel, AppInstallationModel)
+        .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
+        .where(
+            AppInstallationModel.store_id == store_id,
+            AppInstallationModel.is_enabled.is_(True),
+            AppInstallationModel.status == "active",
+            AppModel.status != AppStatus.SUSPENDED,
+            AppModel.slug.notin_(NUMU_APPS),
+        )
+    )
+    if not await partner_apps_enabled(session):
+        stmt = stmt.where(AppModel.developer_id.is_(None))
+    return stmt

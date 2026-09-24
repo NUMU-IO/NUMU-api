@@ -21,7 +21,6 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
-from src.api.dependencies.plan import require_order_limit
 from src.api.dependencies.repositories import (
     get_funnel_event_repository,
     get_network_reputation_repository,
@@ -298,7 +297,6 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
     status_code=status.HTTP_201_CREATED,
     summary="Create new order",
     operation_id="create_order",
-    dependencies=[Depends(require_order_limit())],
 )
 async def create_order(
     request: CreateOrderRequest,
@@ -472,7 +470,6 @@ async def create_order(
     status_code=status.HTTP_201_CREATED,
     summary="Create a draft order",
     operation_id="create_draft_order",
-    dependencies=[Depends(require_order_limit())],
 )
 async def create_draft_order(
     request: CreateOrderRequest,

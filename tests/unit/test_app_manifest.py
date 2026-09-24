@@ -333,3 +333,40 @@ def test_a_price_change_is_its_own_review_type():
     )
     raised = {**base, "pricing": {**base["pricing"], "price_cents": 19900}}
     assert change_type(raised, base) == "pricing"
+
+
+CARRIER = {
+    "create_shipment_url": "https://app.example.com/ship",
+    "rates_url": "https://app.example.com/rates",
+    "labels": True,
+}
+
+
+def test_a_shipping_app_may_declare_a_carrier():
+    m = ManifestV1.model_validate({**GOOD, "carrier": CARRIER}).model_dump(
+        by_alias=True, exclude_none=True
+    )
+    listing = to_listing_manifest(m, developer_name="Dev")
+    assert listing["app"]["carrier"]["rates_url"] == CARRIER["rates_url"]
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"category": "marketing"}, "only for category shipping"),
+        ({"carrier": {**CARRIER, "rates_url": "http://app.example.com/r"}}, "https"),
+        (
+            {"oauth": {**GOOD["oauth"], "scopes": ["orders:read"]}},
+            "a carrier needs oauth.scopes: orders:write",
+        ),
+    ],
+)
+def test_carrier_rules_reject(changes, message):
+    with pytest.raises(ValidationError, match=message):
+        ManifestV1.model_validate({**GOOD, "carrier": CARRIER, **changes})
+
+
+def test_a_carrier_url_change_is_a_url_review():
+    base = {**GOOD, "carrier": CARRIER}
+    moved = {**base, "carrier": {**CARRIER, "rates_url": "https://new.example.com/r"}}
+    assert change_type(moved, base) == "urls"

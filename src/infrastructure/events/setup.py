@@ -101,6 +101,7 @@ from src.infrastructure.events.handlers.meta_capi_status_event_handler import (
 from src.infrastructure.events.handlers.notification_feed_handler import (
     handle_kill_switch_notification,
     handle_order_created_notification,
+    handle_order_limit_notice,
     handle_order_paid_notification,
     handle_order_status_notification,
     handle_payment_proof_submitted_notification,
@@ -242,6 +243,7 @@ def create_event_bus() -> EventBus:
     # Merchant notification feed (hub bell + Notifications page). Sibling
     # of the order-activity timeline — store-wide, categorised, read-state.
     bus.subscribe(OrderCreatedEvent, handle_order_created_notification)
+    bus.subscribe(OrderCreatedEvent, handle_order_limit_notice)
     bus.subscribe(OrderPaidEvent, handle_order_paid_notification)
     bus.subscribe(OrderStatusChangedEvent, handle_order_status_notification)
     bus.subscribe(TrustKillSwitchFiredEvent, handle_kill_switch_notification)
