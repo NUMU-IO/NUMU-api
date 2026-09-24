@@ -14,10 +14,17 @@
   var PARENT_ORIGIN = /^(https:\/\/([a-z0-9-]+\.)*numueg\.app|http:\/\/localhost(:\d+)?)$/;
   var TEXT = {
     en: {
+      secure: "Secure checkout",
+      heading: "Pay by card",
       number: "Card number",
+      cards: "Visa / Mastercard",
       expiry: "Expiry",
+      cvcHint: "3–4 digits",
       name: "Name on card",
+      namePlaceholder: "As shown on your card",
       pay: "Pay ",
+      encrypted: "Bank-level encryption",
+      notStored: "Card details never stored",
       note: "Your card details go encrypted straight to our payment processor. We never store them.",
       threeDs: "Complete the verification from your bank:",
       processing: "Processing...",
@@ -27,10 +34,17 @@
       broken: "Payment is misconfigured. Close this window and try again.",
     },
     ar: {
+      secure: "دفع آمن",
+      heading: "الدفع بالبطاقة",
       number: "رقم البطاقة",
+      cards: "فيزا / ماستركارد",
       expiry: "تاريخ الانتهاء",
+      cvcHint: "3–4 أرقام",
       name: "الاسم على البطاقة",
+      namePlaceholder: "كما يظهر على البطاقة",
       pay: "ادفع ",
+      encrypted: "تشفير بمستوى البنوك",
+      notStored: "لا نحتفظ ببيانات البطاقة",
       note: "تُرسل بيانات بطاقتك مشفّرة مباشرة إلى معالج الدفع ولا نحتفظ بها.",
       threeDs: "أكمل التحقق من بنكك:",
       processing: "جارٍ المعالجة...",
@@ -57,6 +71,9 @@
   if (cfg && cfg.lang === "ar") document.documentElement.dir = "rtl";
   document.querySelectorAll("[data-t]").forEach(function (el) {
     el.textContent = t[el.getAttribute("data-t")];
+  });
+  document.querySelectorAll("[data-placeholder]").forEach(function (el) {
+    el.placeholder = t[el.getAttribute("data-placeholder")];
   });
 
   var endpointHost = "";
@@ -94,11 +111,23 @@
   var csc = $("cc-csc");
   var name = $("cc-name");
   var payBtn = $("pay");
+  var payLabel = $("pay-label");
+  var cardBrand = $("card-brand");
   // Set when the API signed the order to save the card (plan auto-renew):
   // Kashier returns the card token in its response, and the hub stores it
   // through our API once the payment is confirmed.
   var saved = null;
-  payBtn.textContent = t.pay + (cfg.amount || "");
+  $("amount").textContent = cfg.amount || "";
+  payLabel.textContent = t.pay + (cfg.amount || "");
+
+  function brand(cardNumber) {
+    var d = digits(cardNumber);
+    if (/^4/.test(d)) return "VISA";
+    if (/^(5[1-5]|2[2-7])/.test(d)) return "MC";
+    if (/^3[47]/.test(d)) return "AMEX";
+    if (/^6(?:011|5)/.test(d)) return "DISC";
+    return "CARD";
+  }
 
   function parts() {
     var e = exp.value.split("/");
@@ -119,6 +148,7 @@
 
   number.addEventListener("input", function () {
     number.value = digits(number.value).slice(0, 19).replace(/(.{4})(?=.)/g, "$1 ");
+    cardBrand.textContent = brand(number.value);
     refresh();
   });
   exp.addEventListener("input", function () {
