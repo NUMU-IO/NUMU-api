@@ -26,6 +26,12 @@ def test_card_page_is_framable_only_by_numu_and_talks_only_to_kashier():
     assert "script-src 'self';" in csp
     assert "connect-src https://fep.kashier.io https://test-fep.kashier.io;" in csp
     assert "x-frame-options" not in res.headers
+    assert res.headers["cache-control"] == "no-store"
+    assert 'src="card.js?v=2"' in res.text
+
+    script = _client().get("/api/v1/platform-pay/card.js?v=2")
+    assert script.status_code == 200
+    assert script.headers["cache-control"] == "public, max-age=300"
 
 
 def test_other_api_responses_keep_the_default_policy():
