@@ -21,16 +21,17 @@ router = APIRouter(prefix="/platform-pay", include_in_schema=False)
 _ASSETS = Path(__file__).parent / "platform_pay_page"
 _HTML = (_ASSETS / "card.html").read_bytes()
 _JS = (_ASSETS / "card.js").read_bytes()
-_CACHE = {"Cache-Control": "public, max-age=300"}
+_HTML_CACHE = {"Cache-Control": "no-store"}
+_ASSET_CACHE = {"Cache-Control": "public, max-age=300"}
 
 
 @router.get("/card")
 async def card_page() -> Response:
-    return Response(_HTML, media_type="text/html; charset=utf-8", headers=_CACHE)
+    return Response(_HTML, media_type="text/html; charset=utf-8", headers=_HTML_CACHE)
 
 
 @router.get("/card.js")
 async def card_script() -> Response:
     return Response(
-        _JS, media_type="application/javascript; charset=utf-8", headers=_CACHE
+        _JS, media_type="application/javascript; charset=utf-8", headers=_ASSET_CACHE
     )
