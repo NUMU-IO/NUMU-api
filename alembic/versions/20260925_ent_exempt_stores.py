@@ -1,4 +1,4 @@
-"""Keep pixelprint and vionne out of the new enforcement for now.
+"""Keep pixelprint and vionneeg out of the new enforcement for now.
 
 Revision ID: ent_exempt_stores_20260925
 Revises: ent_abandoned_cart_20260925
@@ -39,7 +39,7 @@ WITH granted AS (
         ('multi_warehouse', 'true'::jsonb),
         ('abandoned_cart', 'true'::jsonb)
     ) AS f (feature_key, value)
-    WHERE t.subdomain IN ('pixelprint', 'vionne')
+    WHERE t.subdomain IN ('pixelprint', 'vionneeg')
     ON CONFLICT DO NOTHING
     RETURNING tenant_id
 )
