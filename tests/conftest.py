@@ -70,14 +70,20 @@ from src.main import app
 # Test database URL (use SQLite for tests)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
+
 # The entitlement catalog is data, not code: tests seed it from the migration
 # itself, so they check the rules prod runs, not a copy that can drift.
-_spec = importlib.util.spec_from_file_location(
-    "entitlements_migration",
-    Path(__file__).resolve().parents[1] / "alembic/versions/20260925_entitlements.py",
-)
-_entitlements_migration = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_entitlements_migration)
+def _migration(filename: str):
+    spec = importlib.util.spec_from_file_location(
+        filename, Path(__file__).resolve().parents[1] / "alembic/versions" / filename
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_entitlements_migration = _migration("20260925_entitlements.py")
+_abandoned_cart_migration = _migration("20260925_ent_abandoned_cart.py")
 _FEATURE_COLUMNS = (
     "key",
     "name",
@@ -96,7 +102,10 @@ def _seed_entitlements(conn) -> None:
         FeatureModel.__table__.insert(),
         [
             dict(zip(_FEATURE_COLUMNS, row, strict=True)) | {"is_enabled": True}
-            for row in _entitlements_migration.FEATURES
+            for row in [
+                *_entitlements_migration.FEATURES,
+                _abandoned_cart_migration.FEATURE,
+            ]
         ],
     )
     conn.execute(
@@ -104,6 +113,14 @@ def _seed_entitlements(conn) -> None:
         [
             {"plan_key": plan, "feature_key": feature, "value": value}
             for plan, feature, value in _entitlements_migration.seed_rows({})
+        ]
+        + [
+            {
+                "plan_key": plan,
+                "feature_key": "abandoned_cart",
+                "value": plan in _abandoned_cart_migration.PRO_AND_UP,
+            }
+            for plan in _entitlements_migration.PLANS
         ],
     )
 

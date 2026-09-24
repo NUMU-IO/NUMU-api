@@ -5,7 +5,7 @@ Status: V1 built 2026-09-24 (NUMU-api `feat/entitlements-v1`, numo-merchant-hub 
 Where V1 differs from this design:
 
 - Phases 0 and 1 of §14 shipped together, without the shadow week. `tests/unit/test_entitlements_seed.py` pins the seed to `PLAN_LIMITS` instead, so the only intended behaviour change is D1.
-- D1 is decided; D2, D3, D4 and D6 are applied (§22). D5 is still open.
+- D1 is decided; D2 to D6 are applied (§22).
 - The hub opens the upgrade dialog from `showError` as well as from the mutation cache, so a caller with its own `onError` still gets it.
 
 What was run while designing (Appendix A has the details):
@@ -2854,7 +2854,7 @@ def downgrade() -> None:
 | D2 | What does "over the order limit" mean? | **Applied 2026-09-24:** no order is refused for the monthly limit, including in the hub. The first order past it in a month writes one important `plan.orders_over_limit` notification. Overage billing from the wallet is V2 |
 | D3 | Webhooks on Starter: deliver them, or fold them into `api_access`? | **Applied 2026-09-24:** creating a webhook requires `api_access`, which delivery already required. `webhooks_enabled` decides nothing any more |
 | D4 | Enforce the fields that are never enforced (staff, custom domain, discount codes, multi-warehouse, product subscriptions)? | **Applied 2026-09-24, one PR per field, each with its grandfather migration.** Staff: a seat is a staff member who was not removed or a pending invitation, checked when the invitation is sent; teams already over their plan keep unlimited staff. Custom domain: connecting one needs `custom_domain`; tenants that already have one keep it. Discount codes: the hub, campaign and agent create paths need `discount_codes`; tenants with coupons keep it, and redeeming an existing code is never checked. Multi-warehouse: a second active location, and turning on a capability the plan lacks, need the entitlement; tenants with more than one location keep it. Product subscriptions: nothing is built behind the entitlement yet (the `product_subscriptions` table is back-in-stock signups), so the only gate is the capability switch; gate the feature's routes when it ships |
-| D5 | Abandoned-cart recovery as Pro-only? Everyone has it today | If yes, grandfather every current user |
+| D5 | Abandoned-cart recovery as Pro-only? Everyone has it today | **Applied 2026-09-24:** new `abandoned_cart` feature, granted to Pro, developer and Enterprise (not trial). Every tenant that existed at the migration keeps it through an override. Automatic sends, the two manual recovery routes, the agent tool and turning the WhatsApp toggle on all check it |
 | D6 | The `beta` plan | **Applied:** seeded as trial, which keeps today's behaviour. Map it to a real plan when the beta ends |
 
 ---

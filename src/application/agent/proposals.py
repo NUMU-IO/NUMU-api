@@ -400,6 +400,9 @@ async def _apply_send_cart_recovery(
     session, *, store_id: UUID, staff_id: UUID, params: dict
 ) -> dict:
     """Send the recovery email + stamp the checkout (mirrors the dashboard route)."""
+    tenant = await tenant_for_store(session, store_id)
+    if tenant is not None:
+        await EntitlementService(session).require(tenant, "abandoned_cart")
     from datetime import UTC, datetime
 
     from src.core.interfaces.services.email_service import EmailMessage
