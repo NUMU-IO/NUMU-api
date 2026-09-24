@@ -19,7 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.application.services.carrier_credentials import load_credentials
 from src.application.services.carrier_registry import get_spec
 from src.application.services.funnel_emit_service import emit_order_delivered
-from src.application.services.shipment_status_sync import apply_carrier_status
+from src.application.services.shipment_status_sync import (
+    announce_order_transition,
+    apply_carrier_status,
+)
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.core.logging import get_logger
@@ -187,6 +190,7 @@ async def jt_callback(
             status=status,
         )
 
+    old_status = order.status if order is not None else None
     if order is not None:
         try:
             await _sync_order(
@@ -201,6 +205,7 @@ async def jt_callback(
             )
         except Exception as e:
             log.error("jt_webhook_order_sync_failed", error=str(e))
+        await announce_order_transition(session, order, old_status, reason=reason)
 
     await session.commit()
     log.info("jt_webhook_processed", status=status.value)

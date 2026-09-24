@@ -21,6 +21,7 @@ from typing import Any
 
 from src.application.dto.order import UpdateOrderStatusDTO
 from src.application.services.carrier_resolver import map_carrier_status
+from src.application.services.cod_autopilot_service import _build_status_use_case
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.core.logging import get_logger
@@ -104,6 +105,44 @@ async def apply_carrier_status(
     return new_status
 
 
+def _status_use_case(session: Any) -> Any:
+    return _build_status_use_case(session)
+
+
+async def announce_order_transition(
+    session: Any, order: Any, old_status: Any, *, reason: str
+) -> bool:
+    """Run the dashboard's post-transition path for a carrier-driven change.
+
+    Carrier webhooks keep their own status mapping and move the order
+    themselves; this hands the saved change to
+    ``UpdateOrderStatusUseCase.after_status_change`` so it fires
+    ``OrderStatusChangedEvent`` (merchant webhooks, notifications,
+    WhatsApp, CAPI triggers), network events and the Autopilot supersede,
+    once. Returns False, doing nothing, when the status did not move.
+    Fail-open: never breaks the webhook.
+    """
+    if order is None or old_status is None or order.status == old_status:
+        return False
+    try:
+        use_case = _status_use_case(session)
+        store = await use_case.store_repository.get_by_id(order.store_id)
+        if store is None:
+            return False
+        await use_case.after_status_change(
+            order,
+            getattr(old_status, "value", old_status),
+            order.status,
+            store,
+            reason,
+            "carrier_webhook",
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — the carrier update already stands
+        logger.warning("carrier_order_transition_announce_failed", error=str(exc))
+        return False
+
+
 _ON_THE_WAY = (
     ShipmentStatus.PICKED_UP,
     ShipmentStatus.IN_TRANSIT,
@@ -144,11 +183,7 @@ async def sync_order_status(
     """Move the order through ``UpdateOrderStatusUseCase``, the choke point
     that publishes ``OrderStatusChangedEvent`` (notifications, webhooks,
     COD Autopilot) and records network and funnel outcomes."""
-    from src.application.services.cod_autopilot_service import (
-        _build_status_use_case,
-    )
-
-    use_case = _build_status_use_case(session)
+    use_case = _status_use_case(session)
     order = await use_case.order_repository.get_by_id(order_id)
     if order is None:
         return []
@@ -163,4 +198,9 @@ async def sync_order_status(
     return steps
 
 
-__all__ = ["apply_carrier_status", "order_steps", "sync_order_status"]
+__all__ = [
+    "announce_order_transition",
+    "apply_carrier_status",
+    "order_steps",
+    "sync_order_status",
+]
