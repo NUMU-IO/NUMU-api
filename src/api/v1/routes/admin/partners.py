@@ -24,12 +24,20 @@ from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.partners import DEV_PLAN, PartnerAccountOut
-from src.application.services.app_billing import partner_statement, statement_csv
+from src.application.services.app_billing import (
+    PARTNER_SHARE_BPS,
+    coupon_out,
+    partner_statement,
+    redemption_count,
+    statement_csv,
+)
 from src.application.services.audit_service import AuditService
 from src.application.services.partner_program import (
     program_enabled,
     set_program_enabled,
 )
+from src.infrastructure.database.models.public.app import AppModel
+from src.infrastructure.database.models.public.app_billing import AppCouponModel
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
 )
@@ -84,6 +92,10 @@ class SuspensionRequest(BaseModel):
 
 class ProgramState(BaseModel):
     enabled: bool
+
+
+class ShareRequest(BaseModel):
+    share_bps: int | None = Field(default=None, ge=0, le=10_000)
 
 
 async def _load(db: AsyncSession, partner_id: UUID) -> PartnerAccountModel:
@@ -329,6 +341,9 @@ def _entry_out(e, apps: dict | None = None) -> dict:
         "amount_cents": e.amount_cents,
         "gross_cents": e.gross_cents,
         "platform_fee_cents": e.platform_fee_cents,
+        "share_bps": e.share_bps,
+        "discount_cents": e.discount_cents,
+        "vat_cents": e.vat_cents,
         "currency": e.currency,
         "app_id": str(e.app_id) if e.app_id else None,
         "app_name": app.get("name"),
@@ -505,4 +520,54 @@ async def admin_statement_csv(
                 f'attachment; filename="partner-{partner_id}-{month}.csv"'
             )
         },
+    )
+
+
+# ─── Revenue share and coupons ────────────────────────────────────
+
+
+@router.put(
+    "/{partner_id}/share",
+    response_model=SuccessResponse[AdminPartner],
+    dependencies=_STEP_UP,
+)
+async def set_share(
+    partner_id: UUID,
+    body: ShareRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """The partner's share of each app sale in basis points (8000 = 80%);
+    null returns them to the default. Applies to charges from now on; every
+    sale records the share it was booked with."""
+    a = await _load(db, partner_id)
+    old = a.share_bps
+    a.share_bps = body.share_bps
+    await AuditService(db).log(
+        event_type="admin.partner_program",
+        action="partner_share_changed",
+        resource_type="partner_account",
+        resource_id=str(a.id),
+        user_id=admin_id,
+        old_value={"share_bps": old},
+        new_value={"share_bps": body.share_bps, "default_bps": PARTNER_SHARE_BPS},
+    )
+    await db.flush()
+    return SuccessResponse(data=await _admin_view(db, a))
+
+
+@router.get("/{partner_id}/coupons", response_model=SuccessResponse[list[dict]])
+async def partner_coupons(
+    partner_id: UUID, db: Annotated[AsyncSession, Depends(get_db)]
+):
+    """The partner's app coupons and how many stores redeemed each."""
+    await _load(db, partner_id)
+    rows = await db.execute(
+        select(AppCouponModel, AppModel.name, redemption_count())
+        .join(AppModel, AppModel.id == AppCouponModel.app_id)
+        .where(AppCouponModel.partner_id == partner_id)
+        .order_by(AppCouponModel.created_at.desc())
+    )
+    return SuccessResponse(
+        data=[coupon_out(c, name, used or 0) for c, name, used in rows]
     )

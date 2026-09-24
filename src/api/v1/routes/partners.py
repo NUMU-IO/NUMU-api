@@ -74,6 +74,7 @@ class PartnerAccountOut(BaseModel):
     review_notes: dict | None
     reviewed_at: datetime | None
     created_at: datetime
+    share_bps: int | None = None
 
 
 class PartnerInvitationOut(BaseModel):
@@ -488,6 +489,9 @@ async def earnings(
                     "amount_cents": e.amount_cents,
                     "gross_cents": e.gross_cents,
                     "platform_fee_cents": e.platform_fee_cents,
+                    "share_bps": e.share_bps,
+                    "discount_cents": e.discount_cents,
+                    "vat_cents": e.vat_cents,
                     "app_id": str(e.app_id) if e.app_id else None,
                     "app_name": apps.get(e.app_id, {}).get("name"),
                     "app_slug": apps.get(e.app_id, {}).get("slug"),
@@ -523,9 +527,10 @@ async def statement(
     user_id: Annotated[UUID, Depends(require_approved_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """One month (``YYYY-MM``, UTC) of your ledger: sales (gross, NUMU's 20%
-    fee, your 80%), refunds, adjustments, payouts, and the opening and
-    closing balance NUMU owes you."""
+    """One month (``YYYY-MM``, UTC) of your ledger: sales (gross, NUMU's fee,
+    your share, at the share each sale was booked with), refunds,
+    adjustments, payouts, your coupon discounts, NUMU's VAT on its fee
+    (informational), and the opening and closing balance NUMU owes you."""
     return SuccessResponse(data=await _my_statement(db, user_id, month))
 
 

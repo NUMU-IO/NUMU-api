@@ -2,6 +2,7 @@
 
 GET  /api/v1/wallet
 GET  /api/v1/wallet/transactions
+GET  /api/v1/wallet/app-invoices/{invoice_id}
 POST /api/v1/wallet/topups
 GET  /api/v1/wallet/topups/{topup_id}
 POST /api/v1/wallet/topups/{topup_id}/proof
@@ -12,12 +13,14 @@ paths are declared before ``/wallet/topups/{topup_id}`` (repo convention:
 static-above-dynamic).
 """
 
+import html
 import logging
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +44,11 @@ from src.core.entities.wallet import (
     WalletStatus,
 )
 from src.core.interfaces.services.storage_service import IStorageService
+from src.infrastructure.database.models.public.app import AppModel
+from src.infrastructure.database.models.public.app_billing import AppFeeInvoiceModel
+from src.infrastructure.database.models.public.platform_config import (
+    PlatformConfigModel,
+)
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.wallet import (
     WalletTopupIntentModel,
@@ -87,6 +95,8 @@ class WalletTransactionResponse(BaseModel):
     order_id: str | None
     note: str | None
     created_at: datetime
+    invoice_id: str | None = None
+    invoice_number: str | None = None
 
 
 class CreateTopupRequest(BaseModel):
@@ -233,6 +243,18 @@ async def list_wallet_transactions(
         .scalars()
         .all()
     )
+    invoices = {
+        i.wallet_transaction_id: i
+        for i in (
+            await db.execute(
+                select(AppFeeInvoiceModel).where(
+                    AppFeeInvoiceModel.wallet_transaction_id.in_([t.id for t in rows])
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
     return SuccessResponse(
         data=[
             WalletTransactionResponse(
@@ -244,9 +266,118 @@ async def list_wallet_transactions(
                 order_id=str(t.order_id) if t.order_id else None,
                 note=t.note,
                 created_at=t.created_at,
+                invoice_id=str(invoices[t.id].id) if t.id in invoices else None,
+                invoice_number=invoices[t.id].number if t.id in invoices else None,
             )
             for t in rows
         ]
+    )
+
+
+TAX_IDENTITY_KEY = "numu_tax_identity"
+
+
+def _money(cents: int) -> str:
+    return f"{cents / 100:,.2f}"
+
+
+def fee_invoice_html(
+    invoice: AppFeeInvoiceModel,
+    identity: dict,
+    buyer: str,
+    app_name: str | None,
+    original_number: str | None = None,
+) -> str:
+    e = html.escape
+    tax_id = identity.get("tax_id") or ""
+    credit = invoice.kind == "credit_note"
+    if credit:
+        title = "إشعار دائن / Credit note"
+    elif tax_id:
+        title = "فاتورة ضريبية / Tax invoice"
+    else:
+        title = "إيصال / Receipt"
+    vat_pct = f"{invoice.vat_bps / 100:g}%"
+    partner = invoice.list_price_cents - invoice.discount_cents - invoice.fee_cents
+    rows = [
+        ("سعر التطبيق / App price", invoice.list_price_cents),
+        ("خصم الكوبون / Coupon discount", -invoice.discount_cents),
+        (
+            "محصل لصالح مطور التطبيق / Collected for the app developer",
+            partner,
+        ),
+        ("رسوم نُمو / NUMU service fee", invoice.fee_cents),
+        (
+            f"ضريبة القيمة المضافة {vat_pct} على رسوم نُمو / VAT {vat_pct} on NUMU fee",
+            invoice.vat_cents,
+        ),
+        ("الإجمالي المخصوم من المحفظة / Total charged to wallet", invoice.total_cents),
+    ]
+    body = "".join(
+        f"<tr><td>{e(label)}</td><td class=n>{_money(v)} {e(invoice.currency)}</td></tr>"
+        for label, v in rows
+        if v
+    )
+    seller = e(identity.get("legal_name") or "NUMU")
+    return f"""<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<title>{e(invoice.number)}</title>
+<style>body{{font-family:system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#111;background:#fff}}
+table{{width:100%;border-collapse:collapse}}td{{padding:8px;border-bottom:1px solid #ddd}}
+.n{{text-align:left;direction:ltr;white-space:nowrap}}small{{color:#555}}</style></head><body>
+<h1>{e(title)}</h1>
+<p><b>{e(invoice.number)}</b> &middot; <span dir="ltr">{invoice.created_at:%Y-%m-%d}</span>{f" &middot; عن الفاتورة / For invoice {e(original_number)}" if original_number else ""}</p>
+<p>البائع / Seller: {seller}{f" &middot; رقم التسجيل الضريبي / Tax ID: <span dir=ltr>{e(tax_id)}</span>" if tax_id else ""}<br>
+{e(identity.get("address") or "")}</p>
+<p>العميل / Customer: {e(buyer)}</p>
+<p>{e(app_name or "")} &middot; {e(invoice.description)}</p>
+<table>{body}</table>
+<p><small>ضريبة القيمة المضافة مستحقة على رسوم نُمو فقط. حصة مطور التطبيق خارج نطاق هذه الفاتورة.
+/ VAT applies to NUMU's fee only; the app developer's share is outside this document.</small></p>
+</body></html>"""
+
+
+@router.get(
+    "/wallet/app-invoices/{invoice_id}",
+    response_class=HTMLResponse,
+    summary="NUMU's invoice or credit note for an app charge (printable HTML)",
+    operation_id="get_wallet_app_invoice",
+)
+async def get_app_invoice(
+    invoice_id: UUID,
+    http_request: Request,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Seller details come from the ``numu_tax_identity`` platform_config row
+    (``legal_name``, ``tax_id``, ``address``). Without a ``tax_id`` it is a
+    receipt, not a tax invoice, the same honesty gate as order invoices. Not
+    submitted to ETA."""
+    tenant = await _resolve_tenant(http_request, db, user_id)
+    invoice = await db.get(AppFeeInvoiceModel, invoice_id)
+    if invoice is None or invoice.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    identity = (
+        await db.scalar(
+            select(PlatformConfigModel.value).where(
+                PlatformConfigModel.key == TAX_IDENTITY_KEY
+            )
+        )
+        or {}
+    )
+    app = await db.get(AppModel, invoice.app_id) if invoice.app_id else None
+    original = (
+        await db.get(AppFeeInvoiceModel, invoice.original_id)
+        if invoice.original_id
+        else None
+    )
+    return HTMLResponse(
+        fee_invoice_html(
+            invoice,
+            identity,
+            tenant.name,
+            app.name if app else None,
+            original.number if original else None,
+        )
     )
 
 

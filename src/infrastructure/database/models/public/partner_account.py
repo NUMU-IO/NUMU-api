@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     UniqueConstraint,
 )
@@ -76,6 +77,7 @@ class PartnerAccountModel(Base, UUIDMixin, TimestampMixin):
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    share_bps: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class PartnerMemberModel(Base, UUIDMixin, TimestampMixin):
