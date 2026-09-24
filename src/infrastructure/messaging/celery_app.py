@@ -4,7 +4,7 @@ import logging
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import after_setup_logger, after_setup_task_logger
+from celery.signals import after_setup_logger, after_setup_task_logger, worker_init
 from kombu import Queue
 
 from src.config import settings
@@ -703,3 +703,12 @@ def _load_all_models() -> None:
 
 
 _load_all_models()
+
+
+@worker_init.connect
+def _wire_event_bus(**_kwargs) -> None:
+    """Tasks write customers, refunds, shipments and stock too; their
+    webhooks need the bus wired before the first task runs."""
+    from src.infrastructure.events.setup import create_event_bus
+
+    create_event_bus()

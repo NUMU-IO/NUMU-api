@@ -100,6 +100,14 @@ _READONLY_EXTRA = {
     "PromotionEventDailyModel",  # analytics rollups
     "PromotionDismissalModel",  # analytics
     "PromotionDisplayModel",  # analytics
+    # Entitlements: every change goes through /admin/entitlements, which
+    # audits it and invalidates the cached answers; a raw edit would do neither.
+    "FeatureModel",
+    "PlanEntitlementModel",
+    "EntitlementOverrideModel",
+    "FeatureFlagModel",
+    "FeatureFlagTargetModel",
+    "UsageCounterModel",
 }
 # Models that look like logs but are actually editable config.
 _EDITABLE_OVERRIDE = {"WebhookSubscriptionModel"}

@@ -50,6 +50,7 @@ class ShipmentLabel:
     carrier: str
     service: str
     carrier_shipment_id: str | None = None
+    tracking_url: str | None = None
 
 
 def parse_carrier_timestamp(value: object) -> datetime:

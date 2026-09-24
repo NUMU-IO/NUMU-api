@@ -8,7 +8,7 @@ AST-based security scan, R2 upload) and writes the result into the
 Lifecycle for a marketplace version:
 
     pending_build -> building -> pending_review -> (approved -> published)
-                                                or (rejected)
+                                                or (changes_requested | rejected)
 
 A failure in any stage transitions the version to `build_failed` and
 captures the error in `build_log`.
@@ -33,6 +33,7 @@ from typing import Any, TypeVar
 from uuid import UUID
 
 from src.application.services import admin_notifications
+from src.application.services.marketplace_service import email_theme_status
 from src.core.entities.marketplace_theme import MarketplaceVersionStatus
 from src.core.interfaces.services.storage_service import StorageBucket
 from src.core.theme_contract import validate_navigability_source
@@ -244,6 +245,20 @@ async def _theme_name(theme_id: UUID) -> str:
         return "A theme"
 
 
+async def _email_developer(version, status: str, notes: str | None = None) -> None:
+    """Never raises: an email outage must not turn a finished build into a
+    failed one."""
+    from src.infrastructure.database.connection import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await email_theme_status(
+                session, version.theme_id, version.version_string, status, notes
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("marketplace_status_email_failed", exc_info=True)
+
+
 async def _load_version(version_id: UUID):
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.repositories.marketplace_repository import (
@@ -271,6 +286,7 @@ def build_marketplace_theme(self, version_id: str) -> dict:
     """
     vid = UUID(version_id)
     work_dir: Path | None = None
+    version = None
 
     try:
         version = _run_async(_load_version(vid))
@@ -668,6 +684,9 @@ def build_marketplace_theme(self, version_id: str) -> dict:
             theme_name=_run_async(_theme_name(version.theme_id)),
             version=version.version_string,
         )
+        _run_async(
+            _email_developer(version, MarketplaceVersionStatus.PENDING_REVIEW.value)
+        )
 
         logger.info(
             "marketplace_build_succeeded",
@@ -699,6 +718,14 @@ def build_marketplace_theme(self, version_id: str) -> dict:
                 build_log=str(exc)[:5000],
             )
         )
+        if version is not None:
+            _run_async(
+                _email_developer(
+                    version,
+                    MarketplaceVersionStatus.BUILD_FAILED.value,
+                    str(exc)[:2000],
+                )
+            )
         return {
             "version_id": version_id,
             "status": MarketplaceVersionStatus.BUILD_FAILED.value,

@@ -22,8 +22,11 @@ pytest_plugins = [
 ]
 
 import asyncio
+import importlib.util
+import json
 from collections.abc import AsyncGenerator, Generator
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -38,6 +41,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.api.dependencies import get_db
+from src.application.services import entitlement_service
 from src.core.entities.category import Category
 from src.core.entities.customer import Customer
 from src.core.entities.order import (
@@ -56,11 +60,98 @@ from src.core.value_objects.email import Email
 from src.core.value_objects.money import Currency, Money
 from src.core.value_objects.phone import PhoneNumber
 from src.infrastructure.database.connection import Base
+from src.infrastructure.database.models.public.entitlements import (
+    FeatureModel,
+    PlanEntitlementModel,
+)
 from src.infrastructure.external_services.token_service import TokenService
 from src.main import app
 
 # Test database URL (use SQLite for tests)
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+# The entitlement catalog is data, not code: tests seed it from the migration
+# itself, so they check the rules prod runs, not a copy that can drift.
+def _migration(filename: str):
+    spec = importlib.util.spec_from_file_location(
+        filename, Path(__file__).resolve().parents[1] / "alembic/versions" / filename
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_entitlements_migration = _migration("20260925_entitlements.py")
+_abandoned_cart_migration = _migration("20260925_ent_abandoned_cart.py")
+_FEATURE_COLUMNS = (
+    "key",
+    "name",
+    "name_ar",
+    "category",
+    "kind",
+    "default_value",
+    "usage",
+    "period",
+    "enforcement",
+)
+
+
+def _seed_entitlements(conn) -> None:
+    conn.execute(
+        FeatureModel.__table__.insert(),
+        [
+            dict(zip(_FEATURE_COLUMNS, row, strict=True)) | {"is_enabled": True}
+            for row in [
+                *_entitlements_migration.FEATURES,
+                _abandoned_cart_migration.FEATURE,
+            ]
+        ],
+    )
+    conn.execute(
+        PlanEntitlementModel.__table__.insert(),
+        [
+            {"plan_key": plan, "feature_key": feature, "value": value}
+            for plan, feature, value in _entitlements_migration.seed_rows({})
+        ]
+        + [
+            {
+                "plan_key": plan,
+                "feature_key": "abandoned_cart",
+                "value": plan in _abandoned_cart_migration.PRO_AND_UP,
+            }
+            for plan in _entitlements_migration.PLANS
+        ],
+    )
+
+
+class _MemoryCache:
+    """EntitlementService's Redis, per test: a JSON round trip like the real
+    one, and nothing shared, so a fixed tenant id in one test can never read
+    another test's snapshot."""
+
+    def __init__(self) -> None:
+        self.data: dict[str, str] = {}
+
+    async def get(self, key: str) -> Any:
+        raw = self.data.get(key)
+        return None if raw is None else json.loads(raw)
+
+    async def get_many(self, keys: list[str]) -> dict[str, Any]:
+        return {k: json.loads(self.data[k]) for k in keys if k in self.data}
+
+    async def set(self, key: str, value: Any, expire: int | None = None) -> bool:
+        self.data[key] = json.dumps(value)
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _entitlements_cache(monkeypatch) -> _MemoryCache:
+    cache = _MemoryCache()
+    monkeypatch.setattr(
+        entitlement_service, "RedisCacheService", lambda *_a, **_k: cache
+    )
+    return cache
 
 
 # =============================================================================
@@ -167,6 +258,7 @@ async def test_engine():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_seed_entitlements)
 
     yield engine
 

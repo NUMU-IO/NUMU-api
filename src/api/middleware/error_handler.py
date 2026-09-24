@@ -32,6 +32,9 @@ from src.core.exceptions import (
     DomainException,
     EntityNotFoundError,
     ExternalServiceError,
+    FeatureDisabledError,
+    FeatureNotAvailableError,
+    FeatureNotReleasedError,
     InvalidTokenError,
     PaymentError,
     PlanLimitExceededError,
@@ -272,12 +275,55 @@ def setup_exception_handlers(app: FastAPI) -> None:
                 str(exc),
                 {
                     "resource": exc.resource,
+                    "feature": exc.feature,
                     "limit": exc.limit,
                     "current": exc.current,
                     "plan": exc.plan,
+                    "resets_at": exc.resets_at,
+                    "upgrade_required": bool(exc.available_via),
+                    "available_via": exc.available_via,
                     "upgrade_to": exc.upgrade_to,
                 },
             ),
+        )
+
+    @app.exception_handler(FeatureNotAvailableError)
+    async def feature_not_available_handler(
+        request: Request, exc: FeatureNotAvailableError
+    ):
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content=_error_body(
+                "FEATURE_NOT_AVAILABLE",
+                str(exc),
+                {
+                    "feature": exc.feature,
+                    "reason": exc.reason,
+                    "upgrade_required": exc.upgrade_required,
+                    "available_via": exc.available_via,
+                },
+            ),
+        )
+
+    @app.exception_handler(FeatureDisabledError)
+    async def feature_disabled_handler(request: Request, exc: FeatureDisabledError):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            headers={"Retry-After": "300"},
+            content=_error_body(
+                "FEATURE_TEMPORARILY_DISABLED",
+                str(exc),
+                {"feature": exc.feature, "retryable": True},
+            ),
+        )
+
+    @app.exception_handler(FeatureNotReleasedError)
+    async def feature_not_released_handler(
+        request: Request, exc: FeatureNotReleasedError
+    ):
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content=_error_body("FEATURE_NOT_RELEASED", "Not found"),
         )
 
     @app.exception_handler(PaymentError)

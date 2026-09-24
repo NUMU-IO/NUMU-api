@@ -3,12 +3,30 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from src.application.services.app_manifest import _https
 from src.application.services.carrier_resolver import (
     DEFAULT_CARRIER,
     SUPPORTED_CARRIERS,
 )
+from src.core.entities.shipment import ShipmentStatus
+
+
+class CarrierEventRequest(BaseModel):
+    """A shipping app reports on a shipment it created (app token only)."""
+
+    tracking_number: str = Field(min_length=1, max_length=100)
+    status: ShipmentStatus | None = None
+    description: str = Field(default="", max_length=500)
+    label_url: str | None = None
+    tracking_url: str | None = None
+    cod_collected: bool = False
+
+    @field_validator("label_url", "tracking_url")
+    @classmethod
+    def _https_only(cls, v: str | None) -> str | None:
+        return _https(v) if v else None
 
 
 class CreateShipmentRequest(BaseModel):

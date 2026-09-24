@@ -19,8 +19,10 @@ See ``docs/Plans/Shipping/SHIPPING-UNIFIED-LAYER.md`` § P1.5.
 
 from typing import Any
 
+from src.application.dto.order import UpdateOrderStatusDTO
 from src.application.services.carrier_resolver import map_carrier_status
 from src.application.services.cod_autopilot_service import _build_status_use_case
+from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.core.logging import get_logger
 
@@ -141,4 +143,64 @@ async def announce_order_transition(
         return False
 
 
-__all__ = ["announce_order_transition", "apply_carrier_status"]
+_ON_THE_WAY = (
+    ShipmentStatus.PICKED_UP,
+    ShipmentStatus.IN_TRANSIT,
+    ShipmentStatus.OUT_FOR_DELIVERY,
+)
+
+
+def order_steps(order: Any, status: ShipmentStatus) -> list[OrderStatus]:
+    """The order transitions a shipment status implies, in order."""
+    current = order.status
+    to_shipped = {
+        OrderStatus.CONFIRMED: [OrderStatus.PROCESSING, OrderStatus.SHIPPED],
+        OrderStatus.PROCESSING: [OrderStatus.SHIPPED],
+    }.get(current, [])
+    if status in _ON_THE_WAY:
+        return to_shipped
+    if status is ShipmentStatus.DELIVERED and (
+        to_shipped or current == OrderStatus.SHIPPED
+    ):
+        return [*to_shipped, OrderStatus.DELIVERED]
+    if status is ShipmentStatus.RETURNED and current == OrderStatus.SHIPPED:
+        return [OrderStatus.RETURNED]
+    if status in (ShipmentStatus.RETURNED, ShipmentStatus.CANCELLED) and (
+        order.can_be_cancelled
+    ):
+        return [OrderStatus.CANCELLED]
+    return []
+
+
+async def sync_order_status(
+    session: Any,
+    *,
+    order_id: Any,
+    store: Any,
+    status: ShipmentStatus,
+    reason: str,
+) -> list[OrderStatus]:
+    """Move the order through ``UpdateOrderStatusUseCase``, the choke point
+    that publishes ``OrderStatusChangedEvent`` (notifications, webhooks,
+    COD Autopilot) and records network and funnel outcomes."""
+    use_case = _status_use_case(session)
+    order = await use_case.order_repository.get_by_id(order_id)
+    if order is None:
+        return []
+    steps = order_steps(order, status)
+    for step in steps:
+        await use_case.execute(
+            order_id,
+            UpdateOrderStatusDTO(status=step.value, reason=reason, source="carrier"),
+            store.id,
+            store.owner_id,
+        )
+    return steps
+
+
+__all__ = [
+    "announce_order_transition",
+    "apply_carrier_status",
+    "order_steps",
+    "sync_order_status",
+]
