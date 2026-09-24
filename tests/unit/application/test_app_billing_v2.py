@@ -108,7 +108,7 @@ async def test_the_first_subscription_is_a_free_trial_then_renewal_charges(
     warned = await billing.trial_ending_notices(
         test_session, now=NOW + timedelta(days=12)
     )
-    assert [n["kind"] for n in warned] == ["app_trial_ending"]
+    assert [n["kind"] for n in warned] == ["app.trial_ending"]
 
     stats = await billing.renew_due(
         test_session,
@@ -121,7 +121,7 @@ async def test_the_first_subscription_is_a_free_trial_then_renewal_charges(
     assert not sub.is_trial
     assert await _balance(test_session, tenant.id) == 0
     assert await _ledger_sum(test_session, partner.id) == 7_920
-    assert [n["kind"] for n in notices] == ["app_renewal_charged"]
+    assert [n["kind"] for n in notices] == ["app.renewal_charged"]
 
 
 @pytest.mark.asyncio
@@ -165,7 +165,7 @@ async def test_a_trial_that_runs_out_without_funds_goes_past_due(test_session):
         notices=notices,
     )
     assert stats["past_due"] == 1
-    assert notices[0]["kind"] == "app_renewal_failed"
+    assert notices[0]["kind"] == "app.renewal_failed"
     assert notices[0]["link"] == "/wallet" and notices[0]["important"]
 
 
@@ -198,7 +198,7 @@ async def test_usage_is_charged_now_and_stops_at_the_approved_cap(test_session):
     with pytest.raises(billing.UsageError) as exc:
         await _usage(test_session, install, app, "b", 500, notices)
     assert exc.value.code == "usage_cap_exceeded"
-    assert [n["kind"] for n in notices] == ["app_usage_cap_reached"]
+    assert [n["kind"] for n in notices] == ["app.usage_cap_reached"]
     await _usage(test_session, install, app, "c", 400)
     await test_session.commit()
 

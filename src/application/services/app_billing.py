@@ -364,7 +364,7 @@ def started_notice(sub: AppSubscriptionModel, app: AppModel) -> dict[str, Any]:
     return notice(
         sub,
         app,
-        "app_trial_started" if sub.is_trial else "app_subscription_started",
+        "app.trial_started" if sub.is_trial else "app.subscription_started",
         f"app-started:{sub.id}:{start}",
         amount_cents=sub.price_cents,
         period_end=_aware(sub.current_period_end).isoformat(),
@@ -451,7 +451,7 @@ async def renew_due(
                     notice(
                         sub,
                         app,
-                        "app_renewal_failed",
+                        "app.renewal_failed",
                         f"app-past-due:{sub.id}:{start.isoformat()}",
                         important=True,
                         link="/wallet",
@@ -470,7 +470,7 @@ async def renew_due(
                     notice(
                         sub,
                         app,
-                        "app_renewal_charged",
+                        "app.renewal_charged",
                         f"app-renewal:{key}",
                         amount_cents=sub.price_cents,
                         period_end=_aware(sub.current_period_end).isoformat(),
@@ -502,7 +502,7 @@ async def trial_ending_notices(
         notice(
             sub,
             app,
-            "app_trial_ending",
+            "app.trial_ending",
             f"app-trial-ending:{sub.id}",
             important=True,
             amount_cents=sub.price_cents,
@@ -577,10 +577,10 @@ async def record_usage(
     cap_notice = notice(
         sub,
         app,
-        "app_usage_cap_reached",
+        "app.usage_cap_reached",
         f"app-usage-cap:{sub.id}:{_aware(sub.current_period_start).isoformat()}",
         important=True,
-        cap_cents=sub.usage_cap_cents,
+        amount_cents=sub.usage_cap_cents,
     )
     if used + amount > sub.usage_cap_cents:
         if notices is not None:
