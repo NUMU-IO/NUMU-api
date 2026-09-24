@@ -43,6 +43,7 @@ from src.infrastructure.database.models.public.onboarding import StoreOnboarding
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
     PartnerMemberModel,
+    PartnerReferralModel,
 )
 from src.infrastructure.database.models.public.personal_access_token import (
     PersonalAccessTokenModel,
@@ -89,6 +90,7 @@ __all__ = [
     "PartnerLedgerEntryModel",
     "PartnerAccountModel",
     "PartnerMemberModel",
+    "PartnerReferralModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",
     "FeedbackModel",
