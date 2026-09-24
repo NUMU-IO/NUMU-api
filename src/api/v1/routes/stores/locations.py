@@ -21,12 +21,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.repositories import get_store_repository
 from src.api.responses import SuccessResponse
+from src.application.services.entitlement_service import EntitlementService
 from src.infrastructure.database.connection import AsyncSessionLocal
+from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.tenant.location import LocationModel
 from src.infrastructure.repositories import StoreRepository
 
@@ -91,6 +93,22 @@ async def list_locations(store_id: UUID):
     )
 
 
+async def _require_multi_warehouse(
+    session, store_id: UUID, tenant_id: UUID, activating: UUID | None = None
+) -> None:
+    """A second active location is multi-warehouse, which the plan must
+    include. Editing a location that is already active never asks."""
+    others = select(func.count()).where(
+        LocationModel.store_id == store_id, LocationModel.is_active.is_(True)
+    )
+    if activating is not None:
+        others = others.where(LocationModel.id != activating)
+    if await session.scalar(others):
+        tenant = await session.get(TenantModel, tenant_id)
+        if tenant is not None:
+            await EntitlementService(session).require(tenant, "multi_warehouse")
+
+
 @router.post(
     "",
     response_model=SuccessResponse[LocationResponse],
@@ -109,6 +127,8 @@ async def create_location(
             status_code=status.HTTP_404_NOT_FOUND, detail="Store not found"
         )
     async with AsyncSessionLocal() as session:
+        if body.is_active:
+            await _require_multi_warehouse(session, store_id, store.tenant_id)
         row = LocationModel(
             tenant_id=store.tenant_id,
             store_id=store_id,
@@ -170,6 +190,10 @@ async def update_location(store_id: UUID, location_id: UUID, body: LocationPaylo
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Location not found"
+            )
+        if body.is_active and not row.is_active:
+            await _require_multi_warehouse(
+                session, store_id, row.tenant_id, activating=row.id
             )
         row.name = body.name
         row.name_ar = body.name_ar

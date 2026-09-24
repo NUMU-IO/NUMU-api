@@ -20,6 +20,7 @@ only ever see *published* apps in the catalog.
 from __future__ import annotations
 
 from typing import Annotated, Any
+from urllib.parse import urlencode, urljoin, urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -27,7 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy import false, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.api.dependencies import verify_store_ownership
+from src.api.dependencies import get_current_user_id, verify_store_ownership
 from src.api.dependencies.feature_flags import _read_feature_flags, is_flag_enabled
 from src.api.dependencies.repositories import get_store_repository
 from src.api.responses import SuccessResponse
@@ -91,6 +92,8 @@ class AppListing(BaseModel):
     #: keywords per language.
     video_url: str | None = None
     keywords: dict[str, list[str]] = {}
+    #: Partner App opted in to render inside the hub (``/apps/<slug>/app``).
+    embedded: bool = False
 
 
 def _listing(manifest: dict | None) -> AppListing:
@@ -113,6 +116,7 @@ def _listing(manifest: dict | None) -> AppListing:
         ),
         video_url=m.get("video_url") if isinstance(m.get("video_url"), str) else None,
         keywords=m.get("keywords") if isinstance(m.get("keywords"), dict) else {},
+        embedded=bool((m.get("app") or {}).get("embedded")),
     )
 
 
@@ -234,7 +238,7 @@ def _installation(app: AppModel, install: AppInstallationModel) -> AppInstallati
         listing=_listing(app.manifest),
         app_status=status_value,
         is_live=bool(install.is_enabled)
-        and status_value == AppStatus.PUBLISHED.value
+        and status_value != AppStatus.SUSPENDED.value
         # Mid-consent installs are skipped by the storefront too.
         and (install.status or "active") == "active",
         granted_scopes=list(install.granted_scopes or []),
@@ -288,6 +292,7 @@ async def list_catalog(store_id: UUID):
         stmt = select(AppModel).where(
             AppModel.status == AppStatus.PUBLISHED,
             AppModel.slug.notin_(hidden),
+            AppModel.private_store_id.is_(None),
             or_(AppModel.developer_id.is_(None), partner_listed),
         )
         rows = (await session.execute(stmt)).scalars().all()
@@ -645,6 +650,67 @@ async def open_url(store_id: UUID, slug: str, locale: str = "ar"):
 
     sep = "&" if "?" in app_url else "?"
     return SuccessResponse(data={"url": f"{app_url}{sep}{urlencode(params)}"})
+
+
+@router.post(
+    "/{slug}/session-token",
+    response_model=SuccessResponse[dict[str, str]],
+    summary="Session token for an embedded Partner App",
+    operation_id="app_session_token",
+)
+async def app_session_token(
+    store_id: UUID,
+    slug: str,
+    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    locale: str = "ar",
+):
+    """A 60-second HS256 JWT signed with the app's client secret, and the URL
+    the hub frames (``app_url`` + ``embedded_path`` + ``?session_token``). The
+    hub asks again whenever the framed app posts ``numu:session-token``."""
+    from src.application.services.app_tokens import read_client_secret, session_token
+
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                select(AppModel, AppOAuthClientModel.client_id)
+                .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
+                .join(AppOAuthClientModel, AppOAuthClientModel.app_id == AppModel.id)
+                .where(
+                    AppInstallationModel.store_id == store_id,
+                    AppInstallationModel.is_enabled.is_(True),
+                    AppInstallationModel.status == "active",
+                    AppModel.slug == slug,
+                    AppModel.status == AppStatus.PUBLISHED,
+                )
+            )
+        ).one_or_none()
+        contract = ((row[0].manifest or {}).get("app") or {}) if row else {}
+        if not contract.get("embedded") or not await partner_apps_enabled(session):
+            raise HTTPException(status_code=404, detail="Embedded app not found")
+        app, client_id = row
+        secret = await read_client_secret(session, app.id)
+    if not secret:
+        raise HTTPException(
+            status_code=409, detail="This app must rotate its client secret."
+        )
+    lang = "en" if locale == "en" else "ar"
+    token = session_token(
+        secret, client_id=client_id, user_id=user_id, store_id=store_id, locale=lang
+    )
+    base = urljoin(contract["app_url"], contract.get("embedded_path") or "")
+    query = urlencode({
+        "store_id": str(store_id),
+        "locale": lang,
+        "session_token": token,
+    })
+    parts = urlsplit(contract["app_url"])
+    return SuccessResponse(
+        data={
+            "token": token,
+            "url": f"{base}{'&' if '?' in base else '?'}{query}",
+            "origin": f"{parts.scheme}://{parts.netloc}",
+        }
+    )
 
 
 # ─── Paid apps: the store's subscription (apps plan, Phase 7) ─────

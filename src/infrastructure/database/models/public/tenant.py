@@ -109,6 +109,11 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
         server_default="'{}'::jsonb",
         default=dict,
     )
+    # Cache stamp for EntitlementService. Bumped by EntitlementService.bump_tenant
+    # in the same transaction as any override, add-on or flag-target change.
+    entitlements_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1", default=1
+    )
 
     # Admin flag: mark test/sandbox tenants created via normal signup so
     # they are excluded from all admin dashboard aggregates without

@@ -18,6 +18,9 @@ import src.infrastructure.events.handlers.notification_feed_handler as handler_m
 from src.application.services.notification_feed import emit_notification
 from src.core.entities.order import OrderStatus
 from src.core.events.order_events import OrderCreatedEvent, OrderStatusChangedEvent
+from src.infrastructure.database.models.public.entitlements import (
+    EntitlementOverrideModel,
+)
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.tenant.merchant_notification import (
     MerchantNotificationModel,
@@ -27,6 +30,7 @@ from src.infrastructure.database.models.tenant.store import StoreModel
 from src.infrastructure.repositories.merchant_notification_repository import (
     MerchantNotificationRepository,
 )
+from src.infrastructure.tenancy.repository import TenantRepository
 
 
 @pytest.fixture
@@ -230,13 +234,15 @@ async def test_emit_dedupes_and_honours_muted_categories(test_session):
 # ── handlers ──────────────────────────────────────────────────────────
 
 
-async def _seed_order(session, store: StoreModel) -> OrderModel:
+async def _seed_order(
+    session, store: StoreModel, order_number: str = "ORD-123456"
+) -> OrderModel:
     order = OrderModel(
         id=uuid4(),
         store_id=store.id,
         tenant_id=store.tenant_id,
         customer_id=uuid4(),
-        order_number="ORD-123456",
+        order_number=order_number,
         status=OrderStatus.PENDING,
         line_items=[],
         shipping_address={
@@ -384,3 +390,46 @@ async def test_payment_proof_submitted_is_important(test_session, patched_sessio
     )
     assert row.data["customer_name"] == "Yahia Sherif"
     assert row.data["payment_method"] == "vodafone_cash"
+
+
+async def test_orders_past_the_monthly_limit_notify_once(
+    test_session, patched_sessions
+):
+    store = await _seed_store(test_session)
+    test_session.add(
+        EntitlementOverrideModel(
+            tenant_id=store.tenant_id,
+            feature_key="orders_per_month",
+            value=1,
+            source="testing",
+            reason="a limit of one order",
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+    )
+    await TenantRepository(test_session).bump_entitlements_version(store.tenant_id)
+    await test_session.commit()
+
+    async def order_and_feed(number):
+        order = await _seed_order(test_session, store, number)
+        await handler_mod.handle_order_limit_notice(
+            OrderCreatedEvent(
+                order_id=order.id,
+                order_number=number,
+                store_id=store.id,
+                customer_id=order.customer_id,
+                total=729.0,
+                currency="EGP",
+            )
+        )
+        async with patched_sessions() as s:
+            rows = await s.scalars(
+                select(MerchantNotificationModel).where(
+                    MerchantNotificationModel.store_id == store.id
+                )
+            )
+            return [(r.kind, r.is_important, r.data["limit"]) for r in rows]
+
+    assert await order_and_feed("ORD-000001") == []
+    notice = [("plan.orders_over_limit", True, 1)]
+    assert await order_and_feed("ORD-000002") == notice
+    assert await order_and_feed("ORD-000003") == notice

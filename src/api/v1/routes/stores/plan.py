@@ -1,6 +1,9 @@
 """Plan and usage routes.
 
 URL: /stores/{store_id}/plan
+
+Legacy shapes kept for API callers: limits and switches now come from the
+entitlement catalog, and ``/stores/{store_id}/entitlements`` is the new home.
 """
 
 from typing import Annotated
@@ -12,9 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
-from src.application.services.plan_limit_service import PlanLimitService
-from src.core.entities.plan import PLAN_LIMITS
+from src.application.services.entitlement_service import (
+    EntitlementService,
+    plan_grants,
+)
+from src.core.entities.plan import PLAN_LIMITS, get_plan_features
 from src.core.entities.store import Store
+from src.core.entitlements import UNLIMITED
+from src.infrastructure.database.models.public.tenant import TenantModel
 
 router = APIRouter(prefix="/{store_id}/plan")
 
@@ -31,16 +39,43 @@ async def get_plan_usage(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> SuccessResponse[dict]:
     """Return current resource usage vs plan limits for this store."""
-    tenant_id = store.tenant_id
-    if not tenant_id:
+    tenant = (
+        await session.get(TenantModel, store.tenant_id) if store.tenant_id else None
+    )
+    if tenant is None:
         return SuccessResponse(
             data={"plan": "free", "error": "tenant not linked"},
             message="Usage unavailable",
         )
 
-    service = PlanLimitService(session)
-    usage = await service.get_usage_summary(store_id, tenant_id)
-    return SuccessResponse(data=usage, message="Usage retrieved")
+    ents = EntitlementService(session)
+    legacy = get_plan_features(tenant.plan)
+
+    async def meter(key: str) -> dict:
+        usage = await ents.usage(tenant, key)
+        unlimited = usage["limit"] == UNLIMITED
+        return {
+            "used": usage["used"],
+            "limit": -1 if unlimited else usage["limit"],
+            "unlimited": unlimited,
+        }
+
+    return SuccessResponse(
+        data={
+            "plan": tenant.plan,
+            "display_name": legacy.display_name,
+            "products": await meter("products"),
+            "orders_this_month": await meter("orders_per_month"),
+            "features": {
+                "webhooks": await ents.has(tenant, "api_access"),
+                "custom_domain": await ents.has(tenant, "custom_domain"),
+                "api_access": await ents.has(tenant, "api_access"),
+                "analytics": legacy.analytics_enabled,
+                "discount_codes": await ents.has(tenant, "discount_codes"),
+            },
+        },
+        message="Usage retrieved",
+    )
 
 
 @router.get(
@@ -49,31 +84,34 @@ async def get_plan_usage(
     summary="Get all plan limits",
     operation_id="get_all_plan_limits",
 )
-async def get_all_plan_limits() -> SuccessResponse[dict]:
+async def get_all_plan_limits(
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> SuccessResponse[dict]:
     """Return the feature matrix for all available plans."""
+    grants = await plan_grants(session)
     matrix = {}
     for plan_name, features in PLAN_LIMITS.items():
         if plan_name == "developer":
             continue  # a partner's dev store, never a plan a merchant picks
+        plan = grants.get(plan_name, {})
+
+        def cap(key: str, plan: dict = plan) -> int | None:
+            value = plan.get(key)
+            return None if value == UNLIMITED else value
+
         matrix[plan_name] = {
             "display_name": features.display_name,
-            "max_products": features.max_products
-            if features.max_products != -1
-            else None,
-            "max_orders_per_month": features.max_orders_per_month
-            if features.max_orders_per_month != -1
-            else None,
-            "max_stores": features.max_stores if features.max_stores != -1 else None,
-            "max_staff_members": features.max_staff_members
-            if features.max_staff_members != -1
-            else None,
+            "max_products": cap("products"),
+            "max_orders_per_month": cap("orders_per_month"),
+            "max_stores": cap("stores"),
+            "max_staff_members": cap("staff_accounts"),
             "max_customers": features.max_customers
             if features.max_customers != -1
             else None,
-            "webhooks_enabled": features.webhooks_enabled,
-            "custom_domain_enabled": features.custom_domain_enabled,
-            "api_access_enabled": features.api_access_enabled,
+            "webhooks_enabled": plan.get("api_access") is True,
+            "custom_domain_enabled": plan.get("custom_domain") is True,
+            "api_access_enabled": plan.get("api_access") is True,
             "analytics_enabled": features.analytics_enabled,
-            "discount_codes_enabled": features.discount_codes_enabled,
+            "discount_codes_enabled": plan.get("discount_codes") is True,
         }
     return SuccessResponse(data=matrix, message="Plan limits retrieved")
