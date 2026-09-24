@@ -31,6 +31,7 @@ from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.feature_flags import _read_feature_flags, is_flag_enabled
 from src.api.dependencies.repositories import get_store_repository
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.app_reviews import rating_summaries
 from src.application.services.app_manifest import validate_settings
 from src.application.services.numu_apps import (
     FLAG,
@@ -121,6 +122,8 @@ class AppCatalogEntry(BaseModel):
     #: Partner Apps install through consent: what the hub needs to open it
     #: (``client_id``, the first registered ``redirect_uri``, the scopes).
     connect: dict[str, Any] | None = None
+    rating: float | None = None
+    reviews_count: int = 0
 
 
 class AppInstallation(BaseModel):
@@ -285,6 +288,7 @@ async def list_catalog(store_id: UUID):
             or_(AppModel.developer_id.is_(None), partner_listed),
         )
         rows = (await session.execute(stmt)).scalars().all()
+        ratings = await rating_summaries(session, [a.id for a in rows])
         client_ids = dict(
             (
                 await session.execute(
@@ -314,6 +318,8 @@ async def list_catalog(store_id: UUID):
                 blocks=(a.manifest or {}).get("blocks", []) or [],
                 listing=_listing(a.manifest),
                 connect=connect(a),
+                rating=ratings.get(a.id, (None, 0))[0],
+                reviews_count=ratings.get(a.id, (None, 0))[1],
             )
             for a in rows
         ],
@@ -552,7 +558,11 @@ async def uninstall_app(
             )
 
             await deliver_app_event(session, app, store_id, "app.uninstalled", {})
-            session.add(AppUninstallEventModel(app_id=app.id, store_id=store_id))
+            session.add(
+                AppUninstallEventModel(
+                    app_id=app.id, store_id=store_id, installed_at=row.created_at
+                )
+            )
             try:
                 from src.infrastructure.messaging.tasks.app_redact_task import (
                     app_store_redact_task,

@@ -19,12 +19,15 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
     Index,
+    Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -168,6 +171,55 @@ class AppUninstallEventModel(Base, UUIDMixin, TimestampMixin):
         nullable=False,
     )
     store_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    installed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AppReviewModel(Base, UUIDMixin, TimestampMixin):
+    """One merchant's rating of an app: one per store, with at most one
+    public reply from the app's partner. Hidden reviews leave the listing and
+    the aggregate; ``reported_at`` puts a review in the admin queue."""
+
+    __tablename__ = "app_reviews"
+    __table_args__ = (
+        UniqueConstraint("app_id", "store_id", name="uq_app_reviews_app_store"),
+        CheckConstraint("rating BETWEEN 1 AND 5", name="ck_app_reviews_rating"),
+        Index("ix_app_reviews_app_created", "app_id", "created_at"),
+        Index(
+            "ix_app_reviews_reported",
+            "reported_at",
+            postgresql_where="reported_at IS NOT NULL",
+        ),
+        {"schema": "public"},
+    )
+
+    app_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    store_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.stores.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reply_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    replied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    report_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class AppVersionModel(Base, UUIDMixin, TimestampMixin):

@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.app_reviews import rating_summaries
 from src.application.services.app_manifest import app_subscriptions
 from src.application.services.app_tokens import (
     APP_TOKEN_PREFIX,
@@ -86,6 +87,8 @@ class ConsentApp(BaseModel):
     partner: str | None
     pricing: dict | None
     privacy_policy_url: str | None
+    rating: float | None = None
+    reviews_count: int = 0
 
 
 class Consent(BaseModel):
@@ -219,6 +222,9 @@ async def authorize(
             PartnerAccountModel.user_id == app.developer_id
         )
     )
+    rating, reviews_count = (await rating_summaries(db, [app.id])).get(
+        app.id, (None, 0)
+    )
     return SuccessResponse(
         data=Consent(
             app=ConsentApp(
@@ -231,6 +237,8 @@ async def authorize(
                 partner=partner,
                 pricing=m.get("pricing"),
                 privacy_policy_url=(m.get("app") or {}).get("privacy_policy_url"),
+                rating=rating,
+                reviews_count=reviews_count,
             ),
             store_id=store.id,
             store_name=store.name,

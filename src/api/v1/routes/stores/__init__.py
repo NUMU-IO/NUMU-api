@@ -22,6 +22,8 @@ Provides REST endpoints for store CRUD operations and nested resources:
 
 from fastapi import APIRouter
 
+from src.api.v1.routes import app_reviews as app_reviews_module
+from src.api.v1.routes import app_support as app_support_module
 from src.api.v1.routes.stores import (
     abandoned_checkouts as abandoned_checkouts_module,
 )
@@ -227,6 +229,8 @@ router.include_router(theme_code_module.router, tags=["Store Theme Code"])
 router.include_router(theme_editor_v3_module.router, tags=["Theme Editor V3"])
 router.include_router(customizer_undo_module.router, tags=["Theme Editor V3 — Undo"])
 router.include_router(apps_module.router, tags=["Store Apps"])
+router.include_router(app_reviews_module.merchant_router)
+router.include_router(app_support_module.merchant_router)
 router.include_router(whatsapp_module.router, tags=["Store WhatsApp"])
 router.include_router(
     whatsapp_templates_module.router, tags=["Store WhatsApp Templates"]

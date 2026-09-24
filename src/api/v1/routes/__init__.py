@@ -45,6 +45,8 @@ from src.api.v1.agent.workflow_routes import router as agent_workflow_router
 # Admin routes (super admin only — waitlist, feedback)
 from src.api.v1.routes.admin import router as admin_router
 from src.api.v1.routes.app_oauth import router as app_oauth_router
+from src.api.v1.routes.app_reviews import partner_router as app_reviews_partner_router
+from src.api.v1.routes.app_support import partner_router as app_support_partner_router
 from src.api.v1.routes.auth import router as auth_router
 
 # Billing routes (subscribe, cancel, invoices)
@@ -261,6 +263,8 @@ api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 api_router.include_router(partners_router)
 api_router.include_router(partner_apps_router)
 api_router.include_router(partner_portal_router)
+api_router.include_router(app_reviews_partner_router)
+api_router.include_router(app_support_partner_router)
 # Partner App OAuth (apps plan Phase 4).
 api_router.include_router(app_oauth_router)
 

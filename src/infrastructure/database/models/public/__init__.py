@@ -14,6 +14,7 @@ from src.infrastructure.database.models.public.app import (
     AppModel,
     AppOAuthClientModel,
     AppOAuthCodeModel,
+    AppReviewModel,
     AppUninstallEventModel,
     AppUninstallModel,
     AppVersionModel,
@@ -58,6 +59,10 @@ from src.infrastructure.database.models.public.subscription_payment import (
     SubscriptionPaymentIntentModel,
     SubscriptionPaymentProofModel,
 )
+from src.infrastructure.database.models.public.support_ticket import (
+    SupportMessageModel,
+    SupportTicketModel,
+)
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.theme_admin_config import (
     ThemeAdminConfigModel,
@@ -81,6 +86,9 @@ __all__ = [
     "AppInstallationModel",
     "AppUninstallModel",
     "AppUninstallEventModel",
+    "AppReviewModel",
+    "SupportTicketModel",
+    "SupportMessageModel",
     "AppVersionModel",
     "AppOAuthClientModel",
     "AppOAuthCodeModel",

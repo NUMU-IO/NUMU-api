@@ -63,6 +63,8 @@ from src.api.v1.routes.admin.whatsapp_access import (
     router as whatsapp_access_router,
 )
 from src.api.v1.routes.admin.whatsapp_gowa import router as whatsapp_gowa_router
+from src.api.v1.routes.app_reviews import admin_router as app_reviews_admin_router
+from src.api.v1.routes.app_support import admin_router as partner_support_router
 from src.api.v1.routes.tenant.configuration.admin_routes import (
     router as credentials_router,
 )
@@ -86,6 +88,12 @@ router.include_router(risk_router, prefix="/risk", tags=["Admin - Trust & risk"]
 router.include_router(campaigns_router, prefix="/campaigns", tags=["Admin - Campaigns"])
 router.include_router(
     support_cases_router, prefix="/support-cases", tags=["Admin - Support cases"]
+)
+router.include_router(
+    partner_support_router, prefix="/partner-support", tags=["Admin - Partner support"]
+)
+router.include_router(
+    app_reviews_admin_router, prefix="/app-reviews", tags=["Admin - App reviews"]
 )
 router.include_router(products_router, prefix="/products", tags=["Admin - Products"])
 router.include_router(push_router, prefix="/push", tags=["Admin - Push"])
