@@ -29,6 +29,7 @@ from src.api.v1.routes.admin.dashboard_overview import (
 )
 from src.api.v1.routes.admin.demos import router as demos_router
 from src.api.v1.routes.admin.email_templates import router as email_templates_router
+from src.api.v1.routes.admin.entitlements import router as entitlements_router
 from src.api.v1.routes.admin.feedback import router as feedback_router
 from src.api.v1.routes.admin.landing_page import router as landing_page_router
 from src.api.v1.routes.admin.leads import router as leads_router
@@ -101,6 +102,9 @@ router.include_router(email_templates_router, tags=["Admin - Email Templates"])
 router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
 router.include_router(
     plan_limits_router, prefix="/plan-limits", tags=["Admin - Plan Limits"]
+)
+router.include_router(
+    entitlements_router, prefix="/entitlements", tags=["Admin - Entitlements"]
 )
 # GOWA transport: per-merchant provider choice + device pairing. Staff-only
 # by design — it links a real WhatsApp account that can be banned.

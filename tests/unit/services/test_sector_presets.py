@@ -168,21 +168,23 @@ def test_available_section_types_accepts_both_manifest_shapes():
 def test_unimplemented_capability_never_resolves_true():
     store = _store()
     store.settings = {"capabilities": {"donations": True}}
-    assert CapabilityService.resolve(store, "enterprise", "donations") is False
+    everything = frozenset({"multi_warehouse", "product_subscriptions"})
+    assert CapabilityService.resolve(store, everything, "donations") is False
 
 
-def test_plan_floor_gates_capability():
+def test_entitlement_gates_a_sold_capability():
     store = _store()
     store.settings = {"capabilities": {"multi_warehouse": True}}
-    assert CapabilityService.resolve(store, "starter", "multi_warehouse") is False
-    assert CapabilityService.resolve(store, "pro", "multi_warehouse") is True
+    assert CapabilityService.resolve(store, frozenset(), "multi_warehouse") is False
+    entitled = frozenset({"multi_warehouse"})
+    assert CapabilityService.resolve(store, entitled, "multi_warehouse") is True
 
 
 def test_store_override_beats_default():
     store = _store()
-    assert CapabilityService.resolve(store, "starter", "shipping") is True
+    assert CapabilityService.resolve(store, frozenset(), "shipping") is True
     store.settings = {"capabilities": {"shipping": False}}
-    assert CapabilityService.resolve(store, "starter", "shipping") is False
+    assert CapabilityService.resolve(store, frozenset(), "shipping") is False
 
 
 def test_every_preset_capability_is_a_known_capability():

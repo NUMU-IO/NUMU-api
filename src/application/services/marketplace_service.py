@@ -8,6 +8,7 @@ preconditions.
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 from datetime import UTC, datetime, timedelta
@@ -22,8 +23,87 @@ from src.core.entities.marketplace_theme import (
     MarketplaceThemeStatus,
     MarketplaceVersionStatus,
 )
+from src.core.interfaces.services.email_service import EmailMessage
+from src.infrastructure.database.models.public.user import UserModel
+from src.infrastructure.database.models.tenant.marketplace_theme import (
+    MarketplaceThemeModel,
+)
+from src.infrastructure.external_services.resend import ResendEmailService
 
 logger = logging.getLogger(__name__)
+
+PAID_THEMES_UNAVAILABLE = "Paid themes are coming soon; list the theme as free."
+
+_STATUS_EMAIL_COPY = {
+    MarketplaceVersionStatus.PENDING_REVIEW.value: (
+        "is built and in review",
+        "تم بناؤه وهو الآن قيد المراجعة",
+    ),
+    MarketplaceVersionStatus.BUILD_FAILED.value: (
+        "failed to build",
+        "فشل بناؤه",
+    ),
+    MarketplaceVersionStatus.APPROVED.value: (
+        "was approved. Publish it from the partner portal",
+        "تمت الموافقة عليه. انشره من بوابة الشركاء",
+    ),
+    MarketplaceVersionStatus.CHANGES_REQUESTED.value: (
+        "needs changes before it can be approved",
+        "يحتاج إلى تعديلات قبل الموافقة عليه",
+    ),
+    MarketplaceVersionStatus.REJECTED.value: (
+        "was rejected",
+        "تم رفضه",
+    ),
+}
+
+
+async def email_theme_status(
+    session: Any,
+    theme_id: UUID,
+    version_string: str,
+    status: str,
+    notes: str | None = None,
+) -> None:
+    """Email the theme's partner that a version changed status. Never raises:
+    a missed email must not undo a review or a build."""
+    copy = _STATUS_EMAIL_COPY.get(status)
+    if copy is None:
+        return
+    try:
+        theme = await session.get(MarketplaceThemeModel, theme_id)
+        user = await session.get(UserModel, theme.developer_id) if theme else None
+        if user is None or not user.email:
+            return
+        en, ar = copy
+        name = html.escape(theme.name)
+        name_ar = html.escape(theme.name_ar or theme.name)
+        version = html.escape(version_string)
+        note_html = (
+            f"<p style='white-space:pre-wrap'>{html.escape(notes)}</p>" if notes else ""
+        )
+        await ResendEmailService().send_email(
+            EmailMessage(
+                to=str(user.email),
+                subject=f"{theme.name} {version_string}: {en}",
+                html_content=(
+                    f"<p>{name} {version} {en}.</p>{note_html}"
+                    f"<p dir='rtl'>{name_ar} {version} {ar}.</p>"
+                ),
+                text_content=(
+                    f"{theme.name} {version_string} {en}.\n"
+                    f"{notes or ''}\n{theme.name_ar or theme.name} "
+                    f"{version_string} {ar}."
+                ),
+            )
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "marketplace_status_email_failed",
+            extra={"theme_id": str(theme_id), "status": status},
+            exc_info=True,
+        )
+
 
 #: How long a developer may run an UNREVIEWED build on a real store before it
 #: stops resolving (ADR-6). Long enough for a genuine iteration session, short
@@ -83,14 +163,19 @@ class MarketplaceService:
         """
         slug = data.get("slug", "").strip().lower()
         _validate_slug(slug)
+        if data.get("price_cents"):
+            raise ValueError(PAID_THEMES_UNAVAILABLE)
         if await self._marketplace_repo.get_theme_by_slug(slug):
             raise ValueError(f"slug already taken: {slug!r}")
 
         theme = await self._marketplace_repo.create_theme({
             "developer_id": developer_id,
             "name": data["name"],
+            "name_ar": data.get("name_ar"),
             "slug": slug,
             "description": data.get("description"),
+            "description_ar": data.get("description_ar"),
+            "screenshots": data.get("screenshots") or [],
             "short_description": data.get("short_description"),
             "price_cents": data.get("price_cents", 0),
             "currency": data.get("currency", "USD"),
@@ -128,9 +213,12 @@ class MarketplaceService:
             "category",
             "supported_languages",
             "supported_features",
-            "price_cents",
-            "currency",
+            "name_ar",
+            "description_ar",
+            "screenshots",
         }
+        if fields.get("price_cents"):
+            raise ValueError(PAID_THEMES_UNAVAILABLE)
         clean = {k: v for k, v in fields.items() if k in allowed}
         if not clean:
             return self._theme_dict(theme)
@@ -241,6 +329,7 @@ class MarketplaceService:
             "version_string": version.version_string,
             "status": version.status.value,
             "build_log": version.build_log,
+            "review_notes": version.review_notes,
             "bundle_url": version.bundle_url,
             "css_url": version.css_url,
             "size_bytes": version.size_bytes,
@@ -264,9 +353,53 @@ class MarketplaceService:
                 "css_url": v.css_url,
                 "checksum": v.checksum,
                 "created_at": v.created_at.isoformat() if v.created_at else None,
+                "review_notes": v.review_notes,
+                "build_log": v.build_log,
+                "lint_status": v.lint_status,
+                "lint_issues": v.lint_issues,
+                "certification_tier": v.certification_tier,
             }
             for v in versions
         ]
+
+    async def publish_version(
+        self, developer_id: UUID, version_id: UUID
+    ) -> dict[str, Any]:
+        """Make an approved version live: merchants can install it.
+
+        The first publish of a listing also opens it in the public catalog,
+        unless an admin already set ``catalog_visible`` either way.
+        """
+        version = await self._marketplace_repo.get_version_by_id(version_id)
+        theme = (
+            await self._marketplace_repo.get_theme_by_id(version.theme_id)
+            if version
+            else None
+        )
+        if not theme or theme.developer_id != developer_id:
+            raise LookupError("version not found")
+        if version.status != MarketplaceVersionStatus.APPROVED:
+            raise ValueError(
+                "only approved versions can be published "
+                f"(status={version.status.value})"
+            )
+        if theme.status == MarketplaceThemeStatus.SUSPENDED:
+            raise ValueError("theme is suspended")
+        await self._marketplace_repo.update_version(
+            version_id, {"status": MarketplaceVersionStatus.PUBLISHED.value}
+        )
+        if theme.status != MarketplaceThemeStatus.PUBLISHED:
+            await self._marketplace_repo.update_theme(
+                theme.id, {"status": MarketplaceThemeStatus.PUBLISHED.value}
+            )
+            if "catalog_visible" not in (theme.flags or {}):
+                await self._marketplace_repo.merge_flags(
+                    theme.id, {"catalog_visible": True}
+                )
+        return {
+            "version_id": str(version_id),
+            "status": MarketplaceVersionStatus.PUBLISHED.value,
+        }
 
     # ── Admin flows ──────────────────────────────────────────────────────────
 
@@ -382,6 +515,11 @@ class MarketplaceService:
                 "certification_tier": v.certification_tier,
                 # Listing
                 "theme_name": theme.name if theme else None,
+                "theme_name_ar": theme.name_ar if theme else None,
+                "theme_description_ar": theme.description_ar if theme else None,
+                "theme_screenshots": (
+                    _screenshots_to_dicts(theme.screenshots) if theme else []
+                ),
                 "theme_slug": theme.slug if theme else None,
                 "theme_description": theme.description if theme else None,
                 "theme_short_description": (theme.short_description if theme else None),
@@ -557,16 +695,15 @@ class MarketplaceService:
     ) -> dict[str, Any]:
         """Admin reviews a version (approve / reject / request_changes).
 
-        ``request_changes`` closes this version (there is no "changes
-        requested" version state) but, unlike ``reject``, leaves the listing
-        in draft so the developer uploads a fixed version and resubmits.
+        ``approve`` moves the version to ``approved``; the partner then
+        publishes it (``publish_version``). ``request_changes`` closes this
+        version but, unlike ``reject``, leaves the listing in draft so the
+        developer uploads a fixed version and resubmits.
         """
         if decision not in ("approve", "reject", "request_changes"):
             raise ValueError(
                 "decision must be 'approve', 'reject' or 'request_changes'"
             )
-        if decision == "request_changes":
-            notes = f"[changes requested] {notes or ''}".strip()
 
         version = await self._marketplace_repo.get_version_by_id(version_id)
         if not version:
@@ -609,11 +746,11 @@ class MarketplaceService:
                 f"{notes or ''}".strip()
             )
 
-        new_version_status = (
-            MarketplaceVersionStatus.PUBLISHED
-            if decision == "approve"
-            else MarketplaceVersionStatus.REJECTED
-        )
+        new_version_status = {
+            "approve": MarketplaceVersionStatus.APPROVED,
+            "reject": MarketplaceVersionStatus.REJECTED,
+            "request_changes": MarketplaceVersionStatus.CHANGES_REQUESTED,
+        }[decision]
         await self._marketplace_repo.update_version(
             version_id,
             {
@@ -623,14 +760,12 @@ class MarketplaceService:
             },
         )
 
-        # Promote the theme listing on first approval
         theme = await self._marketplace_repo.get_theme_by_id(version.theme_id)
-        if decision == "approve" and theme:
-            await self._marketplace_repo.update_theme(
-                theme.id,
-                {"status": MarketplaceThemeStatus.PUBLISHED.value},
-            )
-        elif decision == "reject" and theme:
+        if (
+            decision == "reject"
+            and theme
+            and theme.status != MarketplaceThemeStatus.PUBLISHED
+        ):
             await self._marketplace_repo.update_theme(
                 theme.id,
                 {"status": MarketplaceThemeStatus.REJECTED.value},
@@ -643,6 +778,16 @@ class MarketplaceService:
             await self._marketplace_repo.update_theme(
                 theme.id,
                 {"status": MarketplaceThemeStatus.DRAFT.value},
+            )
+
+        session = getattr(self._marketplace_repo, "_session", None)
+        if session is not None:
+            await email_theme_status(
+                session,
+                version.theme_id,
+                version.version_string,
+                new_version_status.value,
+                notes,
             )
 
         return {
@@ -1368,8 +1513,10 @@ class MarketplaceService:
         base = {
             "id": str(t.id),
             "name": t.name,
+            "name_ar": getattr(t, "name_ar", None),
             "slug": t.slug,
             "description": t.description,
+            "description_ar": getattr(t, "description_ar", None),
             "short_description": t.short_description,
             "price_cents": t.price_cents,
             "currency": t.currency,

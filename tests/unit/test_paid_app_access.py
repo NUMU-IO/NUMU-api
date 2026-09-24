@@ -1,23 +1,27 @@
 """Paid apps (Phase 7): access rules around the subscription.
 
 - an app token for a paid app the store isn't paying for answers 402;
-- a store plan can cap how many Partner Apps it installs (-1 = no cap).
+- a store plan can cap how many Partner Apps it installs (the
+  ``partner_apps`` entitlement; unlimited on every plan today).
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import update
 
 from src.core.entities.app import AppStatus
 from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
     AppModel,
+)
+from src.infrastructure.database.models.public.entitlements import (
+    PlanEntitlementModel,
 )
 from src.infrastructure.database.models.public.tenant import TenantModel
 
@@ -98,23 +102,24 @@ async def _store_with_partner_apps(session, installed: int):
     return store, apps
 
 
-def _cap(monkeypatch, cap):
-    from src.core.entities import plan
-
-    real = plan.get_plan_features
-    monkeypatch.setattr(
-        plan,
-        "get_plan_features",
-        lambda name: replace(real(name), max_partner_apps=cap),
+async def _cap(session, cap):
+    await session.execute(
+        update(PlanEntitlementModel)
+        .where(
+            PlanEntitlementModel.plan_key == "starter",
+            PlanEntitlementModel.feature_key == "partner_apps",
+        )
+        .values(value=cap)
     )
+    await session.commit()
 
 
 @pytest.mark.asyncio
-async def test_the_plan_cap_blocks_one_more_partner_app(test_session, monkeypatch):
+async def test_the_plan_cap_blocks_one_more_partner_app(test_session):
     from src.api.v1.routes.app_oauth import _check_app_cap
 
     store, apps = await _store_with_partner_apps(test_session, installed=1)
-    _cap(monkeypatch, 1)
+    await _cap(test_session, 1)
     with pytest.raises(HTTPException) as exc:
         await _check_app_cap(test_session, store, apps[1])
     assert exc.value.status_code == 403
@@ -124,11 +129,11 @@ async def test_the_plan_cap_blocks_one_more_partner_app(test_session, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_no_cap_by_default(test_session, monkeypatch):
+async def test_no_cap_by_default(test_session):
     from src.api.v1.routes.app_oauth import _check_app_cap
 
     store, apps = await _store_with_partner_apps(test_session, installed=3)
-    await _check_app_cap(test_session, store, apps[3])  # -1 on every plan today
+    await _check_app_cap(test_session, store, apps[3])
 
 
 @pytest.mark.parametrize(

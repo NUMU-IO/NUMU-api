@@ -37,7 +37,9 @@ from src.application.services.app_manifest import (
     CATEGORIES,
     SLUG_RE,
     ManifestV1,
+    PrivateManifestV1,
     change_type,
+    manifest_urls,
     semver_key,
     to_listing_manifest,
 )
@@ -101,6 +103,8 @@ class CreateAppRequest(BaseModel):
     slug: str
     name_ar: str = Field(min_length=2, max_length=100)
     name_en: str = Field(min_length=2, max_length=100)
+    #: A private (custom) app for one merchant: that store's id or subdomain.
+    private_store: str | None = Field(default=None, max_length=64)
 
 
 class VersionOut(BaseModel):
@@ -129,6 +133,8 @@ class PartnerAppOut(BaseModel):
     client_id: str | None
     installs: int
     latest_version: VersionOut | None
+    private_store_id: UUID | None = None
+    private_store_name: str | None = None
 
 
 class PartnerAppDetail(PartnerAppOut):
@@ -248,6 +254,13 @@ async def _app_out(db: AsyncSession, app: AppModel, cls=PartnerAppOut, **extra):
         )
     )
     name_ar = ((app.manifest or {}).get("app_locales") or {}).get("ar", {}).get("name")
+    private_store_name = (
+        await db.scalar(
+            select(StoreModel.name).where(StoreModel.id == app.private_store_id)
+        )
+        if app.private_store_id
+        else None
+    )
     fields = {
         "id": app.id,
         "slug": app.slug,
@@ -261,6 +274,8 @@ async def _app_out(db: AsyncSession, app: AppModel, cls=PartnerAppOut, **extra):
         "client_id": client_id,
         "installs": installs or 0,
         "latest_version": _version_out(versions[0], published) if versions else None,
+        "private_store_id": app.private_store_id,
+        "private_store_name": private_store_name,
     }
     if cls is PartnerAppDetail:
         fields["versions"] = [_version_out(v, published) for v in versions]
@@ -276,11 +291,11 @@ async def _version(
     return v
 
 
-def _validated(raw: dict[str, Any]) -> ManifestV1:
+def _validated(raw: dict[str, Any], *, private: bool = False) -> ManifestV1:
     """ManifestV1, or a 422 with one line per broken rule. Model-level rules
     (e.g. ``app.uninstalled``) run only once every field is valid."""
     try:
-        return ManifestV1.model_validate(raw)
+        return (PrivateManifestV1 if private else ManifestV1).model_validate(raw)
     except ValidationError as exc:
         # One readable line per broken rule: the error envelope carries
         # ``detail`` as its message, and a list would arrive as a repr.
@@ -343,6 +358,29 @@ def _draft_out(row: AppListingModel) -> ListingDraftOut:
     return ListingDraftOut.model_validate(row, from_attributes=True)
 
 
+def _assert_public_urls(m: dict[str, Any]) -> None:
+    """Resolve DNS the way webhook delivery will, so a URL that points inside
+    the network is refused."""
+    from src.core.url_guard import UnsafeUrlError, assert_webhook_target
+
+    for url in sorted(manifest_urls(m)):
+        try:
+            assert_webhook_target(url)
+        except UnsafeUrlError as exc:
+            raise HTTPException(status_code=422, detail=f"{url}: {exc}")
+
+
+async def _private_store(db: AsyncSession, ref: str) -> StoreModel:
+    try:
+        where = StoreModel.id == UUID(ref)
+    except ValueError:
+        where = StoreModel.subdomain == ref.strip().lower()
+    store = await db.scalar(select(StoreModel).where(where))
+    if store is None:
+        raise HTTPException(status_code=404, detail="Store not found")
+    return store
+
+
 # ─── Apps ─────────────────────────────────────────────────────────
 
 
@@ -386,6 +424,7 @@ async def create_app(
         raise HTTPException(
             status_code=422, detail="Write the Arabic name in Arabic, not the English."
         )
+    store = await _private_store(db, body.private_store) if body.private_store else None
     app = AppModel(
         slug=body.slug,
         name=body.name_en.strip(),
@@ -399,6 +438,7 @@ async def create_app(
             }
         },
         listing_flags={},
+        private_store_id=store.id if store else None,
     )
     db.add(app)
     await db.flush()
@@ -410,7 +450,12 @@ async def create_app(
     db.add(client)
     await db.flush()
     await db.refresh(app)
-    logger.info("partner_app_created", user_id=str(user_id), slug=app.slug)
+    logger.info(
+        "partner_app_created",
+        user_id=str(user_id),
+        slug=app.slug,
+        private=store is not None,
+    )
     return SuccessResponse(
         data=await _app_out(db, app, CreatedApp, client_secret=secret),
         message="App created. Save the client secret now: it is not shown again.",
@@ -419,6 +464,7 @@ async def create_app(
 
 class ValidateRequest(BaseModel):
     manifest: dict[str, Any]
+    private: bool = False
 
 
 @router.post("/validate", response_model=SuccessResponse[dict])
@@ -429,7 +475,7 @@ async def validate_manifest(
 ):
     """Dry run: the exact rules an upload applies, with nothing stored.
     ``numu app validate`` calls this, so the CLI never drifts from the API."""
-    m = _validated(body.manifest)
+    m = _validated(body.manifest, private=body.private)
     await _check_pricing(db, m.pricing.model)
     return SuccessResponse(
         data={"valid": True, "slug": m.slug, "version": m.version},
@@ -486,9 +532,11 @@ async def upload_version(
     user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Validate a ``numu.app.json`` and store it as a draft version."""
+    """Validate a ``numu.app.json`` and store it as a draft version. A
+    private app is not reviewed: its version is approved on upload."""
     app = await _own_app(db, user_id, app_id)
-    manifest = _validated(body.manifest)
+    private = app.private_store_id is not None
+    manifest = _validated(body.manifest, private=private)
     await _check_pricing(db, manifest.pricing.model)
     if manifest.slug != app.slug:
         raise HTTPException(
@@ -509,7 +557,7 @@ async def upload_version(
         app_id=app.id,
         version=manifest.version,
         manifest=data,
-        status="draft",
+        status="approved" if private else "draft",
         release_notes=notes,
     )
     db.add(v)
@@ -547,9 +595,9 @@ async def submit_version(
 ):
     """Send a draft (or a version NUMU asked to change) for review, with the
     listing draft when ``with_listing``. Each submission is a new round."""
-    from src.core.url_guard import UnsafeUrlError, assert_webhook_target
-
     app = await _own_app(db, user_id, app_id)
+    if app.private_store_id:
+        raise _conflict("A private app is not reviewed; publish it directly.")
     v = await _version(db, app, version_id)
     if v.status not in EDITABLE:
         raise _conflict(f"a {v.status} version cannot be submitted")
@@ -559,19 +607,8 @@ async def submit_version(
         listing = await editable_listing(db, app.id)
         if listing is None:
             raise _conflict("There is no listing draft to submit.")
-    m = v.manifest
-    # The offline check ran at upload; now resolve DNS the way webhook
-    # delivery will, so a URL that points inside the network is refused.
-    urls = {
-        m["app_url"],
-        *m["oauth"]["redirect_urls"],
-        *(w["url"] for w in m["webhooks"]),
-    }
-    for url in sorted(urls):
-        try:
-            assert_webhook_target(url)
-        except UnsafeUrlError as exc:
-            raise HTTPException(status_code=422, detail=f"{url}: {exc}")
+    # The offline check ran at upload.
+    _assert_public_urls(v.manifest)
     await start_round(db, app, version=v, listing=listing)
     logger.info("partner_app_version_submitted", app=app.slug, version=v.version)
     return SuccessResponse(
@@ -590,13 +627,16 @@ async def publish_version(
     user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Make an approved version the live one. The previous one is superseded."""
+    """Make an approved version the live one. The previous one is superseded.
+    A private app goes live on its one store only, never in the App Store."""
     app = await _own_app(db, user_id, app_id)
     if app.status == AppStatus.SUSPENDED:
         raise _conflict("This app is suspended by NUMU.")
     v = await _version(db, app, version_id)
     if v.status != "approved":
         raise _conflict("only an approved version can be published")
+    if app.private_store_id:
+        _assert_public_urls(v.manifest)
     # Approved while billing was live, and it was switched off since.
     await _check_pricing(db, (v.manifest.get("pricing") or {}).get("model", "free"))
     if app.status == AppStatus.PUBLISHED and semver_key(v.version) <= semver_key(
@@ -817,6 +857,8 @@ async def dev_install(
     """Install the partner's own app, at any status, on one of their own
     development stores. Never on a merchant's store."""
     app = await _own_app(db, user_id, app_id)
+    if app.private_store_id and app.private_store_id != body.store_id:
+        raise HTTPException(status_code=404, detail="Development store not found")
     store = (
         await db.execute(
             select(StoreModel)

@@ -265,15 +265,10 @@ async def _search_categories(
     limit: int,
     category_repo: CategoryRepository,
 ) -> list[Any]:
-    """Categories don't have a tsvector yet — fall back to ILIKE on
-    name. Catalog sizes are small enough (typically <50 categories)
-    that a sequential scan is fine."""
+    """Categories don't have a tsvector yet, so match the name in SQL."""
     if not query.strip():
         return []
-    cats = await category_repo.get_by_store(store_id=store_id)
-    lower = query.lower()
-    matches = [c for c in cats if lower in (c.name or "").lower()]
-    return matches[:limit]
+    return await category_repo.search_by_name(store_id, query, limit)
 
 
 def _product_to_dict(p: ProductModel) -> dict[str, Any]:

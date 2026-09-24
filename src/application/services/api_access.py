@@ -1,20 +1,16 @@
 """Who is allowed to use the public API, and why.
 
-API access is sold, so it has to be switchable per merchant. Two ways in:
+API access is sold, so it has to be switchable per merchant. It is the
+``api_access`` entitlement, so the usual ways in apply:
 
-* the tenant's **plan** includes it (``PlanFeatures.api_access_enabled``), or
-* an admin **granted** it to that specific merchant, which is the
-  ``api_access`` tenant feature flag.
+* the tenant's **plan** includes it (a ``plan_entitlements`` row), or
+* an admin **granted** it to that specific merchant (an entitlement override;
+  grants that lived in the ``api_access`` tenant feature flag were moved there
+  by the entitlements migration).
 
 The grant exists because the plan matrix is a blunt instrument: an agency
 integrating one Starter merchant, a partner on a pilot, or a customer who
-negotiated it should not require a plan change. It reuses the feature-flag
-rail rather than adding a second one — same table, same admin endpoint, same
-audit trail.
-
-``api_access_enabled`` was declared on every plan and read by nothing, so
-every merchant on every plan already had the whole API. This module is what
-makes the flag mean something.
+negotiated it should not require a plan change.
 """
 
 from __future__ import annotations
@@ -25,12 +21,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.entities.plan import get_plan_features
+from src.application.services.entitlement_service import EntitlementService
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.tenant.store import StoreModel
 
-#: The tenant feature flag an admin flips to grant access outside the plan.
-GRANT_FLAG = "api_access"
+FEATURE = "api_access"
 
 
 @dataclass(frozen=True)
@@ -54,60 +49,34 @@ class ApiAccess:
         return "plan_excludes_api"
 
 
-async def api_access_for_tenant(
-    session: AsyncSession,
-    tenant_id: UUID,
-    *,
-    plan: str | None = None,
-    feature_flags: dict | None = None,
-) -> ApiAccess:
-    """Resolve API access for a tenant.
+_NONE = ApiAccess(allowed=False, source=None, plan="none", in_plan=False, granted=False)
 
-    ``plan`` and ``feature_flags`` short-circuit the query for callers that
-    already hold the tenant row — the token auth path does, and it runs on
-    every API request.
-    """
-    if plan is None or feature_flags is None:
-        row = (
-            await session.execute(
-                select(TenantModel.plan, TenantModel.feature_flags).where(
-                    TenantModel.id == tenant_id
-                )
-            )
-        ).one_or_none()
-        if row is None:
-            return ApiAccess(
-                allowed=False, source=None, plan="none", in_plan=False, granted=False
-            )
-        plan, feature_flags = row[0], row[1]
 
-    return _decide(plan, feature_flags)
+async def api_access_for_tenant(session: AsyncSession, tenant_id: UUID) -> ApiAccess:
+    """Resolve API access for a tenant. The token auth path runs this on
+    every API request; after the tenant row it is one cached Redis read."""
+    tenant = await session.get(TenantModel, tenant_id)
+    return await decide(session, tenant) if tenant is not None else _NONE
 
 
 async def api_access_for_store(session: AsyncSession, store_id: UUID) -> ApiAccess:
     """Resolve API access from a store id (one join, no tenant lookup first)."""
-    row = (
-        await session.execute(
-            select(TenantModel.plan, TenantModel.feature_flags)
-            .join(StoreModel, StoreModel.tenant_id == TenantModel.id)
-            .where(StoreModel.id == store_id)
-        )
-    ).one_or_none()
-    if row is None:
-        return ApiAccess(
-            allowed=False, source=None, plan="none", in_plan=False, granted=False
-        )
-    return _decide(row[0], row[1])
+    tenant = await session.scalar(
+        select(TenantModel)
+        .join(StoreModel, StoreModel.tenant_id == TenantModel.id)
+        .where(StoreModel.id == store_id)
+    )
+    return await decide(session, tenant) if tenant is not None else _NONE
 
 
-def _decide(plan: str | None, feature_flags: dict | None) -> ApiAccess:
-    plan_name = (plan or "free").lower()
-    in_plan = bool(get_plan_features(plan_name).api_access_enabled)
-    granted = bool((feature_flags or {}).get(GRANT_FLAG, False))
+async def decide(session: AsyncSession, tenant: TenantModel) -> ApiAccess:
+    state = await EntitlementService(session).feature(tenant, FEATURE)
+    in_plan = bool(state.get("in_plan"))
+    granted = state.get("source") == "override" and state["value"] is True
     return ApiAccess(
-        allowed=in_plan or granted,
+        allowed=bool(state["available"]),
         source="plan" if in_plan else ("grant" if granted else None),
-        plan=plan_name,
+        plan=(tenant.plan or "free").lower(),
         in_plan=in_plan,
         granted=granted,
     )
