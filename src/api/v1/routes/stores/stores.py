@@ -17,6 +17,7 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
+from src.api.dependencies.entitlements import require_feature
 from src.api.dependencies.repositories import get_onboarding_repository
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas import (
@@ -855,6 +856,7 @@ async def get_custom_domain(
     response_model=SuccessResponse[CustomDomainStatusResponse],
     summary="Connect a custom domain",
     operation_id="connect_custom_domain",
+    dependencies=[require_feature("custom_domain")],
 )
 async def connect_custom_domain(
     request: ConnectCustomDomainRequest,
