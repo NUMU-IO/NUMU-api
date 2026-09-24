@@ -82,14 +82,14 @@ async def _sweep() -> dict[str, int]:
     products_assigned = 0
 
     async with AsyncSessionLocal() as session:
-        # Pull every category with a non-empty smart_rules blob. We
-        # filter in Python because JSONB existence operators (`?`,
-        # `@>`) require the path to be exactly known; the
-        # `extra_data.smart_rules` shape may evolve.
+        # Only categories that carry a smart_rules blob; SmartCollectionRules
+        # still validates its shape below.
         cat_rows = (
             (
                 await session.execute(
-                    select(CategoryModel).where(CategoryModel.extra_data.isnot(None))
+                    select(CategoryModel).where(
+                        CategoryModel.extra_data["smart_rules"].isnot(None)
+                    )
                 )
             )
             .scalars()
