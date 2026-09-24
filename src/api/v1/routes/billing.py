@@ -515,7 +515,7 @@ async def create_card_intent(
         amount_cents=intent.amount_cents,
         description=f"NUMU {intent.plan_key} plan ({intent.billing_cycle})",
         redirect_url=f"{get_settings().merchant_hub_url}/billing",
-        save_for=(str(tenant.id), intent.billing_cycle) if request.save_card else None,
+        save_for=str(tenant.id) if request.save_card else None,
     )
     await db.commit()
 

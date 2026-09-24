@@ -5,23 +5,17 @@ platform Kashier account through the hub's own card form. The hub posts the
 card straight to Kashier's Direct API; this module only signs the order, and
 the platform webhook (``/webhooks/kashier/platform/callback``) settles it.
 
-A plan payment can also save the card under a Kashier recurring agreement;
-``PlatformKashierRecurring`` then charges it on each renewal.
+A plan payment can also save the card; ``PlatformKashierRecurring`` then
+charges it on each renewal.
 """
 
 import json
-from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 
 from src.config.settings import get_settings
 from src.core.interfaces.services.payment_service import PaymentResult
 from src.infrastructure.external_services.kashier import KashierPaymentService
-
-# Generous caps on the agreement so price changes never block a renewal;
-# the amount of each charge still comes from the server-side plan price.
-_AGREEMENT_YEARS = 10
-_AGREEMENT_MAX_AMOUNT_EGP = 100_000
 
 
 def _platform_service() -> KashierPaymentService:
@@ -43,45 +37,23 @@ def _webhook_url() -> str:
     return f"{api_base}/api/v1/webhooks/kashier/platform/callback"
 
 
-def _agreement(billing_cycle: str) -> dict:
-    """Kashier recurring agreement for a saved plan card.
-
-    Monthly uses the documented RECURRING/MONTHLY shape. Kashier documents no
-    yearly frequency, so annual plans use UNSCHEDULED (card on file).
-    """
-    expiry = (datetime.now(UTC) + timedelta(days=365 * _AGREEMENT_YEARS)).date()
-    if billing_cycle != "monthly":
-        return {"type": "UNSCHEDULED", "expiryDate": expiry.isoformat()}
-    return {
-        "type": "RECURRING",
-        "amountVariability": "VARIABLE",
-        "paymentFrequency": "MONTHLY",
-        "expiryDate": expiry.isoformat(),
-        # Dunning retries a failed renewal within days.
-        "minimumDaysBetweenPayments": 1,
-        "maximumAmountPerPayment": _AGREEMENT_MAX_AMOUNT_EGP,
-        "numberOfPayments": 12 * _AGREEMENT_YEARS,
-    }
-
-
 def platform_card_params(
     *,
     reference: str,
     amount_cents: int,
     description: str,
     redirect_url: str,
-    save_for: tuple[str, str] | None = None,
+    save_for: str | None = None,
 ) -> dict:
     """Signed order for NUMU's card page.
 
-    ``save_for=(customer_reference, billing_cycle)`` also saves the card with
-    a recurring agreement; the tenant id is the Kashier customer reference.
+    ``save_for`` (the tenant id, used as Kashier customer reference) also
+    saves the card for renewals. No recurring ``agreement`` is sent: Kashier
+    rejects it for this account with "invalid credentials" (verified live
+    2026-09-24); a plain saved card works.
     """
     api_base = get_settings().platform_api_base_url.rstrip("/")
-    customer_reference, card_extra = None, None
-    if save_for:
-        customer_reference, cycle = save_for
-        card_extra = {"save": True, "agreement": _agreement(cycle)}
+    card_extra = {"save": True} if save_for else None
     params = _platform_service().direct_payment_params(
         reference=reference,
         amount_cents=amount_cents,
@@ -89,7 +61,7 @@ def platform_card_params(
         description=description,
         webhook_url=_webhook_url(),
         redirect_url=redirect_url,
-        customer_reference=customer_reference,
+        customer_reference=save_for,
         card_extra=card_extra,
     )
     # The page the hub frames to collect the card (platform_pay.py). Built
