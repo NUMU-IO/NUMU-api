@@ -87,6 +87,10 @@ class AppListing(BaseModel):
     pricing: dict[str, Any] | None = None
     languages: list[str] = []
     compatibility: dict[str, Any] | None = None
+    #: A Partner App's reviewed listing: a YouTube/Vimeo link and search
+    #: keywords per language.
+    video_url: str | None = None
+    keywords: dict[str, list[str]] = {}
 
 
 def _listing(manifest: dict | None) -> AppListing:
@@ -107,6 +111,8 @@ def _listing(manifest: dict | None) -> AppListing:
         compatibility=(
             m.get("compatibility") if isinstance(m.get("compatibility"), dict) else None
         ),
+        video_url=m.get("video_url") if isinstance(m.get("video_url"), str) else None,
+        keywords=m.get("keywords") if isinstance(m.get("keywords"), dict) else {},
     )
 
 

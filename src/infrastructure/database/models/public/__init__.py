@@ -11,9 +11,11 @@ They include:
 from src.infrastructure.database.models.public.app import (
     AppAccessTokenModel,
     AppInstallationModel,
+    AppListingModel,
     AppModel,
     AppOAuthClientModel,
     AppOAuthCodeModel,
+    AppReviewModel,
     AppUninstallEventModel,
     AppUninstallModel,
     AppVersionModel,
@@ -43,6 +45,7 @@ from src.infrastructure.database.models.public.onboarding import StoreOnboarding
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
     PartnerMemberModel,
+    PartnerNotificationModel,
 )
 from src.infrastructure.database.models.public.personal_access_token import (
     PersonalAccessTokenModel,
@@ -82,6 +85,8 @@ __all__ = [
     "AppUninstallModel",
     "AppUninstallEventModel",
     "AppVersionModel",
+    "AppListingModel",
+    "AppReviewModel",
     "AppOAuthClientModel",
     "AppOAuthCodeModel",
     "AppAccessTokenModel",
@@ -89,6 +94,7 @@ __all__ = [
     "PartnerLedgerEntryModel",
     "PartnerAccountModel",
     "PartnerMemberModel",
+    "PartnerNotificationModel",
     "CurrencyRateModel",
     "CustomizerUndoEntryModel",
     "FeedbackModel",
