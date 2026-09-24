@@ -32,6 +32,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services import admin_notifications, referral_service
+from src.application.services.partner_referrals import attribute_tenant
 from src.infrastructure.database.models.public.merchant_lead import MerchantLeadModel
 
 logger = logging.getLogger(__name__)
@@ -351,7 +352,9 @@ async def attach_tenant_to_lead(
         if lead.referral_code_used:
             from src.application.services.merchant_referrals import apply_referral
 
-            applied = await apply_referral(
+            applied = await attribute_tenant(
+                db, code=lead.referral_code_used, tenant_id=tenant_id, user_id=user_id
+            ) or await apply_referral(
                 db, code=lead.referral_code_used, referred_tenant_id=tenant_id
             )
             # Cleared only on success. A code that did not resolve stays put:

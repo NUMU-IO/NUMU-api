@@ -32,6 +32,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
+from src.application.services.partner_referrals import credit_invoice
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -213,6 +214,7 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                         paid_at=now,
                     )
                     session.add(invoice)
+                    await credit_invoice(session, invoice)
                     tenant.next_renewal_at = period_end
                     tenant.renewal_retry_count = 0
                     tenant.lifecycle_state = TenantLifecycleState.ACTIVE.value

@@ -438,8 +438,8 @@ async def partner_balance(db: AsyncSession, partner_id: UUID) -> int:
 async def partner_payable(
     db: AsyncSession, partner_id: UUID, *, now: datetime | None = None
 ) -> int:
-    """What may be paid out now: the balance, minus sales still inside the
-    30-day hold. Never more than the balance."""
+    """What may be paid out now: the balance, minus sales and referral
+    credits still inside the 30-day hold. Never more than the balance."""
     cutoff = (now or _now()) - HOLD
     held = int(
         await db.scalar(
@@ -447,7 +447,7 @@ async def partner_payable(
                 func.coalesce(func.sum(PartnerLedgerEntryModel.amount_cents), 0)
             ).where(
                 PartnerLedgerEntryModel.partner_id == partner_id,
-                PartnerLedgerEntryModel.kind == "sale",
+                PartnerLedgerEntryModel.kind.in_(("sale", "referral")),
                 PartnerLedgerEntryModel.created_at > cutoff,
             )
         )
