@@ -76,6 +76,79 @@ class AppSubscriptionModel(Base, UUIDMixin, TimestampMixin):
     cancel_at_period_end: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    #: The current period is the free trial: nothing was charged for it.
+    is_trial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Usage pricing the merchant approved when subscribing (snapshot).
+    usage_cap_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usage_unit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class AppTrialModel(Base):
+    """A store used its free trial of an app. Survives uninstalling, so a
+    reinstall does not start a second trial."""
+
+    __tablename__ = "app_trials"
+    __table_args__ = ({"schema": "public"},)
+
+    store_id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    app_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tenant_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AppUsageRecordModel(Base, UUIDMixin):
+    """One metered charge an app reported, already taken from the wallet."""
+
+    __tablename__ = "app_usage_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "installation_id", "idempotency_key", name="uq_app_usage_idempotency"
+        ),
+        Index("ix_app_usage_sub_period", "subscription_id", "period_start"),
+        {"schema": "public"},
+    )
+
+    tenant_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    store_id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    app_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.apps.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    installation_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_installations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    subscription_id: Mapped[PyUUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("public.app_subscriptions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class PartnerLedgerEntryModel(Base, UUIDMixin):

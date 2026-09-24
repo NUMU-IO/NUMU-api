@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -23,17 +23,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
-from src.application.services.app_manifest import Pricing, change_type, price_label
+from src.application.services.app_billing import refund_charge
+from src.application.services.app_manifest import (
+    Pricing,
+    change_type,
+    listing_pricing,
+)
 from src.application.services.audit_service import AuditService
 from src.application.services.partner_program import (
     KILL_SWITCH_KEY,
     partner_apps_enabled,
 )
+from src.application.services.wallet_service import (
+    WalletService,
+    WalletSuspendedError,
+)
 from src.core.entities.app import AppStatus
+from src.core.entities.wallet import WalletTransactionKind
 from src.infrastructure.database.models.public.app import (
     AppInstallationModel,
     AppModel,
     AppVersionModel,
+)
+from src.infrastructure.database.models.public.app_billing import (
+    AppSubscriptionModel,
+    PartnerLedgerEntryModel,
 )
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
@@ -41,6 +55,8 @@ from src.infrastructure.database.models.public.partner_account import (
 from src.infrastructure.database.models.public.platform_config import (
     PlatformConfigModel,
 )
+from src.infrastructure.database.models.public.wallet import WalletTransactionModel
+from src.infrastructure.database.models.tenant.store import StoreModel
 
 router = APIRouter(
     prefix="/apps", tags=["Admin - Apps"], dependencies=[Depends(require_admin)]
@@ -445,19 +461,9 @@ async def set_numu_app_pricing(
             status_code=409,
             detail="A Partner App's price comes from its reviewed manifest.",
         )
-    if body.model == "external":
+    if body.model not in ("free", "recurring") or body.usage is not None:
         raise HTTPException(status_code=422, detail="NUMU Apps are free or recurring.")
-    pricing = body.model_dump(mode="json", exclude_none=True)
-    label = price_label(pricing)
-    new = {
-        "plan": body.model,
-        "locales": {lang: {"label": label[lang]} for lang in ("ar", "en")},
-        **(
-            {"price_cents": body.price_cents, "cycle": body.cycle, "currency": "EGP"}
-            if body.model == "recurring"
-            else {}
-        ),
-    }
+    new = listing_pricing(body.model_dump(mode="json", exclude_none=True))
     old = (app.manifest or {}).get("pricing")
     app.manifest = {**(app.manifest or {}), "pricing": new}
     await AuditService(db).log(
@@ -471,3 +477,222 @@ async def set_numu_app_pricing(
     )
     await db.flush()
     return SuccessResponse(data=new)
+
+
+# ─── Paid apps: subscriptions, revenue, refunds ───────────────────
+
+
+@router.get("/subscriptions", response_model=SuccessResponse[list[dict]])
+async def list_subscriptions(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    status: Literal["active", "trial", "past_due", "cancelled"] | None = None,
+    app: str | None = None,
+    store_id: UUID | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    """Every store's paid-app subscription. ``trial`` is an active
+    subscription in its free trial; ``active`` excludes trials."""
+    stmt = (
+        select(AppSubscriptionModel, AppModel.slug, AppModel.name, StoreModel.name)
+        .join(AppModel, AppModel.id == AppSubscriptionModel.app_id)
+        .outerjoin(StoreModel, StoreModel.id == AppSubscriptionModel.store_id)
+        .order_by(AppSubscriptionModel.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    if status in ("active", "trial"):
+        stmt = stmt.where(
+            AppSubscriptionModel.status == "active",
+            AppSubscriptionModel.is_trial.is_(status == "trial"),
+        )
+    elif status:
+        stmt = stmt.where(AppSubscriptionModel.status == status)
+    if app:
+        stmt = stmt.where(AppModel.slug == app)
+    if store_id:
+        stmt = stmt.where(AppSubscriptionModel.store_id == store_id)
+    return SuccessResponse(
+        data=[
+            {
+                "id": str(sub.id),
+                "app_slug": slug,
+                "app_name": app_name,
+                "store_id": str(sub.store_id),
+                "store_name": store_name,
+                "tenant_id": str(sub.tenant_id),
+                "status": "trial"
+                if sub.status == "active" and sub.is_trial
+                else sub.status,
+                "price_cents": sub.price_cents,
+                "currency": sub.currency,
+                "cycle": sub.cycle,
+                "usage_cap_cents": sub.usage_cap_cents,
+                "current_period_end": sub.current_period_end,
+                "cancel_at_period_end": sub.cancel_at_period_end,
+                "created_at": sub.created_at,
+            }
+            for sub, slug, app_name, store_name in await db.execute(stmt)
+        ]
+    )
+
+
+@router.get("/revenue", response_model=SuccessResponse[dict])
+async def revenue(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    months: Annotated[int, Query(ge=1, le=36)] = 12,
+):
+    """App revenue by month (UTC): what merchants paid net of refunds
+    (gross), the partners' share (80% of Partner App sales, net of refunds)
+    and NUMU's (the rest, including all of NUMU Apps' revenue)."""
+    now = datetime.now(UTC)
+    first = now.year * 12 + now.month - months
+    since = datetime(first // 12, first % 12 + 1, 1, tzinfo=UTC)
+    wallet_month = func.date_trunc("month", WalletTransactionModel.created_at)
+    gross = {
+        m.strftime("%Y-%m"): -int(total)
+        for m, total in await db.execute(
+            select(wallet_month, func.sum(WalletTransactionModel.amount_cents))
+            .where(
+                WalletTransactionModel.kind.in_([
+                    WalletTransactionKind.APP_CHARGE.value,
+                    WalletTransactionKind.APP_CHARGE_REVERSAL.value,
+                ]),
+                WalletTransactionModel.created_at >= since,
+            )
+            .group_by(wallet_month)
+        )
+    }
+    ledger_month = func.date_trunc("month", PartnerLedgerEntryModel.created_at)
+    partner = {
+        m.strftime("%Y-%m"): int(total)
+        for m, total in await db.execute(
+            select(ledger_month, func.sum(PartnerLedgerEntryModel.amount_cents))
+            .where(
+                (PartnerLedgerEntryModel.kind == "sale")
+                | PartnerLedgerEntryModel.reference.like("refund:%"),
+                PartnerLedgerEntryModel.created_at >= since,
+            )
+            .group_by(ledger_month)
+        )
+    }
+    rows = [
+        {
+            "month": m,
+            "gross_cents": gross.get(m, 0),
+            "partner_cents": partner.get(m, 0),
+            "numu_cents": gross.get(m, 0) - partner.get(m, 0),
+        }
+        for m in sorted(set(gross) | set(partner), reverse=True)
+    ]
+    totals = {
+        k: sum(r[k] for r in rows)
+        for k in ("gross_cents", "partner_cents", "numu_cents")
+    }
+    return SuccessResponse(data={"currency": "EGP", "months": rows, "totals": totals})
+
+
+@router.get("/charges", response_model=SuccessResponse[list[dict]])
+async def list_charges(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: UUID | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+):
+    """Recent app charges from merchants' wallets, and whether each was
+    refunded."""
+    stmt = (
+        select(WalletTransactionModel)
+        .where(WalletTransactionModel.kind == WalletTransactionKind.APP_CHARGE.value)
+        .order_by(WalletTransactionModel.created_at.desc())
+        .limit(limit)
+    )
+    if tenant_id:
+        stmt = stmt.where(WalletTransactionModel.tenant_id == tenant_id)
+    charges = (await db.execute(stmt)).scalars().all()
+    refunded = set(
+        (
+            await db.execute(
+                select(WalletTransactionModel.idempotency_key).where(
+                    WalletTransactionModel.idempotency_key.in_([
+                        f"app-refund:{c.id}" for c in charges
+                    ])
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return SuccessResponse(
+        data=[
+            {
+                "id": str(c.id),
+                "tenant_id": str(c.tenant_id),
+                "amount_cents": -c.amount_cents,
+                "currency": c.currency,
+                "note": c.note,
+                "created_at": c.created_at,
+                "refunded": f"app-refund:{c.id}" in refunded,
+            }
+            for c in charges
+        ]
+    )
+
+
+class RefundRequest(BaseModel):
+    note: str = Field(min_length=3, max_length=500)
+
+
+@router.post(
+    "/charges/{charge_id}/refund",
+    response_model=SuccessResponse[dict],
+    dependencies=_STEP_UP,
+)
+async def refund_app_charge(
+    charge_id: UUID,
+    body: RefundRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    """Refund an app charge in full: the merchant's wallet gets it back
+    (``app_charge_reversal``) and the partner's 80% of it is taken back (a
+    negative ``adjustment``). Refunding the same charge twice does nothing."""
+    try:
+        result = await refund_charge(
+            db, charge_id=charge_id, actor_user_id=admin_id, note=body.note
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="App charge not found") from None
+    except WalletSuspendedError:
+        raise HTTPException(
+            status_code=409, detail="Wallet is suspended; unsuspend before refunding."
+        ) from None
+    if result is None:
+        return SuccessResponse(
+            data={"refunded": False, "charge_id": str(charge_id)},
+            message="Already refunded",
+        )
+    reversal, adjustment = result
+    await AuditService(db).log(
+        event_type="admin.partner_program",
+        action="app_charge_refunded",
+        resource_type="wallet_transaction",
+        resource_id=str(charge_id),
+        user_id=admin_id,
+        new_value={
+            "amount_cents": reversal.amount_cents,
+            "partner_adjustment_cents": adjustment.amount_cents if adjustment else 0,
+            "note": body.note,
+        },
+    )
+    await db.commit()
+    await WalletService(db).invalidate_cache(reversal.tenant_id)
+    return SuccessResponse(
+        data={
+            "refunded": True,
+            "charge_id": str(charge_id),
+            "reversal_id": str(reversal.id),
+            "amount_cents": reversal.amount_cents,
+            "partner_adjustment_cents": adjustment.amount_cents if adjustment else 0,
+        },
+        message="Refunded",
+    )

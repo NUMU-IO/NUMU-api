@@ -18,10 +18,19 @@ How money moves (apps plan, Phase 7):
 Access follows the money: a paid app's token and webhooks work only while the
 store's subscription covers ``now`` (``is_entitled``). Free and external-priced
 apps are always entitled.
+
+A recurring app may offer a free trial: a store's first subscription to it
+starts a trial period with no charge (once per store and app, ``app_trials``),
+and renewal at its end charges as usual. Usage charges (``record_usage``) are
+taken from the wallet as the app reports them, up to the cap the merchant
+approved for the period, and credit the partner through the same 80/20 path.
 """
 
 from __future__ import annotations
 
+import csv
+import io
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -44,11 +53,14 @@ from src.infrastructure.database.models.public.app import (
 )
 from src.infrastructure.database.models.public.app_billing import (
     AppSubscriptionModel,
+    AppTrialModel,
+    AppUsageRecordModel,
     PartnerLedgerEntryModel,
 )
 from src.infrastructure.database.models.public.partner_account import (
     PartnerAccountModel,
 )
+from src.infrastructure.database.models.public.wallet import WalletTransactionModel
 
 logger = get_logger(__name__)
 
@@ -61,6 +73,7 @@ GRACE = timedelta(days=3)
 #: Partner Agreement § 11.4 (draft, [LEGAL REVIEW]): a sale becomes payable to
 #: the partner 30 days after NUMU collects it.
 HOLD = timedelta(days=30)
+TRIAL_WARNING = timedelta(days=3)
 
 
 class InsufficientFundsError(Exception):
@@ -76,22 +89,36 @@ class NotPaidError(ValueError):
     """The app has no recurring price, so there is nothing to subscribe to."""
 
 
+class UsageError(ValueError):
+    """A usage charge NUMU refuses. ``code`` is the API error code."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 @dataclass(frozen=True)
 class AppPrice:
     price_cents: int
     currency: str
     cycle: str
+    trial_days: int = 0
+    #: ``{"unit", "price_cents"?, "cap_cents"}`` for metered charges.
+    usage: dict | None = None
 
 
 def app_price(app: AppModel) -> AppPrice | None:
-    """The app's recurring price, or None when it is free or priced outside NUMU."""
+    """The app's price, or None when it is free or priced outside NUMU. A
+    usage-only app costs nothing a period and bills monthly periods."""
     pricing = (app.manifest or {}).get("pricing") or {}
-    if pricing.get("plan") != "recurring":
+    if pricing.get("plan") not in ("recurring", "usage"):
         return None
     return AppPrice(
-        price_cents=int(pricing["price_cents"]),
+        price_cents=int(pricing.get("price_cents") or 0),
         currency=pricing.get("currency") or "EGP",
-        cycle=pricing["cycle"],
+        cycle=pricing.get("cycle") or "monthly",
+        trial_days=int(pricing.get("trial_days") or 0),
+        usage=pricing.get("usage"),
     )
 
 
@@ -208,12 +235,13 @@ async def subscribe(
     source: ChargeSource,
     now: datetime | None = None,
 ) -> tuple[AppSubscriptionModel, bool]:
-    """Pay for one period starting now. Returns ``(subscription, charged)``.
+    """Start a period now. Returns ``(subscription, started)``.
 
-    A no-op when the store is already covered (a double click, or paying
-    twice): ``charged`` is then False and nothing is taken. Re-subscribing
-    after a lapse or a cancellation takes the app's CURRENT price. Caller
-    owns the commit.
+    The store's first subscription to an app with a trial is a free trial
+    period; otherwise one period is charged. A no-op when the store is
+    already covered (a double click, or paying twice): ``started`` is then
+    False and nothing is taken. Re-subscribing after a lapse or a
+    cancellation takes the app's CURRENT price. Caller owns the commit.
     """
     now = now or _now()
     price = app_price(app)
@@ -234,15 +262,20 @@ async def subscribe(
 
     end = now + timedelta(days=CYCLE_DAYS[price.cycle])
     key = f"app-sub:{installation.id}:start:{now.isoformat()}"
-    charged = await source.charge(
-        tenant_id=installation.tenant_id,
-        amount_cents=price.price_cents,
-        currency=price.currency,
-        key=key,
-        note=f"{app.slug} ({price.cycle})",
-    )
-    if not charged:
-        return sub, False
+    trial = price.trial_days > 0 and await _claim_trial(db, installation, app)
+    charged = False
+    if trial:
+        end = now + timedelta(days=price.trial_days)
+    elif price.price_cents:
+        charged = await source.charge(
+            tenant_id=installation.tenant_id,
+            amount_cents=price.price_cents,
+            currency=price.currency,
+            key=key,
+            note=f"{app.slug} ({price.cycle})",
+        )
+        if not charged:
+            return sub, False
     if sub is None:
         sub = AppSubscriptionModel(
             tenant_id=installation.tenant_id,
@@ -258,16 +291,84 @@ async def subscribe(
     sub.current_period_start = now
     sub.current_period_end = end
     sub.cancel_at_period_end = False
+    sub.is_trial = trial
+    sub.usage_cap_cents = price.usage["cap_cents"] if price.usage else None
+    sub.usage_unit_cents = price.usage.get("price_cents") if price.usage else None
     await db.flush()
-    await _credit_partner(db, app, sub, price.price_cents, price.currency, key, now)
+    if charged:
+        await _credit_partner(db, app, sub, price.price_cents, price.currency, key, now)
     logger.info(
         "app_subscription_started",
         app=app.slug,
         store_id=str(installation.store_id),
         price_cents=price.price_cents,
+        trial=trial,
         period_end=end.isoformat(),
     )
     return sub, True
+
+
+async def _claim_trial(
+    db: AsyncSession, installation: AppInstallationModel, app: AppModel
+) -> bool:
+    """True the first time a store starts this app's trial, ever."""
+    try:
+        async with db.begin_nested():
+            db.add(
+                AppTrialModel(
+                    store_id=installation.store_id,
+                    app_id=app.id,
+                    tenant_id=installation.tenant_id,
+                )
+            )
+            await db.flush()
+    except IntegrityError:
+        return False
+    return True
+
+
+async def trial_available(db: AsyncSession, store_id: UUID, app: AppModel) -> bool:
+    price = app_price(app)
+    if price is None or not price.trial_days:
+        return False
+    return await db.get(AppTrialModel, (store_id, app.id)) is None
+
+
+def notice(
+    sub: AppSubscriptionModel,
+    app: AppModel,
+    kind: str,
+    dedupe_key: str,
+    *,
+    important: bool = False,
+    link: str | None = None,
+    **data: Any,
+) -> dict[str, Any]:
+    """``emit_notification`` kwargs for a merchant-facing billing event."""
+    return {
+        "store_id": sub.store_id,
+        "tenant_id": sub.tenant_id,
+        "category": "payments",
+        "kind": kind,
+        "data": {"app_name": app.name, "app_slug": app.slug, **data},
+        "link": link or f"/apps/{app.slug}",
+        "important": important,
+        "dedupe_key": dedupe_key,
+        "entity_type": "app_subscription",
+        "entity_id": sub.id,
+    }
+
+
+def started_notice(sub: AppSubscriptionModel, app: AppModel) -> dict[str, Any]:
+    start = _aware(sub.current_period_start).isoformat()
+    return notice(
+        sub,
+        app,
+        "app_trial_started" if sub.is_trial else "app_subscription_started",
+        f"app-started:{sub.id}:{start}",
+        amount_cents=sub.price_cents,
+        period_end=_aware(sub.current_period_end).isoformat(),
+    )
 
 
 async def cancel(
@@ -282,7 +383,11 @@ async def cancel(
 
 
 async def renew_due(
-    db: AsyncSession, *, source: ChargeSource, now: datetime | None = None
+    db: AsyncSession,
+    *,
+    source: ChargeSource,
+    now: datetime | None = None,
+    notices: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
     """Charge the next period of every subscription whose period has ended.
 
@@ -290,7 +395,8 @@ async def renew_due(
     an uninstalled or disabled app, or a suspended app is not charged; a
     wallet that can't pay moves the subscription to ``past_due`` and access
     stops (the merchant tops up and subscribes again). Idempotent: the charge
-    key is the period being bought.
+    key is the period being bought. A trial ending is charged here like any
+    renewal. Merchant notifications to send after commit go to ``notices``.
     """
     now = now or _now()
     stats = {"renewed": 0, "cancelled": 0, "past_due": 0}
@@ -326,26 +432,242 @@ async def renew_due(
             continue
         start = _aware(sub.current_period_end)
         key = f"app-sub:{sub.id}:renew:{start.isoformat()}"
+        charged = False
         try:
-            charged = await source.charge(
-                tenant_id=sub.tenant_id,
-                amount_cents=sub.price_cents,
-                currency=sub.currency,
-                key=key,
-                note=f"{app.slug} ({sub.cycle}) renewal",
-            )
+            if sub.price_cents:
+                charged = await source.charge(
+                    tenant_id=sub.tenant_id,
+                    amount_cents=sub.price_cents,
+                    currency=sub.currency,
+                    key=key,
+                    note=f"{app.slug} ({sub.cycle}) renewal",
+                )
         except (InsufficientFundsError, WalletSuspendedError):
             sub.status = "past_due"
             stats["past_due"] += 1
             logger.info("app_subscription_past_due", app=app.slug, sub=str(sub.id))
+            if notices is not None:
+                notices.append(
+                    notice(
+                        sub,
+                        app,
+                        "app_renewal_failed",
+                        f"app-past-due:{sub.id}:{start.isoformat()}",
+                        important=True,
+                        link="/wallet",
+                        amount_cents=sub.price_cents,
+                    )
+                )
             continue
         sub.current_period_start = start
         sub.current_period_end = start + timedelta(days=CYCLE_DAYS[sub.cycle])
+        sub.is_trial = False
         if charged:
             await _credit_partner(db, app, sub, sub.price_cents, sub.currency, key, now)
             stats["renewed"] += 1
+            if notices is not None:
+                notices.append(
+                    notice(
+                        sub,
+                        app,
+                        "app_renewal_charged",
+                        f"app-renewal:{key}",
+                        amount_cents=sub.price_cents,
+                        period_end=_aware(sub.current_period_end).isoformat(),
+                    )
+                )
     await db.flush()
     return stats
+
+
+async def trial_ending_notices(
+    db: AsyncSession, *, now: datetime | None = None
+) -> list[dict[str, Any]]:
+    """Trials that end within 3 days and will be charged: warn once each."""
+    now = now or _now()
+    rows = (
+        await db.execute(
+            select(AppSubscriptionModel, AppModel)
+            .join(AppModel, AppModel.id == AppSubscriptionModel.app_id)
+            .where(
+                AppSubscriptionModel.status == "active",
+                AppSubscriptionModel.is_trial.is_(True),
+                AppSubscriptionModel.cancel_at_period_end.is_(False),
+                AppSubscriptionModel.current_period_end > now,
+                AppSubscriptionModel.current_period_end <= now + TRIAL_WARNING,
+            )
+        )
+    ).all()
+    return [
+        notice(
+            sub,
+            app,
+            "app_trial_ending",
+            f"app-trial-ending:{sub.id}",
+            important=True,
+            amount_cents=sub.price_cents,
+            period_end=_aware(sub.current_period_end).isoformat(),
+        )
+        for sub, app in rows
+    ]
+
+
+async def usage_used_cents(db: AsyncSession, sub: AppSubscriptionModel) -> int:
+    """Usage charged in the subscription's current period."""
+    return int(
+        await db.scalar(
+            select(func.coalesce(func.sum(AppUsageRecordModel.amount_cents), 0)).where(
+                AppUsageRecordModel.subscription_id == sub.id,
+                AppUsageRecordModel.period_start == sub.current_period_start,
+            )
+        )
+        or 0
+    )
+
+
+async def record_usage(
+    db: AsyncSession,
+    *,
+    installation: AppInstallationModel,
+    app: AppModel,
+    source: ChargeSource,
+    description: str,
+    idempotency_key: str,
+    amount_cents: int | None = None,
+    units: int | None = None,
+    now: datetime | None = None,
+    notices: list[dict[str, Any]] | None = None,
+) -> tuple[AppUsageRecordModel, bool]:
+    """Charge one usage record to the wallet now. Returns ``(record, new)``.
+
+    Charged immediately rather than summed at period end: nothing is owed
+    that the wallet has not paid, a refused charge is visible to the app at
+    once, and each record refunds like any other ``app_charge``. The same
+    ``idempotency_key`` from the same installation returns the first record.
+    Raises UsageError (``subscription_inactive``, ``usage_not_enabled``,
+    ``invalid_amount``, ``usage_cap_exceeded``) or InsufficientFundsError.
+    Caller owns the commit.
+    """
+    now = now or _now()
+    sub = await subscription_for(db, installation.id, for_update=True)
+    existing = await db.scalar(
+        select(AppUsageRecordModel).where(
+            AppUsageRecordModel.installation_id == installation.id,
+            AppUsageRecordModel.idempotency_key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        return existing, False
+    if not paid_through(sub, now):
+        raise UsageError(
+            "subscription_inactive",
+            "The store's subscription to this app is not active.",
+        )
+    if not sub.usage_cap_cents:
+        raise UsageError("usage_not_enabled", "This subscription has no usage pricing.")
+    if sub.usage_unit_cents:
+        if not units or units < 1 or amount_cents is not None:
+            raise UsageError("invalid_amount", "Report units, not an amount.")
+        amount = units * sub.usage_unit_cents
+    else:
+        if not amount_cents or amount_cents < 1 or units is not None:
+            raise UsageError("invalid_amount", "Report amount_cents, not units.")
+        amount = amount_cents
+    used = await usage_used_cents(db, sub)
+    cap_notice = notice(
+        sub,
+        app,
+        "app_usage_cap_reached",
+        f"app-usage-cap:{sub.id}:{_aware(sub.current_period_start).isoformat()}",
+        important=True,
+        cap_cents=sub.usage_cap_cents,
+    )
+    if used + amount > sub.usage_cap_cents:
+        if notices is not None:
+            notices.append(cap_notice)
+        raise UsageError(
+            "usage_cap_exceeded",
+            f"This charge would exceed the approved cap of {sub.usage_cap_cents} "
+            f"piasters for the period ({used} used).",
+        )
+    key = f"app-usage:{installation.id}:{idempotency_key}"
+    await source.charge(
+        tenant_id=installation.tenant_id,
+        amount_cents=amount,
+        currency=sub.currency,
+        key=key,
+        note=f"{app.slug} usage: {description}"[:255],
+    )
+    record = AppUsageRecordModel(
+        tenant_id=installation.tenant_id,
+        store_id=installation.store_id,
+        app_id=app.id,
+        installation_id=installation.id,
+        subscription_id=sub.id,
+        period_start=sub.current_period_start,
+        units=units,
+        amount_cents=amount,
+        description=description,
+        idempotency_key=idempotency_key,
+        created_at=now,
+    )
+    db.add(record)
+    await db.flush()
+    await _credit_partner(db, app, sub, amount, sub.currency, key, now)
+    if used + amount == sub.usage_cap_cents and notices is not None:
+        notices.append(cap_notice)
+    return record, True
+
+
+async def refund_charge(
+    db: AsyncSession, *, charge_id: UUID, actor_user_id: UUID, note: str
+) -> tuple[WalletTransactionModel, PartnerLedgerEntryModel | None] | None:
+    """Refund one ``app_charge`` in full: credit the merchant's wallet
+    (``app_charge_reversal``) and take back the partner's share of it (a
+    negative ``adjustment``). None when it was already refunded. Raises
+    LookupError for anything that is not an app charge. Caller commits, then
+    invalidates the wallet cache."""
+    charge = await db.get(WalletTransactionModel, charge_id)
+    if charge is None or charge.kind != WalletTransactionKind.APP_CHARGE.value:
+        raise LookupError("App charge not found")
+    reversal = await WalletService(db).apply_entry(
+        tenant_id=charge.tenant_id,
+        kind=WalletTransactionKind.APP_CHARGE_REVERSAL,
+        amount_cents=-charge.amount_cents,
+        currency=charge.currency,
+        idempotency_key=f"app-refund:{charge.id}",
+        actor_user_id=actor_user_id,
+        note=note,
+        meta={"charge_id": str(charge.id)},
+    )
+    if reversal is None:
+        return None
+    sale = await db.scalar(
+        select(PartnerLedgerEntryModel).where(
+            PartnerLedgerEntryModel.idempotency_key == charge.idempotency_key,
+            PartnerLedgerEntryModel.kind == "sale",
+        )
+    )
+    if sale is None:
+        return reversal, None
+    reference = f"refund:{charge.id}"
+    entry = PartnerLedgerEntryModel(
+        partner_id=sale.partner_id,
+        kind="adjustment",
+        amount_cents=-sale.amount_cents,
+        gross_cents=-(sale.gross_cents or 0),
+        platform_fee_cents=-(sale.platform_fee_cents or 0),
+        currency=sale.currency,
+        app_id=sale.app_id,
+        subscription_id=sale.subscription_id,
+        idempotency_key=reference,
+        reference=reference,
+        actor_user_id=actor_user_id,
+        note=note,
+    )
+    db.add(entry)
+    await db.flush()
+    return reversal, entry
 
 
 async def _credit_partner(
@@ -404,6 +726,20 @@ async def app_labels(
         select(AppModel.id, AppModel.name, AppModel.slug).where(AppModel.id.in_(ids))
     )
     return {r.id: {"name": r.name, "slug": r.slug} for r in rows}
+
+
+async def charge_ids(db: AsyncSession, keys: list[str]) -> dict[str, str]:
+    """``{idempotency_key: wallet charge id}``: a sale shares its key with
+    the ``app_charge`` it came from, which is what a refund names."""
+    if not keys:
+        return {}
+    rows = await db.execute(
+        select(WalletTransactionModel.idempotency_key, WalletTransactionModel.id).where(
+            WalletTransactionModel.idempotency_key.in_(keys),
+            WalletTransactionModel.kind == WalletTransactionKind.APP_CHARGE.value,
+        )
+    )
+    return {k: str(i) for k, i in rows}
 
 
 async def partner_balance(db: AsyncSession, partner_id: UUID) -> int:
@@ -521,6 +857,153 @@ async def record_payout(
     except IntegrityError as exc:
         raise ValueError(f"Transfer {reference} is already recorded.") from exc
     return entry
+
+
+MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+def month_bounds(month: str) -> tuple[datetime, datetime]:
+    """``YYYY-MM`` to ``[start, end)`` in UTC."""
+    if not MONTH_RE.match(month):
+        raise ValueError("month must be YYYY-MM")
+    year, mon = int(month[:4]), int(month[5:])
+    start = datetime(year, mon, 1, tzinfo=UTC)
+    end = datetime(year + mon // 12, mon % 12 + 1, 1, tzinfo=UTC)
+    return start, end
+
+
+def is_refund(entry: PartnerLedgerEntryModel) -> bool:
+    return entry.kind == "adjustment" and (entry.reference or "").startswith("refund:")
+
+
+async def partner_statement(
+    db: AsyncSession, partner_id: UUID, month: str
+) -> dict[str, Any]:
+    """One month of a partner's ledger. Every figure is signed as it moves
+    the balance, so ``closing = opening + net_sales + refunds + adjustments
+    + payouts``. Sales: what merchants paid (gross), NUMU's 20% (fees) and
+    the partner's 80% (net). Refunds reverse a sale's share."""
+    start, end = month_bounds(month)
+    opening = int(
+        await db.scalar(
+            select(
+                func.coalesce(func.sum(PartnerLedgerEntryModel.amount_cents), 0)
+            ).where(
+                PartnerLedgerEntryModel.partner_id == partner_id,
+                PartnerLedgerEntryModel.created_at < start,
+            )
+        )
+        or 0
+    )
+    entries = (
+        (
+            await db.execute(
+                select(PartnerLedgerEntryModel)
+                .where(
+                    PartnerLedgerEntryModel.partner_id == partner_id,
+                    PartnerLedgerEntryModel.created_at >= start,
+                    PartnerLedgerEntryModel.created_at < end,
+                )
+                .order_by(PartnerLedgerEntryModel.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sales = [e for e in entries if e.kind == "sale"]
+    refunds = [e for e in entries if is_refund(e)]
+    others = [e for e in entries if e.kind == "adjustment" and not is_refund(e)]
+    payouts = [e for e in entries if e.kind == "payout"]
+    apps = await app_labels(db, [e.app_id for e in entries])
+    return {
+        "month": month,
+        "currency": "EGP",
+        "opening_balance_cents": opening,
+        "gross_sales_cents": sum(e.gross_cents or 0 for e in sales),
+        "platform_fees_cents": sum(e.platform_fee_cents or 0 for e in sales),
+        "net_sales_cents": sum(e.amount_cents for e in sales),
+        "refunds_cents": sum(e.amount_cents for e in refunds),
+        "adjustments_cents": sum(e.amount_cents for e in others),
+        "payouts_cents": sum(e.amount_cents for e in payouts),
+        "closing_balance_cents": opening + sum(e.amount_cents for e in entries),
+        "entries": [
+            {
+                "id": str(e.id),
+                "kind": "refund" if is_refund(e) else e.kind,
+                "amount_cents": e.amount_cents,
+                "gross_cents": e.gross_cents,
+                "platform_fee_cents": e.platform_fee_cents,
+                "app_name": apps.get(e.app_id, {}).get("name"),
+                "app_slug": apps.get(e.app_id, {}).get("slug"),
+                "reference": e.reference,
+                "created_at": _aware(e.created_at).isoformat(),
+            }
+            for e in entries
+        ],
+    }
+
+
+STATEMENT_TOTALS = (
+    "opening_balance_cents",
+    "gross_sales_cents",
+    "platform_fees_cents",
+    "net_sales_cents",
+    "refunds_cents",
+    "adjustments_cents",
+    "payouts_cents",
+    "closing_balance_cents",
+)
+
+
+def statement_csv(statement: dict[str, Any]) -> str:
+    """The statement as CSV: the totals, a blank line, then every entry."""
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["month", statement["month"]])
+    w.writerow(["currency", statement["currency"]])
+    for k in STATEMENT_TOTALS:
+        w.writerow([k, statement[k]])
+    w.writerow([])
+    cols = [
+        "created_at",
+        "kind",
+        "app_slug",
+        "gross_cents",
+        "platform_fee_cents",
+        "amount_cents",
+        "reference",
+    ]
+    w.writerow(cols)
+    for e in statement["entries"]:
+        w.writerow([e[c] if e[c] is not None else "" for c in cols])
+    return out.getvalue()
+
+
+async def subscription_view(
+    db: AsyncSession,
+    sub: AppSubscriptionModel | None,
+    app: AppModel,
+    store_id: UUID,
+) -> dict[str, Any]:
+    """``subscription_out`` plus what needs the database: the trial still on
+    offer and this period's usage."""
+    price = app_price(app)
+    usage = price.usage if price else None
+    return {
+        **subscription_out(sub, app),
+        "trial_days": price.trial_days if price else 0,
+        "trial_available": await trial_available(db, store_id, app),
+        "is_trial": bool(sub and sub.is_trial),
+        "usage": {
+            "unit": usage["unit"],
+            "unit_price_cents": (sub.usage_unit_cents if sub else None)
+            or usage.get("price_cents"),
+            "cap_cents": (sub.usage_cap_cents if sub else None) or usage["cap_cents"],
+            "used_cents": await usage_used_cents(db, sub) if sub else 0,
+        }
+        if usage
+        else None,
+    }
 
 
 def subscription_out(sub: AppSubscriptionModel | None, app: AppModel) -> dict[str, Any]:

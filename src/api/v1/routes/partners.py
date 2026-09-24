@@ -14,6 +14,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,7 @@ from src.api.dependencies.partners import (
     require_partner_program,
 )
 from src.api.responses import SuccessResponse
+from src.application.services.app_billing import partner_statement, statement_csv
 from src.application.services.partner_program import (
     AGREEMENT_VERSION,
     MAX_DEV_STORES,
@@ -450,4 +452,49 @@ async def earnings(
                 for e in rows
             ],
         }
+    )
+
+
+# ─── Monthly statements (paid apps) ───────────────────────────────
+
+
+async def _my_statement(db: AsyncSession, user_id: UUID, month: str) -> dict:
+    account = await partner_for_user(db, user_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="No partner account")
+    try:
+        return await partner_statement(db, account.id, month)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get(
+    "/me/statements",
+    response_model=SuccessResponse[dict],
+    operation_id="get_partner_statement",
+)
+async def statement(
+    month: str,
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """One month (``YYYY-MM``, UTC) of your ledger: sales (gross, NUMU's 20%
+    fee, your 80%), refunds, adjustments, payouts, and the opening and
+    closing balance NUMU owes you."""
+    return SuccessResponse(data=await _my_statement(db, user_id, month))
+
+
+@router.get("/me/statements/{month}.csv", operation_id="get_partner_statement_csv")
+async def statement_csv_export(
+    month: str,
+    user_id: Annotated[UUID, Depends(require_approved_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    body = statement_csv(await _my_statement(db, user_id, month))
+    return Response(
+        content=body,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="numu-statement-{month}.csv"'
+        },
     )

@@ -236,12 +236,25 @@ CYCLE_LABELS = {
 }
 
 
-class Pricing(_Strict):
-    """``free``; ``external`` (the partner bills the merchant themselves); or
-    ``recurring``: NUMU charges the merchant's wallet every cycle and pays the
-    partner 80% (app_billing). ``one_time`` is not offered."""
+class UsagePricing(_Strict):
+    """Metered charges an app reports (``POST /api/v1/app/usage-charges``),
+    taken from the merchant's wallet as they happen and never more than
+    ``cap_cents`` a cycle, which the merchant approves when subscribing.
+    With ``price_cents`` the app reports units; without it, amounts."""
 
-    model: Literal["free", "external", "recurring"]
+    unit: Bilingual
+    price_cents: int | None = Field(default=None, ge=1, le=10_000_000)
+    cap_cents: int = Field(ge=100, le=10_000_000)
+
+
+class Pricing(_Strict):
+    """``free``; ``external`` (the partner bills the merchant themselves);
+    ``recurring``: NUMU charges the merchant's wallet every cycle and pays the
+    partner 80% (app_billing), optionally after a free trial and with metered
+    ``usage`` on top; or ``usage``: metered charges only, over monthly
+    periods. ``one_time`` is not offered."""
+
+    model: Literal["free", "external", "recurring", "usage"]
     #: For ``external``: what the merchant will be charged, shown on the listing.
     #: For ``recurring`` it defaults to the price and cycle.
     label: Bilingual | None = None
@@ -249,6 +262,10 @@ class Pricing(_Strict):
     price_cents: int | None = Field(default=None, ge=500, le=10_000_000)
     cycle: Literal["monthly", "annual"] | None = None
     currency: Literal["EGP"] = "EGP"
+    #: ``recurring`` only: free days before the first charge, once per store.
+    trial_days: int | None = Field(default=None, ge=0, le=90)
+    #: ``usage`` (required) or ``recurring`` (optional).
+    usage: UsagePricing | None = None
 
     @model_validator(mode="after")
     def _recurring_has_a_price(self):
@@ -261,6 +278,12 @@ class Pricing(_Strict):
             raise ValueError(
                 "pricing.price_cents and pricing.cycle are for recurring only"
             )
+        if self.model != "recurring" and self.trial_days:
+            raise ValueError("pricing.trial_days is for recurring only")
+        if self.model == "usage" and self.usage is None:
+            raise ValueError("pricing.usage is required for usage")
+        if self.model not in ("recurring", "usage") and self.usage is not None:
+            raise ValueError("pricing.usage is for recurring or usage only")
         return self
 
 
@@ -269,20 +292,60 @@ class Pricing(_Strict):
 _AR_DIGITS = str.maketrans("0123456789,.", "٠١٢٣٤٥٦٧٨٩٬٫")
 
 
+def _egp(cents: int) -> tuple[str, str]:
+    amount = f"{cents / 100:,.2f}".removesuffix(".00")
+    return amount.translate(_AR_DIGITS), amount
+
+
 def price_label(pricing: dict[str, Any]) -> dict[str, str] | None:
     """The listing's price text in both languages."""
     if pricing.get("label"):
         return pricing["label"]
-    if pricing["model"] == "free":
+    model = pricing.get("model") or pricing.get("plan")
+    if model == "free":
         return {"ar": "مجاني", "en": "Free"}
-    if pricing["model"] == "recurring":
-        amount = f"{pricing['price_cents'] / 100:,.2f}".removesuffix(".00")
-        cycle = CYCLE_LABELS[pricing["cycle"]]
-        return {
-            "ar": f"{amount.translate(_AR_DIGITS)} ج.م {cycle['ar']}",
-            "en": f"EGP {amount} {cycle['en']}",
+    if model not in ("recurring", "usage"):
+        return None
+    usage = pricing.get("usage")
+    if usage:
+        cap_ar, cap_en = _egp(usage["cap_cents"])
+        usage_ar = f"حسب الاستخدام حتى {cap_ar} ج.م في الشهر"
+        usage_en = f"usage up to EGP {cap_en} / month"
+    if model == "usage":
+        return {"ar": usage_ar, "en": usage_en[0].upper() + usage_en[1:]}
+    ar, en = _egp(pricing["price_cents"])
+    cycle = CYCLE_LABELS[pricing["cycle"]]
+    label = {"ar": f"{ar} ج.م {cycle['ar']}", "en": f"EGP {en} {cycle['en']}"}
+    if usage:
+        label = {
+            "ar": f"{label['ar']} + {usage_ar}",
+            "en": f"{label['en']} + {usage_en}",
         }
-    return None
+    days = pricing.get("trial_days")
+    if days:
+        label = {
+            "ar": f"تجربة مجانية {str(days).translate(_AR_DIGITS)} يوم ثم {label['ar']}",
+            "en": f"{days}-day free trial, then {label['en']}",
+        }
+    return label
+
+
+def listing_pricing(pricing: dict[str, Any]) -> dict[str, Any]:
+    """A validated ``Pricing`` in the shape ``apps.manifest.pricing`` stores
+    (``plan`` rather than ``model``); app_billing reads the money fields."""
+    label = price_label(pricing)
+    model = pricing["model"]
+    return {
+        "plan": model,
+        "locales": {lang: {"label": label[lang]} for lang in ("ar", "en")}
+        if label
+        else {},
+        **{
+            k: pricing[k]
+            for k in ("price_cents", "cycle", "currency", "trial_days", "usage")
+            if model in ("recurring", "usage") and pricing.get(k) is not None
+        },
+    }
 
 
 class ManifestV1(_Strict):
@@ -431,7 +494,6 @@ def change_type(new: dict[str, Any], published: dict[str, Any] | None) -> str:
 def to_listing_manifest(m: dict[str, Any], *, developer_name: str) -> dict[str, Any]:
     """A validated v1 manifest in the shape ``apps.manifest`` readers use."""
     pricing = m["pricing"]
-    label = price_label(pricing)
     dev = m["developer"]
     return {
         "version": m["version"],
@@ -459,18 +521,7 @@ def to_listing_manifest(m: dict[str, Any], *, developer_name: str) -> dict[str, 
         ],
         "highlights": [],
         "features": [],
-        "pricing": {
-            "plan": pricing["model"],
-            "locales": {lang: {"label": label[lang]} for lang in ("ar", "en")}
-            if label
-            else {},
-            # app_billing reads these for a recurring price.
-            **{
-                k: pricing[k]
-                for k in ("price_cents", "cycle", "currency")
-                if pricing["model"] == "recurring"
-            },
-        },
+        "pricing": listing_pricing(pricing),
         "languages": m.get("languages") or ["ar", "en"],
         "settings_schema": m.get("settings_schema") or [],
         "public_settings": [],

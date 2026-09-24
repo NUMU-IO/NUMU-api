@@ -24,6 +24,7 @@ class WalletTransactionKind(StrEnum):
     COMMISSION_REVERSAL = "commission_reversal"  # +
     ADJUSTMENT = "adjustment"  # +/- (admin, audited via actor_user_id)
     APP_CHARGE = "app_charge"  # - (a paid app's period; app_billing)
+    APP_CHARGE_REVERSAL = "app_charge_reversal"  # + (an app charge refunded)
 
 
 class TopupMethod(StrEnum):

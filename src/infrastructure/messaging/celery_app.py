@@ -661,6 +661,10 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.renew_app_subscriptions",
         "schedule": crontab(minute=25),  # Hourly at :25
     },
+    "warn-app-trials-ending": {
+        "task": "tasks.warn_app_trials_ending",
+        "schedule": crontab(hour=8, minute=5),  # Daily at 08:05 UTC
+    },
     # NUMU Apps: an uninstalled app's conversations are deleted after 30 days.
     "purge-uninstalled-numu-apps": {
         "task": "tasks.purge_uninstalled_numu_apps",

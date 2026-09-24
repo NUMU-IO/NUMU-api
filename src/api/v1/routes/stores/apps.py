@@ -662,12 +662,17 @@ async def _install_for(session, store_id: UUID, slug: str):
     operation_id="get_app_subscription",
 )
 async def get_subscription(store_id: UUID, slug: str):
-    from src.application.services.app_billing import subscription_for, subscription_out
+    from src.application.services.app_billing import (
+        subscription_for,
+        subscription_view,
+    )
 
     async with AsyncSessionLocal() as session:
         install, app = await _install_for(session, store_id, slug)
         sub = await subscription_for(session, install.id)
-        return SuccessResponse(data=subscription_out(sub, app))
+        return SuccessResponse(
+            data=await subscription_view(session, sub, app, store_id)
+        )
 
 
 @router.post(
@@ -677,15 +682,20 @@ async def get_subscription(store_id: UUID, slug: str):
     operation_id="subscribe_app",
 )
 async def subscribe_app(store_id: UUID, slug: str):
-    """Charges one period to the NUMU wallet, now. Already covered: nothing is
+    """Charges one period to the NUMU wallet, now, or starts the app's free
+    trial on the store's first subscription. Already covered: nothing is
     charged (and a pending cancellation is withdrawn). 402 when the wallet
     can't cover it; top it up (InstaPay, Vodafone Cash or card) and retry."""
     from src.application.services.app_billing import (
         InsufficientFundsError,
         NotPaidError,
         WalletChargeSource,
+        started_notice,
         subscribe,
-        subscription_out,
+        subscription_view,
+    )
+    from src.application.services.notification_feed import (
+        emit_notification_standalone,
     )
     from src.application.services.wallet_service import WalletSuspendedError
 
@@ -699,7 +709,7 @@ async def subscribe_app(store_id: UUID, slug: str):
             raise HTTPException(status_code=409, detail="This app is not available.")
         source = WalletChargeSource(session)
         try:
-            sub, charged = await subscribe(
+            sub, started = await subscribe(
                 session, installation=install, app=app, source=source
             )
         except NotPaidError:
@@ -719,10 +729,12 @@ async def subscribe_app(store_id: UUID, slug: str):
             ) from None
         await session.commit()
         await source.invalidate()
-        logger.info("app_subscribe", app=slug, store_id=str(store_id), charged=charged)
+        logger.info("app_subscribe", app=slug, store_id=str(store_id), started=started)
+        if started:
+            await emit_notification_standalone(**started_notice(sub, app))
         return SuccessResponse(
-            data=subscription_out(sub, app),
-            message="Subscribed" if charged else "Already active",
+            data=await subscription_view(session, sub, app, store_id),
+            message="Subscribed" if started else "Already active",
         )
 
 
@@ -733,10 +745,12 @@ async def subscribe_app(store_id: UUID, slug: str):
     operation_id="cancel_app_subscription",
 )
 async def cancel_subscription(store_id: UUID, slug: str):
-    from src.application.services.app_billing import cancel, subscription_out
+    from src.application.services.app_billing import cancel, subscription_view
 
     async with AsyncSessionLocal() as session:
         install, app = await _install_for(session, store_id, slug)
         sub = await cancel(session, install.id)
         await session.commit()
-        return SuccessResponse(data=subscription_out(sub, app))
+        return SuccessResponse(
+            data=await subscription_view(session, sub, app, store_id)
+        )
