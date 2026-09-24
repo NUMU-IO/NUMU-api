@@ -11,6 +11,10 @@ other app billing tables:
   sale was booked with;
 - ``app_coupons`` and ``app_coupon_redemptions`` (one per store and coupon);
 - ``app_subscriptions.coupon_id`` / ``coupon_cycles_left``;
+- ``app_subscriptions.vat_grandfathered``: true for every subscription that
+  exists when this runs (they keep renewing without VAT until they end or
+  are subscribed again), false for new ones. Added once: a rerun never
+  grandfathers later rows;
 - ``app_fee_invoices``: NUMU's numbered invoice (and credit note) for its
   fee and the VAT on it, one per wallet charge.
 
@@ -90,6 +94,24 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'app_subscriptions'
+                  AND column_name = 'vat_grandfathered'
+            ) THEN
+                ALTER TABLE public.app_subscriptions
+                    ADD COLUMN vat_grandfathered BOOLEAN NOT NULL DEFAULT true;
+                ALTER TABLE public.app_subscriptions
+                    ALTER COLUMN vat_grandfathered SET DEFAULT false;
+            END IF;
+        END $$;
+        """
+    )
+    op.execute(
+        """
         CREATE TABLE IF NOT EXISTS public.app_fee_invoices (
             id UUID PRIMARY KEY,
             number VARCHAR(32) NOT NULL,
@@ -127,6 +149,7 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS public.app_fee_invoices")
     op.execute(
         "ALTER TABLE public.app_subscriptions "
+        "DROP COLUMN IF EXISTS vat_grandfathered, "
         "DROP COLUMN IF EXISTS coupon_cycles_left, "
         "DROP COLUMN IF EXISTS coupon_id"
     )

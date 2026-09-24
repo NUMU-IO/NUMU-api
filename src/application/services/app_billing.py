@@ -169,6 +169,7 @@ class Quote:
     discount_cents: int
     capped: bool = False
     partner_id: UUID | None = None
+    vat_bps: int = VAT_BPS
 
     @property
     def partner_cents(self) -> int:
@@ -184,7 +185,7 @@ class Quote:
             "discount_cents": self.discount_cents,
             "discount_capped": self.capped,
             "vat_cents": self.vat_cents,
-            "vat_bps": VAT_BPS,
+            "vat_bps": self.vat_bps,
             "total_cents": self.total_cents,
         }
 
@@ -194,16 +195,18 @@ def quote(
     share_bps: int,
     discount_cents: int = 0,
     partner_id: UUID | None = None,
+    vat_bps: int = VAT_BPS,
 ) -> Quote:
     share, fee = split(list_cents, share_bps)
     return Quote(
         list_cents=list_cents,
         share_bps=share_bps,
         fee_cents=fee,
-        vat_cents=bps_of(fee, VAT_BPS),
+        vat_cents=bps_of(fee, vat_bps),
         discount_cents=min(discount_cents, share),
         capped=discount_cents > share,
         partner_id=partner_id,
+        vat_bps=vat_bps,
     )
 
 
@@ -233,12 +236,22 @@ async def partner_terms(db: AsyncSession, app: AppModel) -> tuple[UUID | None, i
     return (account.id if account else None), effective_share_bps(account)
 
 
+def sub_vat_bps(sub: AppSubscriptionModel | None) -> int:
+    """No VAT for a subscription grandfathered from before VAT on app fees,
+    until it ends or is subscribed again."""
+    return 0 if sub is not None and sub.vat_grandfathered else VAT_BPS
+
+
 async def quote_for(
-    db: AsyncSession, app: AppModel, list_cents: int, coupon: AppCouponModel | None
+    db: AsyncSession,
+    app: AppModel,
+    list_cents: int,
+    coupon: AppCouponModel | None,
+    vat_bps: int = VAT_BPS,
 ) -> Quote:
     partner_id, share_bps = await partner_terms(db, app)
     discount = coupon_discount(coupon, list_cents) if coupon else 0
-    return quote(list_cents, share_bps, discount, partner_id)
+    return quote(list_cents, share_bps, discount, partner_id, vat_bps)
 
 
 class ChargeSource(Protocol):
@@ -419,6 +432,7 @@ async def subscribe(
     sub.current_period_end = end
     sub.cancel_at_period_end = False
     sub.is_trial = trial
+    sub.vat_grandfathered = False
     sub.usage_cap_cents = price.usage["cap_cents"] if price.usage else None
     sub.usage_unit_cents = price.usage.get("price_cents") if price.usage else None
     await db.flush()
@@ -588,9 +602,10 @@ async def _charge(
     key: str,
     note: str,
     coupon: AppCouponModel | None = None,
+    vat_bps: int = VAT_BPS,
 ) -> tuple[Quote, WalletTransactionModel | None]:
     """Take the list price, less the coupon, plus VAT on NUMU's fee."""
-    q = await quote_for(db, app, list_cents, coupon)
+    q = await quote_for(db, app, list_cents, coupon, vat_bps)
     tx = await source.charge(
         tenant_id=tenant_id,
         amount_cents=q.total_cents,
@@ -676,7 +691,7 @@ async def issue_fee_invoice(
         discount_cents=sign * q.discount_cents,
         fee_cents=sign * q.fee_cents,
         vat_cents=sign * q.vat_cents,
-        vat_bps=original.vat_bps if original else VAT_BPS,
+        vat_bps=q.vat_bps,
         share_bps=q.share_bps,
         total_cents=sign * q.total_cents,
         currency=tx.currency,
@@ -794,7 +809,7 @@ async def renew_due(
         start = _aware(sub.current_period_end)
         key = f"app-sub:{sub.id}:renew:{start.isoformat()}"
         coupon = await _active_coupon(db, sub)
-        q = await quote_for(db, app, sub.price_cents, coupon)
+        q = await quote_for(db, app, sub.price_cents, coupon, sub_vat_bps(sub))
         tx = None
         try:
             if sub.price_cents:
@@ -808,6 +823,7 @@ async def renew_due(
                     key=key,
                     note=f"{app.slug} ({sub.cycle}) renewal",
                     coupon=coupon,
+                    vat_bps=sub_vat_bps(sub),
                 )
         except (InsufficientFundsError, WalletSuspendedError):
             sub.status = "past_due"
@@ -969,6 +985,7 @@ async def record_usage(
         currency=sub.currency,
         key=key,
         note=f"{app.slug} usage: {description}"[:255],
+        vat_bps=sub_vat_bps(sub),
     )
     record = AppUsageRecordModel(
         tenant_id=installation.tenant_id,
@@ -1033,6 +1050,7 @@ async def refund_charge(
                 fee_cents=invoice.fee_cents,
                 vat_cents=invoice.vat_cents,
                 discount_cents=invoice.discount_cents,
+                vat_bps=invoice.vat_bps,
             ),
             store_id=invoice.store_id,
             app_id=invoice.app_id,
@@ -1405,10 +1423,17 @@ async def subscription_view(
         price.price_cents if price else 0
     )
     coupon = await _active_coupon(db, sub)
-    next_charge = await quote_for(db, app, list_cents, coupon) if price else None
+    live = sub is not None and sub.status == "active"
+    next_charge = (
+        await quote_for(
+            db, app, list_cents, coupon, sub_vat_bps(sub) if live else VAT_BPS
+        )
+        if price
+        else None
+    )
     return {
         **subscription_out(sub, app),
-        "vat_bps": VAT_BPS,
+        "vat_bps": next_charge.vat_bps if next_charge else VAT_BPS,
         "next_charge": next_charge.out() if next_charge else None,
         "coupon": {
             "code": coupon.code,

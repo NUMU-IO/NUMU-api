@@ -304,3 +304,55 @@ async def test_a_partner_manages_and_sees_only_their_own(test_session):
     ).data
     assert mine["counts"]["active"] == 1 and mine["total"] == 1
     assert theirs["total"] == 0
+
+
+# ─── Grandfathered subscriptions ───────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_grandfathered_subscription_renews_without_vat(test_session):
+    tenant, app, install, partner = await _seed(test_session, balance=50_000)
+    sub, _ = await _subscribe(test_session, install, app)
+    sub.vat_grandfathered = True
+    await test_session.commit()
+    after_first = await _balance(test_session, tenant.id)
+    assert after_first == 50_000 - PRICE - 277
+
+    await billing.renew_due(
+        test_session, source=_source(test_session), now=NOW + timedelta(days=31)
+    )
+    await test_session.commit()
+    assert await _balance(test_session, tenant.id) == after_first - PRICE
+    invoice = await test_session.scalar(
+        select(AppFeeInvoiceModel).order_by(AppFeeInvoiceModel.number.desc())
+    )
+    assert (invoice.vat_cents, invoice.vat_bps, invoice.total_cents) == (0, 0, PRICE)
+    assert await _ledger_sum(test_session, partner.id) == 2 * 7_920
+
+
+@pytest.mark.asyncio
+async def test_a_new_subscription_is_not_grandfathered(test_session):
+    tenant, app, install, _ = await _seed(test_session, balance=20_000)
+    sub, _ = await _subscribe(test_session, install, app)
+    await test_session.commit()
+    assert sub.vat_grandfathered is False
+    assert await _balance(test_session, tenant.id) == 20_000 - PRICE - 277
+
+
+@pytest.mark.asyncio
+async def test_resubscribing_after_cancel_ends_the_grandfathering(test_session):
+    tenant, app, install, _ = await _seed(test_session, balance=50_000)
+    sub, _ = await _subscribe(test_session, install, app)
+    sub.vat_grandfathered = True
+    await billing.cancel(test_session, install.id)
+    await test_session.commit()
+    later = NOW + timedelta(days=31)
+    await billing.renew_due(test_session, source=_source(test_session), now=later)
+    await test_session.commit()
+    assert sub.status == "cancelled"
+    before = await _balance(test_session, tenant.id)
+
+    sub, started = await _subscribe(test_session, install, app, now=later)
+    await test_session.commit()
+    assert started and sub.vat_grandfathered is False
+    assert await _balance(test_session, tenant.id) == before - PRICE - 277

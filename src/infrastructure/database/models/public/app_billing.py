@@ -88,6 +88,9 @@ class AppSubscriptionModel(Base, UUIDMixin, TimestampMixin):
         nullable=True,
     )
     coupon_cycles_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vat_grandfathered: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
 
 class AppTrialModel(Base):
