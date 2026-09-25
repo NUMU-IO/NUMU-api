@@ -1,6 +1,6 @@
 """Password policy validator.
 
-Policy: minimum 12 characters, at least one uppercase letter,
+Policy: minimum 8 characters, at least one uppercase letter,
 one lowercase letter, and one digit.
 """
 
@@ -8,7 +8,7 @@ import re
 
 from src.core.exceptions import ValidationError
 
-_MIN_LENGTH = 12
+_MIN_LENGTH = 8
 _RE_UPPER = re.compile(r"[A-Z]")
 _RE_LOWER = re.compile(r"[a-z]")
 _RE_DIGIT = re.compile(r"\d")
@@ -18,7 +18,7 @@ def validate_password(password: str) -> None:
     """Raise ValidationError if password doesn't meet policy requirements.
 
     Rules:
-    - At least 12 characters
+    - At least 8 characters
     - At least one uppercase letter (A-Z)
     - At least one lowercase letter (a-z)
     - At least one digit (0-9)

@@ -109,7 +109,7 @@ class BetaRedeemRequest(BaseModel):
     """
 
     invite_code: str = Field(..., min_length=1, max_length=100)
-    password: str = Field(..., min_length=12, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     first_name: SanitizedStr = Field(..., min_length=2, max_length=50)
     last_name: SanitizedStr = Field(..., min_length=2, max_length=50)
     phone: str | None = Field(None, max_length=20)
