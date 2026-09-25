@@ -240,3 +240,15 @@ def test_proxy_route_not_installed_is_404(monkeypatch):
     api.include_router(storefront_apps.router, prefix="/storefront/store/{store_id}")
     res = TestClient(api).get(f"/storefront/store/{STORE}/apps/nope/proxy/x")
     assert res.status_code == 404
+
+
+def test_built_by_numu_flag_marks_the_listing_first_party():
+    from src.api.v1.routes.stores.apps import _listing
+
+    manifest = to_listing_manifest(copy.deepcopy(GOOD), developer_name="Acme")
+    assert _listing(manifest).developer["is_first_party"] is False
+    assert _listing(manifest, {"built_by_numu": False}).developer["name"] == "Acme"
+    dev = _listing(manifest, {"built_by_numu": True}).developer
+    assert dev["is_first_party"] is True
+    assert dev["name"] == "NUMU"
+    assert dev["support_email"] == manifest["developer"]["support_email"]

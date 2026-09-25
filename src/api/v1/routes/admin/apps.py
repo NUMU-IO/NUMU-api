@@ -188,6 +188,8 @@ class ListingFlags(BaseModel):
     catalog_visible: bool | None = None
     featured: bool | None = None
     staff_pick: bool | None = None
+    #: A Partner App NUMU builds itself: listed as "Built by NUMU".
+    built_by_numu: bool | None = None
 
 
 class Suspension(BaseModel):
