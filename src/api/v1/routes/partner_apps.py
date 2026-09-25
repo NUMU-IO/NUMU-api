@@ -19,7 +19,15 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -34,7 +42,10 @@ from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.stores.apps import AppCatalogEntry, _listing
 from src.application.services.app_manifest import (
+    APP_SCOPES,
+    APP_WEBHOOK_EVENTS,
     CATEGORIES,
+    EVENT_SCOPES,
     SLUG_RE,
     ManifestV1,
     PrivateManifestV1,
@@ -105,6 +116,9 @@ class CreateAppRequest(BaseModel):
     name_en: str = Field(min_length=2, max_length=100)
     #: A private (custom) app for one merchant: that store's id or subdomain.
     private_store: str | None = Field(default=None, max_length=64)
+    #: Optional at creation; the listing edits both later.
+    category: str | None = None
+    tags: list[str] = Field(default_factory=list, max_length=10)
 
 
 class VersionOut(BaseModel):
@@ -135,6 +149,7 @@ class PartnerAppOut(BaseModel):
     latest_version: VersionOut | None
     private_store_id: UUID | None = None
     private_store_name: str | None = None
+    created_at: datetime | None = None
 
 
 class PartnerAppDetail(PartnerAppOut):
@@ -273,6 +288,7 @@ async def _app_out(db: AsyncSession, app: AppModel, cls=PartnerAppOut, **extra):
         "catalog_visible": bool((app.listing_flags or {}).get("catalog_visible")),
         "client_id": client_id,
         "installs": installs or 0,
+        "created_at": app.created_at,
         "latest_version": _version_out(versions[0], published) if versions else None,
         "private_store_id": app.private_store_id,
         "private_store_name": private_store_name,
@@ -291,6 +307,14 @@ async def _version(
     return v
 
 
+def _error_lines(exc: ValidationError) -> list[str]:
+    return [
+        f"{'.'.join(str(p) for p in e['loc']) or 'manifest'}: "
+        f"{e['msg'].removeprefix('Value error, ')}"
+        for e in exc.errors()
+    ]
+
+
 def _validated(raw: dict[str, Any], *, private: bool = False) -> ManifestV1:
     """ManifestV1, or a 422 with one line per broken rule. Model-level rules
     (e.g. ``app.uninstalled``) run only once every field is valid."""
@@ -299,14 +323,7 @@ def _validated(raw: dict[str, Any], *, private: bool = False) -> ManifestV1:
     except ValidationError as exc:
         # One readable line per broken rule: the error envelope carries
         # ``detail`` as its message, and a list would arrive as a repr.
-        raise HTTPException(
-            status_code=422,
-            detail="\n".join(
-                f"{'.'.join(str(p) for p in e['loc']) or 'manifest'}: "
-                f"{e['msg'].removeprefix('Value error, ')}"
-                for e in exc.errors()
-            ),
-        )
+        raise HTTPException(status_code=422, detail="\n".join(_error_lines(exc)))
 
 
 async def _check_pricing(db: AsyncSession, model: str) -> None:
@@ -424,6 +441,11 @@ async def create_app(
         raise HTTPException(
             status_code=422, detail="Write the Arabic name in Arabic, not the English."
         )
+    if body.category is not None and body.category not in CATEGORIES:
+        raise HTTPException(
+            status_code=422, detail=f"category must be one of {', '.join(CATEGORIES)}"
+        )
+    tags = [tag.strip()[:40] for tag in body.tags if tag.strip()]
     store = await _private_store(db, body.private_store) if body.private_store else None
     app = AppModel(
         slug=body.slug,
@@ -435,8 +457,10 @@ async def create_app(
             "app_locales": {
                 "ar": {"name": body.name_ar.strip()},
                 "en": {"name": body.name_en.strip()},
-            }
+            },
+            **({"keywords": {"ar": tags, "en": tags}} if tags else {}),
         },
+        category=body.category,
         listing_flags={},
         private_store_id=store.id if store else None,
     )
@@ -535,8 +559,30 @@ async def upload_version(
     """Validate a ``numu.app.json`` and store it as a draft version. A
     private app is not reviewed: its version is approved on upload."""
     app = await _own_app(db, user_id, app_id)
+    v, versions, renamed = await _store_version(
+        db, app, body.manifest, body.release_notes_ar, body.release_notes_en
+    )
+    # The portal's form draft reseeds from this upload.
+    app.draft_manifest = None
+    return SuccessResponse(
+        data=_version_out(v, _published_manifest(versions)),
+        message="Version uploaded. The name in numu.app.json is not used: "
+        "rename the app in its listing."
+        if renamed
+        else "Version uploaded",
+    )
+
+
+async def _store_version(
+    db: AsyncSession,
+    app: AppModel,
+    raw: dict[str, Any],
+    notes_ar: str | None = None,
+    notes_en: str | None = None,
+) -> tuple[AppVersionModel, list[AppVersionModel], bool]:
+    """Validate a manifest and store it as the app's newest version."""
     private = app.private_store_id is not None
-    manifest = _validated(body.manifest, private=private)
+    manifest = _validated(raw, private=private)
     await _check_pricing(db, manifest.pricing.model)
     if manifest.slug != app.slug:
         raise HTTPException(
@@ -547,11 +593,7 @@ async def upload_version(
         raise _conflict(
             f"version must be higher than {versions[0].version}; bump it in numu.app.json"
         )
-    notes = (
-        {"ar": body.release_notes_ar, "en": body.release_notes_en}
-        if body.release_notes_ar or body.release_notes_en
-        else None
-    )
+    notes = {"ar": notes_ar, "en": notes_en} if notes_ar or notes_en else None
     data = manifest.model_dump(mode="json", by_alias=True, exclude_none=True)
     v = AppVersionModel(
         app_id=app.id,
@@ -574,13 +616,7 @@ async def upload_version(
     renamed = name_change(app, {"name": data["name"]})
     await db.flush()
     await db.refresh(v)
-    return SuccessResponse(
-        data=_version_out(v, _published_manifest(versions)),
-        message="Version uploaded. The name in numu.app.json is not used: "
-        "rename the app in its listing."
-        if renamed
-        else "Version uploaded",
-    )
+    return v, versions, renamed
 
 
 @router.post(
@@ -889,3 +925,222 @@ async def dev_install(
         data={"store_id": str(store.id), "slug": app.slug},
         message="Installed on your dev store",
     )
+
+
+# ─── Form editor draft ────────────────────────────────────────────
+#
+# The portal edits an app section by section (permissions, links, webhooks,
+# pricing) the way merchants' own settings pages work, instead of a JSON
+# upload. Each save lands in ``apps.draft_manifest`` and may be incomplete;
+# the listing (name, texts, screenshots, category) stays in the reviewed
+# listing draft. "Submit for review" composes both into a manifest, applies
+# every upload rule, stores it as the next version and opens a review round.
+
+#: The manifest keys the form editor owns. Listing fields come from the
+#: listing; slug, version and type are the server's.
+DRAFT_KEYS = frozenset({
+    "icon",
+    "developer",
+    "app_url",
+    "embedded",
+    "embedded_path",
+    "oauth",
+    "webhooks",
+    "pricing",
+    "carrier",
+    "settings_schema",
+    "app_proxy",
+})
+
+
+class EditorDraftOut(BaseModel):
+    draft: dict[str, Any]
+    #: Every rule the composed manifest still breaks; empty = ready to submit.
+    problems: list[str]
+    next_version: str
+    meta: dict[str, Any]
+
+
+class EditorDraftUpdate(BaseModel):
+    changes: dict[str, Any]
+
+
+def _next_version(versions: list[AppVersionModel]) -> str:
+    if not versions:
+        return "1.0.0"
+    major, minor, patch = semver_key(versions[0].version)
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def _editor_draft(app: AppModel, versions: list[AppVersionModel]) -> dict[str, Any]:
+    if app.draft_manifest is not None:
+        return dict(app.draft_manifest)
+    source = versions[0].manifest if versions else {}
+    draft = {k: v for k, v in source.items() if k in DRAFT_KEYS}
+    draft.setdefault("oauth", {"redirect_urls": [], "scopes": []})
+    draft.setdefault("webhooks", [])
+    draft.setdefault("pricing", {"model": "free"})
+    draft.setdefault("embedded", False)
+    if not draft.get("icon") and app.icon_url:
+        draft["icon"] = app.icon_url
+    return draft
+
+
+async def _listing_content(db: AsyncSession, app: AppModel) -> dict[str, Any]:
+    row = await editable_listing(db, app.id)
+    return row.content if row else live_listing(app)
+
+
+def _compose(
+    app: AppModel,
+    versions: list[AppVersionModel],
+    draft: dict[str, Any],
+    listing: dict[str, Any],
+) -> dict[str, Any]:
+    def both(pair: dict[str, str] | None) -> bool:
+        return bool(pair and pair.get("ar") and pair.get("en"))
+
+    return {
+        "manifest_version": 1,
+        "slug": app.slug,
+        "version": _next_version(versions),
+        "type": ["connected"],
+        **draft,
+        "name": listing["name"],
+        "tagline": listing["tagline"],
+        "description": listing["description"],
+        "screenshots": [
+            {"src": s["src"]}
+            | ({"caption": s["caption"]} if both(s.get("caption")) else {})
+            for s in listing.get("screenshots") or []
+            if s.get("src")
+        ],
+        "category": listing["category"],
+    }
+
+
+def _problems(m: dict[str, Any], *, private: bool) -> list[str]:
+    try:
+        (PrivateManifestV1 if private else ManifestV1).model_validate(m)
+    except ValidationError as exc:
+        return _error_lines(exc)
+    return []
+
+
+async def _editor_out(
+    db: AsyncSession, request: Request, app: AppModel
+) -> EditorDraftOut:
+    from src.application.services.partner_program import partner_billing_enabled
+    from src.config.settings import settings
+
+    versions = await _versions(db, app.id)
+    draft = _editor_draft(app, versions)
+    composed = _compose(app, versions, draft, await _listing_content(db, app))
+    return EditorDraftOut(
+        draft=draft,
+        problems=_problems(composed, private=app.private_store_id is not None),
+        next_version=composed["version"],
+        meta={
+            "scopes": sorted(APP_SCOPES),
+            "events": sorted(APP_WEBHOOK_EVENTS),
+            "event_scopes": EVENT_SCOPES,
+            "categories": list(CATEGORIES),
+            "billing_enabled": await partner_billing_enabled(db),
+            "authorize_url": f"{settings.merchant_hub_url.rstrip('/')}/oauth/authorize",
+            "token_url": f"{str(request.base_url).rstrip('/')}/api/v1/oauth/token",
+        },
+    )
+
+
+@router.get("/{app_id}/draft", response_model=SuccessResponse[EditorDraftOut])
+async def get_draft(
+    app_id: UUID,
+    request: Request,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """The form editor's working copy, what still blocks a submission, and
+    the choices the forms offer (scopes, events, categories)."""
+    app = await _own_app(db, user_id, app_id)
+    return SuccessResponse(data=await _editor_out(db, request, app))
+
+
+@router.put("/{app_id}/draft", response_model=SuccessResponse[EditorDraftOut])
+async def save_draft(
+    app_id: UUID,
+    body: EditorDraftUpdate,
+    request: Request,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Save one or more sections. Incomplete is fine here; the rules apply
+    at submission. A key set to null is removed."""
+    unknown = sorted(set(body.changes) - DRAFT_KEYS)
+    if unknown:
+        raise HTTPException(
+            status_code=422, detail=f"not editable here: {', '.join(unknown)}"
+        )
+    app = await _own_app(db, user_id, app_id)
+    draft = _editor_draft(app, await _versions(db, app.id))
+    for key, value in body.changes.items():
+        if value is None:
+            draft.pop(key, None)
+        else:
+            draft[key] = value
+    app.draft_manifest = draft
+    await db.flush()
+    return SuccessResponse(data=await _editor_out(db, request, app), message="Saved")
+
+
+@router.post("/{app_id}/draft/submit", response_model=SuccessResponse[VersionOut])
+async def submit_draft(
+    app_id: UUID,
+    request: Request,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Turn the draft and listing into the next version and send both for
+    review. A private app is approved on upload, so it is only stored."""
+    app = await _own_app(db, user_id, app_id)
+    versions = await _versions(db, app.id)
+    composed = _compose(
+        app, versions, _editor_draft(app, versions), await _listing_content(db, app)
+    )
+    if app.private_store_id is None:
+        await _no_open_review(db, app)
+    v, versions, _ = await _store_version(db, app, composed)
+    if app.private_store_id is None:
+        listing = await editable_listing(db, app.id)
+        _assert_public_urls(v.manifest)
+        await start_round(db, app, version=v, listing=listing)
+        logger.info("partner_app_draft_submitted", app=app.slug, version=v.version)
+    return SuccessResponse(
+        data=_version_out(v, _published_manifest(versions)),
+        message="Submitted for review"
+        if app.private_store_id is None
+        else "Version saved",
+    )
+
+
+@router.delete("/{app_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_app(
+    app_id: UUID,
+    user_id: Annotated[UUID, Depends(require_agreed_partner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Delete an app that never went live and no store has installed.
+
+    Everything under an app cascades (installs, billing, reviews), so an app
+    that was ever published or installed is suspended by NUMU instead.
+    """
+    app = await _own_app(db, user_id, app_id)
+    installed = await db.scalar(
+        select(func.count(AppInstallationModel.id)).where(
+            AppInstallationModel.app_id == app.id
+        )
+    )
+    if app.status != AppStatus.DRAFT or installed:
+        raise _conflict("Only a draft app that no store has installed can be deleted.")
+    await db.delete(app)
+    await db.flush()
+    logger.info("partner_app_deleted", app=app.slug, user_id=str(user_id))
