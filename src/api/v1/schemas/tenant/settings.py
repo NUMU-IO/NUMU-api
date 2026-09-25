@@ -185,7 +185,7 @@ class CodTrustResponse(BaseModel):
     enabled: bool = False
     threshold: int = 70
     min_confidence: Literal["low", "medium", "high"] = "medium"
-    action: Literal["block", "warn", "recover"] = "block"
+    action: Literal["block", "warn", "recover", "hold"] = "block"
     # Optional promo shown in the WhatsApp pay-online offer for the "recover"
     # flow (e.g. "10% off if you pay online now").
     recovery_promo: str | None = None
@@ -203,7 +203,7 @@ class UpdateCodTrustRequest(BaseModel):
     enabled: bool | None = None
     threshold: int | None = Field(None, ge=0, le=100)
     min_confidence: Literal["low", "medium", "high"] | None = None
-    action: Literal["block", "warn", "recover"] | None = None
+    action: Literal["block", "warn", "recover", "hold"] | None = None
     recovery_promo: str | None = None
     auto_rto_disabled: bool | None = None
     auto_rto_days: int | None = Field(None, ge=7, le=60)

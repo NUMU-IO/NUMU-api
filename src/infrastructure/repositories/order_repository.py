@@ -165,6 +165,8 @@ class OrderRepository(IOrderRepository):
             deposit_gateway=model.deposit_gateway,
             deposit_payment_id=model.deposit_payment_id,
             customer_confirmation_status=model.customer_confirmation_status,
+            cod_review_status=model.cod_review_status,
+            cod_reviewed_at=model.cod_reviewed_at,
             customer_confirmation_requested_at=model.customer_confirmation_requested_at,
             customer_confirmed_at=model.customer_confirmed_at,
             tracking_number=model.tracking_number,
@@ -226,6 +228,8 @@ class OrderRepository(IOrderRepository):
             deposit_gateway=entity.deposit_gateway,
             deposit_payment_id=entity.deposit_payment_id,
             customer_confirmation_status=entity.customer_confirmation_status,
+            cod_review_status=entity.cod_review_status,
+            cod_reviewed_at=entity.cod_reviewed_at,
             customer_confirmation_requested_at=entity.customer_confirmation_requested_at,
             customer_confirmed_at=entity.customer_confirmed_at,
             tracking_number=entity.tracking_number,
@@ -327,6 +331,8 @@ class OrderRepository(IOrderRepository):
             model.deposit_gateway = entity.deposit_gateway
             model.deposit_payment_id = entity.deposit_payment_id
             model.customer_confirmation_status = entity.customer_confirmation_status
+            model.cod_review_status = entity.cod_review_status
+            model.cod_reviewed_at = entity.cod_reviewed_at
             model.customer_confirmation_requested_at = (
                 entity.customer_confirmation_requested_at
             )

@@ -263,6 +263,8 @@ def _suggested_action_from_decision(decision: "CodTrustDecision") -> str:
         return "cancel"
     if decision.reason == "warned_high_risk":
         return "whatsapp_confirm"
+    if decision.reason == "held_high_risk":
+        return "hold"
     return "auto_approve"
 
 
@@ -1981,6 +1983,12 @@ async def checkout(
         first_touch_at=_first_touch_at,
         session_fingerprint=request.session_fingerprint,
     )
+
+    # COD-trust "hold": a high-risk COD order the merchant chose to REVIEW
+    # rather than block. It is created normally but held, so the courier
+    # booking on creation skips it until it is approved.
+    if trust_decision is not None and getattr(trust_decision, "hold", False):
+        order.cod_review_status = "held"
 
     created_order = await order_repo.create(order)
 

@@ -163,6 +163,13 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     customer_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # COD review hold: NULL = not held; "held" = the Trust Network flagged it
+    # and the store's action is "hold", so it waits (and is not booked with a
+    # courier) until a person or the COD app approves or rejects it.
+    cod_review_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    cod_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     tracking_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Notes

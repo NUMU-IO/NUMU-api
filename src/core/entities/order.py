@@ -261,6 +261,9 @@ class Order(BaseEntity):
     customer_confirmation_status: str | None = None
     customer_confirmation_requested_at: datetime | None = None
     customer_confirmed_at: datetime | None = None
+    # COD review hold: None | "held" | "approved" | "rejected".
+    cod_review_status: str | None = None
+    cod_reviewed_at: datetime | None = None
     tracking_number: str | None = None
     tracking_url: str | None = None
     notes: str | None = None
