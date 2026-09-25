@@ -103,6 +103,15 @@ class Keywords(BaseModel):
         return list(dict.fromkeys(out))
 
 
+def _video_url(v: str | None) -> str | None:
+    if not v:
+        return None
+    parsed = urlparse(v.strip())
+    if parsed.scheme != "https" or (parsed.hostname or "") not in VIDEO_HOSTS:
+        raise ValueError("video_url must be an https YouTube or Vimeo link")
+    return v.strip()
+
+
 class ListingContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -132,12 +141,34 @@ class ListingContent(BaseModel):
     @field_validator("video_url")
     @classmethod
     def _video(cls, v: str | None) -> str | None:
-        if not v:
-            return None
-        parsed = urlparse(v.strip())
-        if parsed.scheme != "https" or (parsed.hostname or "") not in VIDEO_HOSTS:
-            raise ValueError("video_url must be an https YouTube or Vimeo link")
-        return v.strip()
+        return _video_url(v)
+
+
+class LooseBilingual(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ar: str = Field(default="", max_length=4000)
+    en: str = Field(default="", max_length=4000)
+
+
+class ListingDraftContent(BaseModel):
+    """The listing as the portal saves it while the partner types: any text
+    may still be empty. ``ListingContent`` applies when it is submitted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: LooseBilingual = Field(default_factory=LooseBilingual)
+    tagline: LooseBilingual = Field(default_factory=LooseBilingual)
+    description: LooseBilingual = Field(default_factory=LooseBilingual)
+    screenshots: list[Screenshot] = Field(default_factory=list, max_length=8)
+    video_url: str | None = None
+    category: Literal[CATEGORIES] = "other"  # type: ignore[valid-type]
+    keywords: Keywords = Field(default_factory=Keywords)
+
+    @field_validator("video_url")
+    @classmethod
+    def _video(cls, v: str | None) -> str | None:
+        return _video_url(v)
 
 
 def _max(v: Bilingual, n: int, what: str) -> Bilingual:

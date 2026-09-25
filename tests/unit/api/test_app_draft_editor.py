@@ -198,3 +198,18 @@ async def test_an_unknown_category_is_refused(test_session):
             db=test_session,
         )
     assert exc.value.status_code == 422
+
+
+async def test_a_partial_listing_saves_but_does_not_submit(test_session):
+    owner, app_id = await _setup(test_session)
+    partial = pa.ListingDraftContent.model_validate({
+        "name": {"ar": "اشترك", "en": "Eshtarek"},
+        "category": "sales",
+    })
+    await pa.save_listing(app_id, partial, user_id=owner.id, db=test_session)
+    listing = (await pa.get_listing(app_id, user_id=owner.id, db=test_session)).data
+    assert listing.draft.content["tagline"] == {"ar": "", "en": ""}
+    with pytest.raises(HTTPException) as exc:
+        await pa.submit_listing(app_id, user_id=owner.id, db=test_session)
+    assert exc.value.status_code == 422
+    assert "listing.tagline" in exc.value.detail

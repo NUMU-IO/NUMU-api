@@ -57,6 +57,7 @@ from src.application.services.app_manifest import (
 from src.application.services.app_review import (
     REVIEW_SLA_BUSINESS_DAYS,
     ListingContent,
+    ListingDraftContent,
     due_at,
     editable_listing,
     go_live,
@@ -336,6 +337,17 @@ async def _check_pricing(db: AsyncSession, model: str) -> None:
             status_code=422,
             detail=f"pricing.model: {model} is not available yet, because NUMU "
             "billing for Partner Apps is not live. Use free or external.",
+        )
+
+
+def _complete_listing(content: dict[str, Any]) -> None:
+    """A saved listing may be partial; a submitted one follows every rule."""
+    try:
+        ListingContent.model_validate(content)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="\n".join(f"listing.{line}" for line in _error_lines(exc)),
         )
 
 
@@ -804,11 +816,12 @@ async def get_listing(
 @router.put("/{app_id}/listing", response_model=SuccessResponse[ListingDraftOut])
 async def save_listing(
     app_id: UUID,
-    body: ListingContent,
+    body: ListingDraftContent,
     user_id: Annotated[UUID, Depends(require_agreed_partner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Save the listing draft. Nothing reaches merchants until it is reviewed."""
+    """Save the listing draft, complete or not: it is checked in full when it
+    is submitted. Nothing reaches merchants until it is reviewed."""
     app = await _own_app(db, user_id, app_id)
     content = body.model_dump(mode="json")
     row = await editable_listing(db, app.id)
@@ -843,6 +856,7 @@ async def submit_listing(
     row = await editable_listing(db, app.id)
     if row is None:
         raise _conflict("There is no listing draft to submit.")
+    _complete_listing(row.content)
     await _no_open_review(db, app)
     row.version_id = None
     await start_round(db, app, listing=row)
@@ -1111,6 +1125,8 @@ async def submit_draft(
     v, versions, _ = await _store_version(db, app, composed)
     if app.private_store_id is None:
         listing = await editable_listing(db, app.id)
+        if listing is not None:
+            _complete_listing(listing.content)
         _assert_public_urls(v.manifest)
         await start_round(db, app, version=v, listing=listing)
         logger.info("partner_app_draft_submitted", app=app.slug, version=v.version)
