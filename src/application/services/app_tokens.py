@@ -59,6 +59,10 @@ def mint(prefix: str) -> tuple[str, str]:
     return raw, sha256_hex(raw)
 
 
+#: ``GET /stores/{id}/app-settings``: the calling app's own settings.
+APP_SETTINGS_SEGMENT = "app-settings"
+
+
 def required_app_scope(path: str, method: str) -> str | None:
     """The scope an app token needs for this request (None = never allowed).
 
@@ -66,11 +70,15 @@ def required_app_scope(path: str, method: str) -> str | None:
     ``themes:write``) is refused here even if an installation's grant
     somehow carries it: the manifest check alone would trust stored grants.
     """
+    parts = path.strip("/").split("/")
+    segment = parts[4] if len(parts) > 4 else ""
+    if segment == APP_SETTINGS_SEGMENT and method.upper() in ("GET", "HEAD"):
+        # An app reading its own merchant-saved settings needs no scope: the
+        # route only ever returns the calling installation's own values.
+        return "__identity__"
     required = required_scope_for(path, method)
     if required is None or required == "__identity__":
         return required
-    parts = path.strip("/").split("/")
-    segment = parts[4] if len(parts) > 4 else ""
     if segment in MESSAGE_SEGMENTS:
         required = "messages:" + required.split(":", 1)[1]
     return required if required in APP_SCOPES else None

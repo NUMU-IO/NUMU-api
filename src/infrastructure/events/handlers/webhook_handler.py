@@ -48,6 +48,50 @@ async def _dispatch(store_id, event_type, event_id, data: dict) -> None:
         await session.commit()
 
 
+async def _order_context(order_id) -> dict:
+    """What a receiver needs to act on a new order without a second call:
+    how it is paid, the phone to reach the customer, its status, and the
+    Trust Network result when the store screens COD orders. Best effort:
+    the webhook still goes out without it."""
+    from sqlalchemy import select
+
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.order import OrderModel
+    from src.infrastructure.database.models.tenant.risk_assessment import (
+        RiskAssessmentModel,
+    )
+
+    try:
+        async with AsyncSessionLocal() as session:
+            order = await session.get(OrderModel, order_id)
+            if order is None:
+                return {}
+            risk = (
+                await session.execute(
+                    select(RiskAssessmentModel)
+                    .where(RiskAssessmentModel.order_id == order.id)
+                    .order_by(RiskAssessmentModel.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+    except Exception:
+        logger.warning("webhook_order_context_failed", order_id=str(order_id))
+        return {}
+    address = order.shipping_address or {}
+    return {
+        "status": getattr(order.status, "value", order.status),
+        "payment_method": order.payment_method,
+        "customer_phone": address.get("phone") if isinstance(address, dict) else None,
+        "cod_risk": {
+            "score": risk.risk_score,
+            "level": risk.risk_level,
+            "action": risk.action_taken,
+        }
+        if risk is not None
+        else None,
+    }
+
+
 async def handle_webhook_order_created(event: OrderCreatedEvent) -> None:
     from src.core.entities.webhook import WebhookEventType
 
@@ -61,6 +105,7 @@ async def handle_webhook_order_created(event: OrderCreatedEvent) -> None:
             "customer_id": str(event.customer_id),
             "total": event.total,
             "currency": event.currency,
+            **await _order_context(event.order_id),
         },
     )
 

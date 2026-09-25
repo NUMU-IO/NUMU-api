@@ -38,6 +38,7 @@ from src.api.v1.routes.stores import bundles as bundles_module
 from src.api.v1.routes.stores import business_profile as business_profile_module
 from src.api.v1.routes.stores import carriers as carriers_module
 from src.api.v1.routes.stores import categories as categories_module
+from src.api.v1.routes.stores import cod as cod_module
 from src.api.v1.routes.stores import cod_trust_decisions as cod_trust_decisions_module
 from src.api.v1.routes.stores import coupons as coupons_module
 from src.api.v1.routes.stores import customer_import as customer_import_module
@@ -198,6 +199,7 @@ router.include_router(settings_module.router, tags=["Store Settings"])
 router.include_router(
     cod_trust_decisions_module.router, tags=["Store COD Trust Decisions"]
 )
+router.include_router(cod_module.router, tags=["Store COD Protection"])
 router.include_router(onboarding_module.router, tags=["Store Onboarding"])
 router.include_router(business_profile_module.router, tags=["Store Business Profile"])
 router.include_router(feedback_module.router, tags=["Store Feedback"])
@@ -231,6 +233,7 @@ router.include_router(theme_code_module.router, tags=["Store Theme Code"])
 router.include_router(theme_editor_v3_module.router, tags=["Theme Editor V3"])
 router.include_router(customizer_undo_module.router, tags=["Theme Editor V3 — Undo"])
 router.include_router(apps_module.router, tags=["Store Apps"])
+router.include_router(apps_module.app_settings_router, tags=["Store Apps"])
 router.include_router(app_reviews_module.merchant_router)
 router.include_router(app_support_module.merchant_router)
 router.include_router(whatsapp_module.router, tags=["Store WhatsApp"])
