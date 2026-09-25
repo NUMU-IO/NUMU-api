@@ -260,7 +260,7 @@ class Settings(BaseSettings):
     # coverage report flags areas with no published article or stale beyond this window.
     agent_knowledge_staleness_days: int = 90
     # Base URL of the developer docs ingested into Layer A (theme/SDK/CLI/API topics).
-    agent_docs_ingest_base_url: str = "https://docs.numueg.app"
+    agent_docs_ingest_base_url: str = "https://developers.numueg.app"
     # Shared secret n8n presents when upserting Layer A knowledge (server-side only).
     agent_knowledge_upsert_secret: str = ""
     # n8n orchestration lane (research R9): heavy/async/bulk work is offloaded to

@@ -1,6 +1,7 @@
-"""Ingest the NUMU developer docs (docs.numueg.app) into Layer A.
+"""Ingest the NUMU developer docs (developers.numueg.app) into Layer A.
 
-docs.numueg.app is a VitePress static site (verified): the page inventory is
+developers.numueg.app is a VitePress static site (verified); docs.numueg.app is
+now the Apidog API reference and has no VitePress site data. The page inventory is
 embedded in the home page as `__VP_SITE_DATA__.themeConfig.sidebar`. We enumerate
 those links, fetch each clean URL, strip the HTML to text, chunk on headings, and
 map each page's top-level section to a Knowledge Area. These are *developer* docs
@@ -131,6 +132,10 @@ async def fetch_docs_corpus(base_url: str | None = None) -> list[KnowledgeDoc]:
             )
             docs.append(
                 KnowledgeDoc(
+                    # Kept as the old host on purpose: knowledge rows upsert by
+                    # `source`, so a new prefix would orphan every existing row
+                    # as a stale duplicate. The site now lives at
+                    # developers.numueg.app with the same paths.
                     source=f"docs.numueg.app{link}",
                     title=title,
                     area=_area_for(link),
