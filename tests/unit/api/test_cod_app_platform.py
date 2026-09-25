@@ -42,8 +42,27 @@ class _Repo:
         return store
 
 
+class _Zones:
+    zones: list = []
+
+    def __init__(self, db):
+        pass
+
+    async def list_zones_by_store(self, store_id, include_inactive=False):
+        return self.zones
+
+    async def get_zone(self, zone_id):
+        return next((z for z in self.zones if z.id == zone_id), None)
+
+    async def update_zone(self, zone):
+        return zone
+
+
 @pytest.fixture
 def no_otp(monkeypatch):
+    monkeypatch.setattr(cod, "ShippingZoneRepository", _Zones)
+    _Zones.zones = []
+
     async def unavailable(store_id, settings, db):
         return False
 
@@ -117,3 +136,53 @@ async def test_only_an_app_token_reads_app_settings(sample_store):
     with pytest.raises(HTTPException) as exc:
         await read_own_app_settings(request=request, store=sample_store)
     assert exc.value.status_code == 403
+
+
+async def test_rules_and_zone_fees_save(sample_store, no_otp):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from src.application.services.cod_rules import CodRules, OrderConditions
+
+    zone = SimpleNamespace(
+        id=uuid4(),
+        store_id=sample_store.id,
+        name="Cairo",
+        name_ar="القاهرة",
+        is_active=True,
+        cod_enabled=True,
+        cod_fee_cents=0,
+    )
+    _Zones.zones = [zone]
+    sample_store.settings = {}
+    body = cod.CodSettingsUpdate(
+        rules=CodRules(otp=OrderConditions(everyone=False, first_time=True)),
+        cod_fee=[cod.ZoneFeeUpdate(zone_id=zone.id, cod_fee_cents=2_500)],
+    )
+    data = (
+        await cod.update_cod_settings(
+            body=body,
+            store=sample_store,
+            db=None,
+            store_repo=_Repo(),
+            onboarding_repo=None,
+        )
+    ).data
+    assert data.rules.otp.first_time is True and data.rules.otp.everyone is False
+    assert data.cod_fee[0].cod_fee_cents == 2_500
+
+
+async def test_another_stores_zone_is_not_found(sample_store, no_otp):
+    from uuid import uuid4
+
+    with pytest.raises(HTTPException) as exc:
+        await cod.update_cod_settings(
+            body=cod.CodSettingsUpdate(
+                cod_fee=[cod.ZoneFeeUpdate(zone_id=uuid4(), cod_fee_cents=1)]
+            ),
+            store=sample_store,
+            db=None,
+            store_repo=_Repo(),
+            onboarding_repo=None,
+        )
+    assert exc.value.status_code == 404

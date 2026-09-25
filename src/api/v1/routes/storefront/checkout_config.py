@@ -126,7 +126,14 @@ async def get_public_checkout_config(
     # settings.payment.cod.deposit_policy (see stores/settings.py).
     cod_block = payment_settings.get("cod") or {}
     deposit_raw = cod_block.get("deposit_policy") or {}
-    deposit_enabled = bool(deposit_raw.get("enabled", False))
+    # COD Shield: with the gate on, a store without the app gets no deposit;
+    # with deposit conditions, checkout decides per order.
+    from src.application.services.cod_rules import get_cod_rules
+    from src.application.services.cod_shield import cod_shield_allows
+
+    shield = await cod_shield_allows(db, store.id)
+    rules = get_cod_rules(store.settings)
+    deposit_enabled = bool(deposit_raw.get("enabled", False)) and shield
     deposit_gateways = [
         g for g in (deposit_raw.get("allowed_gateways") or []) if isinstance(g, str)
     ]
@@ -186,7 +193,16 @@ async def get_public_checkout_config(
         "deposit_amount_cents": int(deposit_raw.get("amount_cents", 0) or 0),
         "deposit_percent": int(deposit_raw.get("percent", 50) or 50),
         "deposit_min_order_cents": int(deposit_raw.get("min_order_cents", 0) or 0),
+        # True: only some COD orders take the deposit (first-time customers,
+        # above a value, risky, some products); checkout decides.
+        "deposit_conditional": deposit_enabled and not rules.deposit.everyone,
     }
+    # What paying online saves, so the payment step can say so.
+    config["prepaid_incentive"] = (
+        rules.prepaid.model_dump(mode="json")
+        if shield and rules.prepaid.enabled
+        else None
+    )
     config["currency"] = currency
     config["saved_cards_enabled"] = any(
         p in _CARD_TOKEN_PROVIDERS for p in enabled_methods

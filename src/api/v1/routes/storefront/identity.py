@@ -47,6 +47,7 @@ from src.application.services.checkout_identity import (
     read_identity_flag,
     write_identity_flag,
 )
+from src.application.services.cod_rules import get_cod_rules
 from src.application.services.network_reputation_service import (
     extract_phone_hash_from_string,
 )
@@ -618,7 +619,12 @@ async def identity_status(
 
     return SuccessResponse(
         data=IdentityStatusResponse(
-            required=bool(identity_cfg.get("require_verification")) and available,
+            # With COD Shield OTP conditions the checkout decides per order
+            # (and answers phone_verification_required when one matches), so
+            # the storefront doesn't ask every shopper up front.
+            required=bool(identity_cfg.get("require_verification"))
+            and available
+            and get_cod_rules(store_row.settings).otp.everyone,
             otp_available=available,
             verified=verified,
             phone_masked=phone_masked,

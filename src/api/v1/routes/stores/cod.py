@@ -34,12 +34,17 @@ from src.api.v1.schemas.tenant.settings import (
     UpdateCodTrustRequest,
     UpdatePaymentSettingsRequest,
 )
+from src.application.services.cod_rules import SETTINGS_KEY as COD_RULES_KEY
+from src.application.services.cod_rules import CodRules, get_cod_rules
 from src.core.checkout_fields import CheckoutFieldsConfig
 from src.core.entities.order import OrderStatus
 from src.core.entities.store import Store
 from src.core.events.order_events import OrderStatusChangedEvent
 from src.core.logging import get_logger
 from src.infrastructure.repositories import OnboardingRepository, StoreRepository
+from src.infrastructure.repositories.shipping_zone_repository import (
+    ShippingZoneRepository,
+)
 
 logger = get_logger(__name__)
 
@@ -61,11 +66,31 @@ class Otp(BaseModel):
     available: bool = False
 
 
+class ZoneFee(BaseModel):
+    """A shipping zone's cash-on-delivery switch and surcharge."""
+
+    zone_id: UUID
+    name: str
+    name_ar: str | None = None
+    is_active: bool = True
+    cod_enabled: bool
+    cod_fee_cents: int
+
+
 class CodSettings(BaseModel):
     trust: dict
     deposit: CodDepositPolicy
     confirmation: Confirmation
     otp: Otp
+    #: Which orders the OTP and the deposit apply to, and the prepaid incentive.
+    rules: CodRules
+    cod_fee: list[ZoneFee]
+
+
+class ZoneFeeUpdate(BaseModel):
+    zone_id: UUID
+    cod_enabled: bool | None = None
+    cod_fee_cents: int | None = Field(default=None, ge=0, le=100_000)
 
 
 class ConfirmationUpdate(BaseModel):
@@ -84,6 +109,8 @@ class CodSettingsUpdate(BaseModel):
     deposit: CodDepositPolicy | None = None
     confirmation: ConfirmationUpdate | None = None
     otp: OtpUpdate | None = None
+    rules: CodRules | None = None
+    cod_fee: list[ZoneFeeUpdate] | None = Field(default=None, max_length=100)
 
 
 async def _read(store: Store, db: AsyncSession) -> CodSettings:
@@ -109,6 +136,20 @@ async def _read(store: Store, db: AsyncSession) -> CodSettings:
             require_verification=bool(identity.get("require_verification", True)),
             available=await otp_available(store.id, settings, db),
         ),
+        rules=get_cod_rules(settings),
+        cod_fee=[
+            ZoneFee(
+                zone_id=z.id,
+                name=z.name,
+                name_ar=z.name_ar,
+                is_active=z.is_active,
+                cod_enabled=z.cod_enabled,
+                cod_fee_cents=z.cod_fee_cents,
+            )
+            for z in await ShippingZoneRepository(db).list_zones_by_store(
+                store.id, include_inactive=True
+            )
+        ],
     )
 
 
@@ -183,6 +224,22 @@ async def update_cod_settings(
             store=store,
             store_repo=store_repo,
         )
+    if body.rules is not None:
+        settings = dict(store.settings or {})
+        settings[COD_RULES_KEY] = body.rules.model_dump(mode="json")
+        store.settings = settings
+        await store_repo.update(store)
+    if body.cod_fee:
+        zones = ShippingZoneRepository(db)
+        for change in body.cod_fee:
+            zone = await zones.get_zone(change.zone_id)
+            if zone is None or zone.store_id != store.id:
+                raise HTTPException(status_code=404, detail="Shipping zone not found")
+            if change.cod_enabled is not None:
+                zone.cod_enabled = change.cod_enabled
+            if change.cod_fee_cents is not None:
+                zone.cod_fee_cents = change.cod_fee_cents
+            await zones.update_zone(zone)
     return SuccessResponse(data=await _read(store, db), message="COD settings saved")
 
 
