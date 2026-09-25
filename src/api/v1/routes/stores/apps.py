@@ -24,7 +24,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import urlencode, urljoin, urlsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import false, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -917,3 +917,58 @@ async def cancel_subscription(store_id: UUID, slug: str):
         return SuccessResponse(
             data=await subscription_view(session, sub, app, store_id)
         )
+
+
+# ─── The calling app's own settings (app tokens only) ─────────────
+
+app_settings_router = APIRouter(
+    prefix="/{store_id}/app-settings",
+    tags=["Apps"],
+    dependencies=[Depends(verify_store_ownership)],
+)
+
+
+class OwnAppSettings(BaseModel):
+    settings: dict
+    settings_schema: list
+
+
+@app_settings_router.get("", response_model=SuccessResponse[OwnAppSettings])
+async def read_own_app_settings(
+    request: Request,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+):
+    """What the merchant saved in this app's settings form, for the app.
+
+    The form is the manifest's ``settings_schema``, rendered by NUMU; until
+    now an app could never read the answers back. Only the calling app's
+    own installation is returned, so no scope is needed, and a merchant or
+    personal token gets a 403.
+    """
+    app_id = (getattr(request.state, "pat", None) or {}).get("app_id")
+    if not app_id:
+        raise HTTPException(
+            status_code=403, detail="Only an app token can read its settings."
+        )
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                select(AppInstallationModel, AppModel)
+                .join(AppModel, AppModel.id == AppInstallationModel.app_id)
+                .where(
+                    AppInstallationModel.store_id == store.id,
+                    AppInstallationModel.app_id == UUID(str(app_id)),
+                )
+            )
+        ).first()
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail="The app is not installed on this store."
+        )
+    install, app = row
+    return SuccessResponse(
+        data=OwnAppSettings(
+            settings=install.settings or {},
+            settings_schema=(app.manifest or {}).get("settings_schema", []) or [],
+        )
+    )

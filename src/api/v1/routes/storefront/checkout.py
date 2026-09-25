@@ -263,6 +263,8 @@ def _suggested_action_from_decision(decision: "CodTrustDecision") -> str:
         return "cancel"
     if decision.reason == "warned_high_risk":
         return "whatsapp_confirm"
+    if decision.reason == "held_high_risk":
+        return "hold"
     return "auto_approve"
 
 
@@ -500,6 +502,12 @@ async def checkout(
                 },
             )
 
+    # ── COD Shield gate: the OTP, trust check and deposit below are the COD
+    # Shield app's features. Off (the default), every store keeps them. ──
+    from src.application.services.cod_shield import cod_shield_allows
+
+    _cod_shield = await cod_shield_allows(store_repo.session, store_id)
+
     # ── Checkout-fields: validate submitted custom fields against live config ──
     checkout_config = resolve_checkout_config(store.settings)
     accepted_custom_fields, custom_field_errors = validate_custom_field_values(
@@ -520,8 +528,15 @@ async def checkout(
     # `identity_phone_just_verified` marks a guest order whose customer row
     # should be stamped phone_verified_at once it exists (below).
     identity_phone_just_verified = False
+    # COD Shield rules: which orders need the OTP / a deposit, and the
+    # prepaid incentive. With OTP conditions, an unverified phone is refused
+    # further down, once the order is known to match them.
+    from src.application.services.cod_rules import get_cod_rules
+
+    _cod_rules = get_cod_rules(store.settings)
+    _otp_pending = False
     _identity_cfg = checkout_config.get("identity") or {}
-    if bool(_identity_cfg.get("require_verification")):
+    if bool(_identity_cfg.get("require_verification")) and _cod_shield:
         from src.application.services.checkout_identity import (
             otp_available as _otp_available,
         )
@@ -595,7 +610,9 @@ async def checkout(
                 finally:
                     await _cache.close()
 
-            if not _verified_here:
+            if not _verified_here and not _cod_rules.otp.everyone:
+                _otp_pending = True
+            elif not _verified_here:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail={
@@ -1022,7 +1039,7 @@ async def checkout(
     # event is recorded below, so the customer's own current order does
     # not inflate their own score during the check.
     trust_decision: CodTrustDecision | None = None
-    if is_cod:
+    if is_cod and _cod_shield:
         customer_phone = (
             request.shipping_address.phone if request.shipping_address else None
         )
@@ -1157,8 +1174,14 @@ async def checkout(
     # discount. That divergence is exactly the "promised 650, charged 750"
     # failure mode, so keep this populated.
     product_category_map: dict[UUID, UUID | None] = {}
+    _rule_product_ids: set = set()
+    _rule_category_ids: set = set()
     for item in request.line_items:
         product = await product_repo.get_by_id(item.product_id)
+        if product is not None:
+            _rule_product_ids.add(product.id)
+            if getattr(product, "category_id", None):
+                _rule_category_ids.add(product.category_id)
         if not product:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1839,6 +1862,74 @@ async def checkout(
     # invoice/ETA reporting; ``tax_to_add_cents`` is always 0 and is
     # NOT used in the total formula. The order's ``tax_amount`` field
     # records the included VAT as informational accounting only.
+    # ── COD Shield rules: OTP / deposit conditions and the prepaid incentive ──
+    from src.application.services.cod_rules import (
+        OrderFacts,
+        applies,
+        prepaid_incentive,
+    )
+
+    _first_time = True
+    if current_customer is not None:
+        from sqlalchemy import func as _func
+        from sqlalchemy import select as _select
+
+        from src.infrastructure.database.models.tenant.order import (
+            OrderModel as _OrderModel,
+        )
+
+        _first_time = not (
+            await order_repo.session.scalar(
+                _select(_func.count())
+                .select_from(_OrderModel)
+                .where(
+                    _OrderModel.store_id == store_id,
+                    _OrderModel.customer_id == current_customer.id,
+                )
+            )
+        )
+    from src.application.services.cod_trust_service import get_cod_trust_settings
+
+    _order_facts = OrderFacts(
+        is_cod=is_cod,
+        subtotal_cents=subtotal,
+        first_time=_first_time,
+        high_risk=bool(
+            trust_decision is not None
+            and trust_decision.score is not None
+            and trust_decision.score
+            >= get_cod_trust_settings(store.settings)["threshold"]
+        ),
+        product_ids=frozenset(_rule_product_ids),
+        category_ids=frozenset(_rule_category_ids),
+    )
+    if _otp_pending and applies(_cod_rules.otp, _order_facts):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "phone_verification_required",
+                "message": (
+                    "Please verify your phone number via WhatsApp "
+                    "before placing this order. | "
+                    "يرجى تأكيد رقم هاتفك عبر واتساب قبل إتمام الطلب."
+                ),
+            },
+        )
+    _incentive = (
+        prepaid_incentive(
+            _cod_rules.prepaid,
+            is_cod=is_cod,
+            subtotal_cents=subtotal,
+            discount_cents=discount_amount,
+        )
+        if _cod_shield
+        else None
+    )
+    if _incentive is not None:
+        discount_amount += _incentive.discount_cents
+        if _incentive.free_shipping:
+            shipping_cost_cents = 0
+
     tax_resolver = tax_resolver_for_country(getattr(store, "country", None))
     tax_resolution = tax_resolver.resolve(
         store_settings=store.settings,
@@ -1942,6 +2033,12 @@ async def checkout(
                 else {}
             ),
             **({"ip_address": shopper_ip} if shopper_ip else {}),
+            **(
+                {"prepaid_incentive": _incentive.as_metadata()}
+                if _incentive is not None
+                and (_incentive.discount_cents or _incentive.free_shipping)
+                else {}
+            ),
             **({"opt_out": True} if request.opt_out else {}),
             **({"user_agent": client_user_agent} if client_user_agent else {}),
             # Read back by the Meta / TikTok CAPI purchase dispatchers to
@@ -1981,6 +2078,12 @@ async def checkout(
         first_touch_at=_first_touch_at,
         session_fingerprint=request.session_fingerprint,
     )
+
+    # COD-trust "hold": a high-risk COD order the merchant chose to REVIEW
+    # rather than block. It is created normally but held, so the courier
+    # booking on creation skips it until it is approved.
+    if trust_decision is not None and getattr(trust_decision, "hold", False):
+        order.cod_review_status = "held"
 
     created_order = await order_repo.create(order)
 
@@ -2216,7 +2319,11 @@ async def checkout(
     # Sized server-side from the order we just built. The storefront quotes
     # the same figure from the same policy, but the amount charged is never
     # taken from the client.
-    _deposit_amount = deposit_due_cents(_deposit_policy_raw, created_order.total)
+    _deposit_amount = (
+        deposit_due_cents(_deposit_policy_raw, created_order.total)
+        if _cod_shield and applies(_cod_rules.deposit, _order_facts)
+        else 0
+    )
     if request.payment_method == "cod" and _deposit_amount > 0:
         _allowed_gateways: list[str] = list(
             _deposit_policy_raw.get("allowed_gateways") or []

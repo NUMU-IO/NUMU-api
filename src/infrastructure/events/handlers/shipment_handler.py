@@ -46,9 +46,15 @@ def auto_create_carrier(store_settings: dict | None) -> str | None:
 
 
 def books_on_creation(
-    store_settings: dict | None, payment_method: str | None, status: str
+    store_settings: dict | None,
+    payment_method: str | None,
+    status: str,
+    cod_review_status: str | None = None,
 ) -> bool:
     if (payment_method or "").lower() not in COD_METHODS:
+        return False
+    if cod_review_status == "held":
+        # Waiting for review; approving it publishes CONFIRMED, which books.
         return False
     if status not in ("pending", "confirmed", "processing"):
         return False
@@ -108,7 +114,10 @@ async def _auto_create(order_id: UUID, store_id: UUID, trigger: str) -> None:
 
             status = getattr(order.status, "value", order.status)
             if trigger == "created" and not books_on_creation(
-                store.settings, order.payment_method, status
+                store.settings,
+                order.payment_method,
+                status,
+                getattr(order, "cod_review_status", None),
             ):
                 return
 

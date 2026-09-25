@@ -49,6 +49,7 @@ SCOPE_DOMAINS = (
     "themes",
     "risk",
     "settings",
+    "cod",
 )
 VALID_SCOPES = frozenset(
     f"{domain}:{access}" for domain in SCOPE_DOMAINS for access in ("read", "write")
@@ -107,6 +108,10 @@ _SEGMENT_DOMAINS: dict[str, str] = {
     "menus": "themes",
     # risk / trust network
     "risk": "risk",
+    # COD protection (trust rules, deposits, review holds): what the COD
+    # Shield app drives. Narrower than settings:*, which apps never get.
+    "cod": "cod",
+    "cod-trust": "cod",
     # settings & money
     "settings": "settings",
     "locations": "settings",

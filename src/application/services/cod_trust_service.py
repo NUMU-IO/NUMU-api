@@ -36,7 +36,7 @@ DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "threshold": 70,
     "min_confidence": "medium",  # never block on "low" confidence
-    "action": "block",  # "block" | "warn" | "recover"
+    "action": "block",  # "block" | "warn" | "recover" | "hold"
 }
 
 _CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
@@ -45,7 +45,7 @@ _VALID_CONFIDENCE = {"low", "medium", "high"}
 # "warn"    → allow + log (no buyer-facing change).
 # "recover" → allow the COD order, then fire a WhatsApp payment-link offer
 #             (with a promo) to convert it to prepaid — the second flow.
-_VALID_ACTIONS = {"block", "warn", "recover"}
+_VALID_ACTIONS = {"block", "warn", "recover", "hold"}
 _BASELINE_SCORE = 55  # matches network_reputation_service baseline
 
 # Location-signal weights added to the network reputation score. Individually
@@ -103,6 +103,10 @@ class CodTrustDecision:
     # the order is ALLOWED as COD, but the caller should fire the WhatsApp
     # payment-link recovery offer to convert it to prepaid.
     recover: bool = False
+    # True when the merchant chose action="hold" AND the order is high-risk:
+    # the order is ALLOWED, but created held for review (not booked with a
+    # courier until approved).
+    hold: bool = False
 
 
 def get_cod_trust_settings(store_settings: dict | None) -> dict[str, Any]:
@@ -364,6 +368,7 @@ async def check_customer_trust(
     min_conf_rank = _CONFIDENCE_RANK[settings["min_confidence"]]
     actual_conf_rank = _CONFIDENCE_RANK.get(confidence, 0)
     recover = False
+    hold = False
     if actual_conf_rank < min_conf_rank:
         reason = "low_confidence"
     elif adjusted_score >= settings["threshold"]:
@@ -374,6 +379,9 @@ async def check_customer_trust(
         if settings["action"] == "recover":
             reason = "recover_high_risk"
             recover = True
+        elif settings["action"] == "hold":
+            reason = "held_high_risk"
+            hold = True
         else:
             reason = "warned_high_risk"
             logger.warning(
@@ -396,6 +404,7 @@ async def check_customer_trust(
         label=label,
         factors=location_factors,
         recover=recover,
+        hold=hold,
     )
     _set_sentry_context(decision)
     return decision

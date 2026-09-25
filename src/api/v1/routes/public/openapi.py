@@ -56,6 +56,11 @@ _DOMAIN_TAGS = (
     ),
     ("media", "Media", "File uploads and stored assets."),
     ("risk", "Risk", "Risk assessments for orders."),
+    (
+        "cod",
+        "COD protection",
+        "Trust Network screening, deposits, confirmation and the checkout OTP.",
+    ),
     ("any", "Identity", "Who a token belongs to. Reachable with any valid token."),
 )
 _TAG_BY_DOMAIN = {domain: name for domain, name, _ in _DOMAIN_TAGS}

@@ -115,6 +115,16 @@ class ShippingResolver:
         self.repository = repository
         self.currency = currency
 
+    async def _load_cod_fee_gate(self, store_id: UUID, cod_requested: bool) -> None:
+        """Whether this store may charge its zones' COD fee (COD Shield)."""
+        if not cod_requested:
+            return
+        from src.application.services.cod_shield import cod_shield_allows
+
+        self._cod_fee = await cod_shield_allows(
+            getattr(self.repository, "session", None), store_id
+        )
+
     # ─── Public API ───────────────────────────────────────────────
 
     async def resolve_options(
@@ -143,6 +153,7 @@ class ShippingResolver:
         # the documentation above commits to the surface, and rate
         # evaluation has a hook for it later.
         _ = location_id
+        await self._load_cod_fee_gate(store_id, cod_requested)
         zone = await self.repository.get_zone_for_governorate(
             store_id, governorate_code
         )
@@ -294,6 +305,7 @@ class ShippingResolver:
         rate evaluation is destination-only.
         """
         _ = location_id
+        await self._load_cod_fee_gate(store_id, cod_requested)
         rate = await self.repository.get_rate(rate_id)
         if rate is None or not rate.is_active:
             return None
@@ -410,8 +422,14 @@ class ShippingResolver:
         else:  # pragma: no cover — validator covers unknowns
             return None
 
-        # Apply COD surcharge if customer chose COD and zone charges a fee.
-        if cod_requested and zone.cod_enabled and zone.cod_fee_cents > 0:
+        # Apply COD surcharge if customer chose COD and zone charges a fee
+        # (a COD Shield feature once that app is required).
+        if (
+            cod_requested
+            and zone.cod_enabled
+            and zone.cod_fee_cents > 0
+            and getattr(self, "_cod_fee", True)
+        ):
             amount_cents += zone.cod_fee_cents
 
         return ResolvedOption(

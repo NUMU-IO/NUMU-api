@@ -524,6 +524,10 @@ async def _maybe_send_cod_confirm_request(
     notif = store_settings.get("whatsapp_notifications", {}) or {}
     if not bool(notif.get("require_order_confirmation", False)):
         return False
+    from src.application.services.cod_shield import cod_shield_allows
+
+    if not await cod_shield_allows(session, event.store_id):
+        return False
 
     # From here this IS the confirm-order flow: even if the guard skips the
     # send below, return True so we don't also fire order_confirmation_v2.
