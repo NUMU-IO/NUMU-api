@@ -81,7 +81,7 @@ def _log_to_response(log: WebhookDeliveryLog) -> WebhookDeliveryLogResponse:
     response_model=SuccessResponse[WebhookSubscriptionCreatedResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Register a webhook endpoint",
-    dependencies=[require_feature("api_access")],
+    dependencies=[require_feature("webhooks_access")],
 )
 async def create_webhook_subscription(
     store_id: UUID,
@@ -209,7 +209,7 @@ async def rotate_webhook_secret(
     "/{subscription_id}/test",
     response_model=SuccessResponse[WebhookTestResponse],
     summary="Send a test event to a webhook endpoint",
-    dependencies=[require_feature("api_access")],
+    dependencies=[require_feature("webhooks_access")],
 )
 async def test_webhook_subscription(
     store_id: UUID,

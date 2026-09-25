@@ -17,6 +17,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.entitlement_service import aware
 from src.core.logging import get_logger
 from src.infrastructure.database.models.public.personal_access_token import (
     PersonalAccessTokenModel,
@@ -247,7 +248,8 @@ class PersonalAccessTokenService:
             return None
         if record.revoked_at is not None:
             return None
-        if record.expires_at is not None and record.expires_at <= datetime.now(UTC):
+        expires_at = aware(record.expires_at)
+        if expires_at is not None and expires_at <= datetime.now(UTC):
             return None
 
         user = (
@@ -258,11 +260,6 @@ class PersonalAccessTokenService:
         if user is None:
             return None
         return record, user
-
-    async def mark_used(self, record: PersonalAccessTokenModel) -> None:
-        """Stamp ``last_used_at`` for audit/visibility (best-effort)."""
-        record.last_used_at = datetime.now(UTC)
-        await self._session.flush()
 
     async def list_for(
         self, *, user_id: UUID, tenant_id: UUID
@@ -278,8 +275,10 @@ class PersonalAccessTokenService:
         )
         return list(result.scalars().all())
 
-    async def revoke(self, *, token_id: UUID, user_id: UUID) -> bool:
-        """Revoke a token the user owns. Returns ``False`` if not found/owned."""
+    async def revoke(
+        self, *, token_id: UUID, user_id: UUID
+    ) -> PersonalAccessTokenModel | None:
+        """Revoke a token the user owns. Returns it, or ``None`` if not found/owned."""
         result = await self._session.execute(
             select(PersonalAccessTokenModel).where(
                 PersonalAccessTokenModel.id == token_id,
@@ -288,9 +287,9 @@ class PersonalAccessTokenService:
         )
         record = result.scalar_one_or_none()
         if record is None:
-            return False
+            return None
         if record.revoked_at is None:
             record.revoked_at = datetime.now(UTC)
             await self._session.flush()
             logger.info("pat_revoked", token_id=str(token_id), user_id=str(user_id))
-        return True
+        return record

@@ -84,6 +84,7 @@ def _migration(filename: str):
 
 _entitlements_migration = _migration("20260925_entitlements.py")
 _abandoned_cart_migration = _migration("20260925_ent_abandoned_cart.py")
+_public_api_migration = _migration("20260925_public_api_limits.py")
 _FEATURE_COLUMNS = (
     "key",
     "name",
@@ -105,6 +106,7 @@ def _seed_entitlements(conn) -> None:
             for row in [
                 *_entitlements_migration.FEATURES,
                 _abandoned_cart_migration.FEATURE,
+                *_public_api_migration.FEATURES,
             ]
         ],
     )
@@ -121,6 +123,16 @@ def _seed_entitlements(conn) -> None:
                 "value": plan in _abandoned_cart_migration.PRO_AND_UP,
             }
             for plan in _entitlements_migration.PLANS
+        ]
+        + [
+            {"plan_key": plan, "feature_key": feature, "value": value}
+            for plan, values in _public_api_migration.PLAN_VALUES.items()
+            for feature, value in values.items()
+        ]
+        + [
+            {"plan_key": plan, "feature_key": "webhooks_access", "value": value}
+            for plan, feature, value in _entitlements_migration.seed_rows({})
+            if feature == "api_access"
         ],
     )
 

@@ -2,6 +2,9 @@ from src.infrastructure.messaging.tasks.abandoned_cart_tasks import (  # noqa: F
     detect_abandoned_carts_task,
     send_abandoned_cart_notification_task,
 )
+from src.infrastructure.messaging.tasks.api_usage_tasks import (  # noqa: F401
+    flush_api_usage,
+)
 from src.infrastructure.messaging.tasks.backup_task import backup_database  # noqa: F401
 from src.infrastructure.messaging.tasks.health_score_tasks import (  # noqa: F401
     calculate_health_scores_task,

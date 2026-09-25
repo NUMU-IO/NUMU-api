@@ -51,18 +51,25 @@ class WebhookDeliveryService:
         self.delivery_log_repo = delivery_log_repo
 
     async def _store_may_receive(self, store_id: UUID) -> bool:
-        """Webhooks are part of API access, so a downgrade stops them.
+        """Webhooks are an entitlement (``webhooks_access``), so a downgrade
+        stops them.
 
         Checked at dispatch rather than only at subscribe time: a store that
         drops off the plan keeps its subscription rows, and without this it
         keeps receiving events it is no longer paying for.
         """
-        from src.application.services.api_access import api_access_for_store
+        from src.application.services.entitlement_service import (
+            EntitlementService,
+            tenant_for_store,
+        )
 
         session = getattr(self.subscription_repo, "session", None)
         if session is None:
             return True
-        return (await api_access_for_store(session, store_id)).allowed
+        tenant = await tenant_for_store(session, store_id)
+        return tenant is not None and await EntitlementService(session).has(
+            tenant, "webhooks_access"
+        )
 
     @staticmethod
     def _sign(secret: str, body: bytes) -> str:
