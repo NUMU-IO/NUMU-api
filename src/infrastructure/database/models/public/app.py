@@ -81,6 +81,10 @@ class AppModel(Base, UUIDMixin, TimestampMixin):
     listing_flags: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict
     )
+    #: The portal's form editor saves here section by section (OAuth,
+    #: webhooks, pricing, links). Incomplete until "Submit for review" turns
+    #: it into a version; a CLI upload clears it so it reseeds from the upload.
+    draft_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     category: Mapped[str | None] = mapped_column(String(40), nullable=True)
     #: A private (custom) app: installs on this one store only, never listed,
     #: never reviewed, never billed by NUMU.
