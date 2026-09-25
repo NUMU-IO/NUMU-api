@@ -116,11 +116,15 @@ class AppListing(BaseModel):
     embedded: bool = False
 
 
-def _listing(manifest: dict | None) -> AppListing:
+def _listing(manifest: dict | None, flags: dict | None = None) -> AppListing:
     m = manifest or {}
+    developer = m.get("developer") if isinstance(m.get("developer"), dict) else None
+    # A Partner App NUMU builds itself (admin flag): shown "Built by NUMU".
+    if (flags or {}).get("built_by_numu"):
+        developer = {**(developer or {}), "name": "NUMU", "is_first_party": True}
     return AppListing(
         tagline=m.get("tagline"),
-        developer=m.get("developer") if isinstance(m.get("developer"), dict) else None,
+        developer=developer,
         lockup_url=m.get("lockup_url"),
         screenshots=[x for x in (m.get("screenshots") or []) if isinstance(x, dict)],
         highlights=[x for x in (m.get("highlights") or []) if isinstance(x, dict)],
@@ -257,7 +261,7 @@ def _installation(app: AppModel, install: AppInstallationModel) -> AppInstallati
         settings=install.settings or {},
         blocks=(app.manifest or {}).get("blocks", []) or [],
         settings_schema=(app.manifest or {}).get("settings_schema", []) or [],
-        listing=_listing(app.manifest),
+        listing=_listing(app.manifest, app.listing_flags),
         app_status=status_value,
         is_live=bool(install.is_enabled)
         and status_value != AppStatus.SUSPENDED.value
@@ -346,7 +350,7 @@ async def list_catalog(store_id: UUID):
                 icon_url=a.icon_url,
                 version=a.version,
                 blocks=(a.manifest or {}).get("blocks", []) or [],
-                listing=_listing(a.manifest),
+                listing=_listing(a.manifest, a.listing_flags),
                 connect=connect(a),
                 rating=ratings.get(a.id, (None, 0))[0],
                 reviews_count=ratings.get(a.id, (None, 0))[1],
