@@ -161,3 +161,71 @@ async def test_another_stores_order_is_not_found(world):
     with pytest.raises(HTTPException) as exc:
         await cod.approve_held_order(world.order.id, store=world.store, db=_Db())
     assert exc.value.status_code == 404
+
+
+# ─── Deposit request ──────────────────────────────────────────────
+
+
+def _store(world):
+    world.store.store_url = "https://shop.numueg.app"
+    return world.store
+
+
+async def test_a_percent_deposit_moves_the_order_to_pending_deposit(world):
+    world.order.payment_method = "cod"
+    world.order.total = 150_000
+    out = (
+        await cod.request_deposit(
+            world.order.id,
+            cod.DepositRequest(percent=10),
+            store=_store(world),
+            db=_Db(),
+        )
+    ).data
+    assert out.deposit_cents == 15_000 and out.balance_due_cents == 135_000
+    assert out.pay_url == f"https://shop.numueg.app/pay/{world.order.id}"
+    assert world.order.status == OrderStatus.PENDING_DEPOSIT
+    assert world.order.deposit_required_cents == 15_000
+    assert world.order.cod_review_status == "deposit"
+
+
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        (cod.DepositRequest(), 422),
+        (cod.DepositRequest(amount_cents=500, percent=10), 422),
+        (cod.DepositRequest(amount_cents=150_000), 422),
+    ],
+)
+async def test_a_bad_deposit_is_refused(world, body, code):
+    world.order.payment_method = "cod"
+    world.order.total = 150_000
+    with pytest.raises(HTTPException) as exc:
+        await cod.request_deposit(world.order.id, body, store=_store(world), db=_Db())
+    assert exc.value.status_code == code
+
+
+async def test_a_prepaid_order_takes_no_deposit(world):
+    world.order.payment_method = "paymob"
+    world.order.total = 150_000
+    with pytest.raises(HTTPException) as exc:
+        await cod.request_deposit(
+            world.order.id,
+            cod.DepositRequest(percent=10),
+            store=_store(world),
+            db=_Db(),
+        )
+    assert exc.value.status_code == 409
+
+
+def test_the_pay_page_charges_the_deposit_while_one_is_due():
+    from src.api.v1.routes.storefront.pay import _amount_due
+
+    waiting = SimpleNamespace(
+        status=OrderStatus.PENDING_DEPOSIT, deposit_required_cents=15_000, total=150_000
+    )
+    open_order = SimpleNamespace(
+        status=OrderStatus.PENDING, deposit_required_cents=None, total=150_000
+    )
+    assert _amount_due(waiting) == 15_000
+    assert _amount_due(open_order) == 150_000

@@ -76,6 +76,9 @@ _PAYMOB_UNIFIED_CHECKOUT = "https://accept.paymob.com/unifiedcheckout/"
 # An order is still payable while it is open and unpaid.
 _PAYABLE_STATUSES = frozenset({
     OrderStatus.PENDING,
+    # A COD order waiting for its confirmation deposit (checkout or an app's
+    # deposit request): the page charges the deposit, not the total.
+    OrderStatus.PENDING_DEPOSIT,
     OrderStatus.CONFIRMED,
     OrderStatus.PROCESSING,
 })
@@ -158,6 +161,13 @@ def _enabled_manual_methods(store_settings: dict | None) -> list[str]:
     return out
 
 
+def _amount_due(order) -> int:
+    """The deposit while the order waits for one; otherwise the total."""
+    if order.status == OrderStatus.PENDING_DEPOSIT and order.deposit_required_cents:
+        return int(order.deposit_required_cents)
+    return order.total
+
+
 def _payable_state(order) -> tuple[bool, str | None]:
     """(is_payable, reason). Open + unpaid orders are payable."""
     pstatus = (
@@ -237,7 +247,7 @@ async def get_pay_order_view(
             else str(order.payment_status),
             currency=order.currency,
             total=order.total,
-            amount_due=order.total,  # v1: full total; discount is a follow-up
+            amount_due=_amount_due(order),
             subtotal=order.subtotal,
             shipping_cost=order.shipping_cost,
             discount_amount=order.discount_amount,
@@ -322,7 +332,7 @@ async def initiate_pay_order(
         )
 
     method = (request.payment_method or "").lower()
-    amount_due = order.total  # v1: full total
+    amount_due = _amount_due(order)
     currency = order.currency
     ship = order.shipping_address
     customer_email = (
@@ -410,7 +420,7 @@ async def _initiate_manual(order, store, method_value: str, order_repo) -> dict:
     for _ in range(5):
         candidate = generate_reference_code(manual_method.reference_prefix)
         qr_payload, expires_at = manual_service.build_intent_payload(
-            amount_cents=order.total,
+            amount_cents=_amount_due(order),
             reference_code=candidate,
             note=f"Order {order.order_number}",
         )
@@ -422,7 +432,7 @@ async def _initiate_manual(order, store, method_value: str, order_repo) -> dict:
             method=manual_method,
             display_destination=credentials["destination"],
             display_phone=credentials.get("fallback_phone"),
-            amount_cents=order.total,
+            amount_cents=_amount_due(order),
             expires_at=expires_at,
             qr_payload=qr_payload,
         )

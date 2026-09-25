@@ -12,7 +12,7 @@ validation, the same side effects, one source of truth.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -414,4 +414,95 @@ async def reject_held_order(
     return SuccessResponse(
         data={"order_id": str(updated.id), "status": OrderStatus.CANCELLED.value},
         message="Order cancelled",
+    )
+
+
+# ─── Deposit request on an existing order ─────────────────────────
+
+
+class DepositRequest(BaseModel):
+    """Exactly one of ``amount_cents`` or ``percent``."""
+
+    amount_cents: int | None = Field(default=None, ge=100)
+    percent: int | None = Field(default=None, ge=1, le=90)
+    ttl_minutes: int = Field(default=1440, ge=5, le=10080)
+
+
+class DepositLink(BaseModel):
+    order_id: str
+    deposit_cents: int
+    balance_due_cents: int
+    expires_at: str
+    pay_url: str
+
+
+@router.post(
+    "/orders/{order_id}/deposit",
+    response_model=SuccessResponse[DepositLink],
+    summary="Ask for a confirmation deposit on a COD order",
+    operation_id="request_cod_deposit",
+)
+async def request_deposit(
+    order_id: UUID,
+    body: DepositRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Turn a pending COD order into one waiting for a deposit.
+
+    The order moves to ``pending_deposit`` exactly as a checkout deposit
+    order does, so the rest is the existing flow: the customer pays the
+    deposit on the store's /pay page, the payment webhook confirms the
+    order (which books the courier), and an unpaid deposit expires and
+    cancels it. The balance stays cash on delivery. How the link reaches
+    the customer (WhatsApp, SMS) is the caller's choice.
+    """
+    from src.infrastructure.repositories.order_repository import OrderRepository
+
+    if (body.amount_cents is None) == (body.percent is None):
+        raise HTTPException(
+            status_code=422, detail="Send exactly one of amount_cents or percent."
+        )
+    repo = OrderRepository(db)
+    order = await repo.get_by_id(order_id)
+    if order is None or order.store_id != store.id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if (order.payment_method or "").lower() != "cod":
+        raise HTTPException(status_code=409, detail="Only a COD order takes a deposit.")
+    if order.status != OrderStatus.PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail="Only a pending order can be switched to a deposit.",
+        )
+    deposit = (
+        body.amount_cents
+        if body.amount_cents is not None
+        else order.total * body.percent // 100
+    )
+    if not 100 <= deposit < order.total:
+        raise HTTPException(
+            status_code=422,
+            detail="The deposit must be at least 1.00 and less than the order total.",
+        )
+    expires = datetime.now(UTC) + timedelta(minutes=body.ttl_minutes)
+    # Checkout assigns PENDING_DEPOSIT the same way: it is not a transition
+    # a pending order makes on its own.
+    order.status = OrderStatus.PENDING_DEPOSIT
+    order.deposit_required_cents = deposit
+    order.deposit_amount_cents = deposit
+    order.deposit_expires_at = expires
+    if order.cod_review_status == "held":
+        order.cod_review_status = "deposit"
+        order.cod_reviewed_at = datetime.now(UTC)
+    updated = await repo.update(order)
+    await db.commit()
+    return SuccessResponse(
+        data=DepositLink(
+            order_id=str(updated.id),
+            deposit_cents=deposit,
+            balance_due_cents=updated.total - deposit,
+            expires_at=expires.isoformat(),
+            pay_url=f"{store.store_url}/pay/{updated.id}",
+        ),
+        message="Deposit requested",
     )
