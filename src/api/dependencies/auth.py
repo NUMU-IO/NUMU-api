@@ -176,6 +176,13 @@ async def require_admin(
 # We avoid 401 here since the access token is still valid; 403 is the
 # correct "you're authenticated but lacking the necessary credential
 # strength" code.
+#: Temporarily off (owner's call, 2026-09-25): enrolling in the admin
+#: panel kept answering "Invalid two-factor authentication code". Admin
+#: routes then skip the step-up entirely, in every environment. Set back
+#: to True once enrollment works; nothing else needs to change.
+ADMIN_2FA_ENFORCED = False
+
+
 def require_admin_2fa(max_age_seconds: int = 300):
     """Build a dependency that requires recent 2FA verification.
 
@@ -208,6 +215,8 @@ def require_admin_2fa(max_age_seconds: int = 300):
             "true",
             "yes",
         )
+        if not ADMIN_2FA_ENFORCED:
+            return admin_id
         if _settings.environment != "production" and not force:
             return admin_id
 
