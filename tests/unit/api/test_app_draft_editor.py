@@ -213,3 +213,16 @@ async def test_a_partial_listing_saves_but_does_not_submit(test_session):
         await pa.submit_listing(app_id, user_id=owner.id, db=test_session)
     assert exc.value.status_code == 422
     assert "listing.tagline" in exc.value.detail
+
+
+async def test_a_draft_apps_icon_shows_as_soon_as_it_is_saved(test_session):
+    owner, app_id = await _setup(test_session)
+    await pa.save_draft(
+        app_id,
+        pa.EditorDraftUpdate(changes={"icon": "https://cdn.example.com/icon.png"}),
+        REQUEST,
+        user_id=owner.id,
+        db=test_session,
+    )
+    app = (await pa.get_app(app_id, user_id=owner.id, db=test_session)).data
+    assert app.icon_url == "https://cdn.example.com/icon.png"

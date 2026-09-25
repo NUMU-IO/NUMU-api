@@ -1102,6 +1102,11 @@ async def save_draft(
         else:
             draft[key] = value
     app.draft_manifest = draft
+    if "icon" in body.changes and app.status == AppStatus.DRAFT:
+        # Never published: the app row mirrors the draft (as an upload does),
+        # so the portal's list and header show the icon straight away. A live
+        # app keeps its reviewed icon until the next version is published.
+        app.icon_url = draft.get("icon")
     await db.flush()
     return SuccessResponse(data=await _editor_out(db, request, app), message="Saved")
 
