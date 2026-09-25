@@ -265,6 +265,10 @@ celery_app.conf.beat_schedule = {
         # churn on the NullPool worker; alert latency of <1 min is fine.
         "kwargs": {"max_alerts": 10},
     },
+    "flush-api-usage": {
+        "task": "tasks.flush_api_usage",
+        "schedule": 300.0,
+    },
     "retry-pending-webhook-deliveries": {
         "task": "tasks.retry_pending_webhook_deliveries",
         "schedule": 60.0,  # Every 60s (was 15s) — biggest single churn source

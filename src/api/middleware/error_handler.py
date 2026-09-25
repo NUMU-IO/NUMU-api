@@ -202,10 +202,13 @@ def setup_exception_handlers(app: FastAPI) -> None:
             body["error"].update({
                 k: v for k, v in detail.items() if k not in ("code", "message")
             })
-            return JSONResponse(status_code=exc.status_code, content=body)
+            return JSONResponse(
+                status_code=exc.status_code, content=body, headers=exc.headers
+            )
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body("HTTP_ERROR", str(detail)),
+            headers=exc.headers,
         )
 
     @app.exception_handler(EntityNotFoundError)

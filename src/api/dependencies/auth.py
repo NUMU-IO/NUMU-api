@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_db
@@ -308,46 +308,86 @@ async def _resolve_principal(request: Request) -> TokenPayload:
 
 
 async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
-    """Validate a Personal Access Token and synthesize a ``TokenPayload``.
+    """Validate a merchant API key (``numu_pat_``) and synthesize a ``TokenPayload``.
 
-    Opens its own short-lived session (the request-scoped one isn't available
-    this early in the dependency chain). The PAT, user, and store tables all
-    live in the ``public`` schema, so the default search_path resolves them
-    without tenant-schema switching.
+    Order: key → store binding → ``api_access`` → rate limits + monthly quota
+    → scopes. Limits run before scopes so a client hammering an endpoint it
+    lacks the scope for is still throttled.
+
+    A cached call costs Redis only: the key's metadata (60 s, and dead keys
+    are remembered too, so a client retrying a bad key costs no queries) and
+    the merchant's API policy (30 s). The session below connects only on a
+    cache miss or the once-a-minute ``last_used_at`` stamp. The result is
+    memoised on the request, because several auth dependencies may resolve
+    the principal for one request and the limiter must count it once.
     """
+    memo = getattr(request.state, "pat_principal", None)
+    if memo is not None:
+        return memo
+
+    from src.application.services import api_limits
+    from src.application.services.entitlement_service import aware
     from src.application.services.personal_access_token_service import (
         PersonalAccessTokenService,
+        hash_token,
         required_scope_for,
         scope_allows,
     )
     from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.public.personal_access_token import (
+        PersonalAccessTokenModel,
+    )
+
+    invalid = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired access token",
+    )
+    token_hash = hash_token(token)
 
     async with AsyncSessionLocal() as session:
-        service = PersonalAccessTokenService(session)
-        resolved = await service.authenticate(token)
-        if resolved is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired access token",
-            )
-        record, user = resolved
+        meta = await api_limits.cached_key(token_hash)
+        if meta == api_limits.MISS:
+            raise invalid
+        if not isinstance(meta, dict):
+            resolved = await PersonalAccessTokenService(session).authenticate(token)
+            if resolved is None:
+                await api_limits.cache_key(token_hash, None)
+                raise invalid
+            record, user = resolved
+            meta = {
+                "token_id": str(record.id),
+                "name": record.name,
+                "scopes": record.scopes,
+                "store_id": str(record.store_id) if record.store_id else None,
+                "tenant_id": str(record.tenant_id),
+                "user_id": str(user.id),
+                "email": user.email,
+                "role": user.role.value
+                if hasattr(user.role, "value")
+                else str(user.role),
+                "expires_at": aware(record.expires_at).isoformat()
+                if record.expires_at
+                else None,
+            }
+            await api_limits.cache_key(token_hash, meta)
+        if meta["expires_at"] and datetime.fromisoformat(
+            meta["expires_at"]
+        ) <= datetime.now(UTC):
+            await api_limits.forget_key(token_hash)
+            raise invalid
 
         # Expose PAT identity to downstream handlers (e.g. /auth/api-key/me)
         # without re-authenticating the token. Set before the checks below so
         # the per-token request trail also records the requests they refuse.
         request.state.pat = {
-            "token_id": str(record.id),
-            "name": record.name,
-            "scopes": record.scopes,
-            "store_id": str(record.store_id) if record.store_id else None,
-            "tenant_id": str(record.tenant_id),
+            k: meta[k] for k in ("token_id", "name", "scopes", "store_id", "tenant_id")
         }
 
         # Defense in depth: a PAT may only act on the tenant it was minted for.
         # The subdomain middleware has already resolved the target tenant, so a
         # token replayed against another store's subdomain is rejected here.
         tenant = getattr(request.state, "tenant", None)
-        if tenant is not None and str(record.tenant_id) != str(tenant.id):
+        if tenant is not None and meta["tenant_id"] != str(tenant.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access token is not valid for this store",
@@ -358,12 +398,12 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
         path = request.url.path
         parts = [p for p in path.split("/") if p]
         if (
-            record.store_id is not None
+            meta["store_id"] is not None
             and len(parts) >= 4
             and parts[0] == "api"
             and parts[1] == "v1"
             and parts[2] == "stores"
-            and parts[3] != str(record.store_id)
+            and parts[3] != meta["store_id"]
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -373,11 +413,10 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
         # API access is sold: the plan includes it, or an admin granted it to
         # this merchant. Checked on every request rather than only at minting,
         # so revoking a grant or downgrading a plan stops the tokens already
-        # out there.
-        from src.application.services.api_access import api_access_for_tenant
-
-        access = await api_access_for_tenant(session, record.tenant_id)
-        if not access.allowed:
+        # out there (within the policy cache's 30 s).
+        tenant_id = UUID(meta["tenant_id"])
+        policy = await api_limits.policy_for_tenant(session, tenant_id)
+        if not policy.allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=(
@@ -386,12 +425,37 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
                 ),
             )
 
+        decision = await api_limits.check_and_count(
+            tenant_id=meta["tenant_id"],
+            token_id=meta["token_id"],
+            path=path,
+            method=request.method,
+            policy=policy,
+        )
+        request.state.api_limit = decision
+        if not decision.allowed:
+            quota = decision.code == api_limits.QUOTA_EXCEEDED
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": decision.code,
+                    "message": (
+                        "Your monthly API usage limit has been reached."
+                        if quota
+                        else "Too many API requests."
+                    ),
+                    "retry_after": decision.retry_after,
+                },
+                headers=decision.headers(),
+            )
+
         # Central scope enforcement (routes stay scope-unaware). NULL scopes =
         # unrestricted legacy token; scoped tokens are default-deny outside the
         # mapped store surface and may never manage tokens themselves.
-        if record.scopes is not None:
+        scopes = meta["scopes"]
+        if scopes is not None:
             required = required_scope_for(path, request.method)
-            if required is None or not scope_allows(record.scopes, required):
+            if required is None or not scope_allows(scopes, required):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=(
@@ -401,19 +465,25 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
                     ),
                 )
 
-        await service.mark_used(record)
-        await session.commit()
+        if await api_limits.should_mark_used(meta["token_id"]):
+            await session.execute(
+                update(PersonalAccessTokenModel)
+                .where(PersonalAccessTokenModel.id == UUID(meta["token_id"]))
+                .values(last_used_at=datetime.now(UTC))
+            )
+            await session.commit()
 
-        role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
-        return TokenPayload(
-            user_id=user.id,
-            email=user.email,
-            role=role_value,
-            exp=0,
-            token_type="access",
-            iat=0,
-            tenant_id=record.tenant_id,
-        )
+    payload = TokenPayload(
+        user_id=UUID(meta["user_id"]),
+        email=meta["email"],
+        role=meta["role"],
+        exp=0,
+        token_type="access",
+        iat=0,
+        tenant_id=tenant_id,
+    )
+    request.state.pat_principal = payload
+    return payload
 
 
 async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:

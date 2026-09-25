@@ -77,6 +77,9 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Process-Time"] = str(process_time_ms)
+            limit = getattr(request.state, "api_limit", None)
+            if limit is not None:
+                response.headers.update(limit.headers())
 
             record_in_background(request, response.status_code, process_time_ms)
             return response

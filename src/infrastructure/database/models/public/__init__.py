@@ -8,6 +8,7 @@ They include:
 - FeedbackModel: Beta merchant feedback
 """
 
+from src.infrastructure.database.models.public.api_usage import ApiUsageDailyModel
 from src.infrastructure.database.models.public.app import (
     AppAccessTokenModel,
     AppInstallationModel,
@@ -117,6 +118,7 @@ __all__ = [
     "CustomizerUndoEntryModel",
     "FeedbackModel",
     "PaymentReconciliationRunModel",
+    "ApiUsageDailyModel",
     "PersonalAccessTokenModel",
     "ReconciliationMismatchModel",
     "StoreOnboardingModel",

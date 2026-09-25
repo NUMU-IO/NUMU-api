@@ -86,3 +86,119 @@ async def list_api_token_requests(
     limit: Annotated[int, Query(ge=1, le=KEEP)] = 200,
 ):
     return SuccessResponse(data=await recent_requests(str(token_id), limit))
+
+
+@router.get("/usage", response_model=SuccessResponse[dict])
+async def api_usage_overview(db: Annotated[AsyncSession, Depends(get_db)]):
+    """Platform-wide API usage from ``api_usage_daily`` (today is at most one
+    flush, 5 minutes, behind): top consumers, merchants near their quota,
+    throttling, error rates and the slowest and busiest endpoints."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import case, func
+
+    from src.application.services import api_limits
+    from src.infrastructure.database.models.public.api_usage import (
+        ApiUsageDailyModel as U,
+    )
+
+    today = datetime.now(UTC).date()
+    month_start = today.replace(day=1)
+    today_n = func.sum(case((U.day == today, U.requests), else_=0))
+
+    tenants = (
+        await db.execute(
+            select(
+                U.tenant_id,
+                TenantModel.subdomain,
+                func.sum(U.requests).label("month"),
+                today_n.label("today"),
+                func.sum(U.throttled).label("throttled"),
+                func.sum(U.errors_5xx).label("errors_5xx"),
+                func.max(U.updated_at).label("last_activity"),
+            )
+            .join(TenantModel, TenantModel.id == U.tenant_id)
+            .where(U.day >= month_start)
+            .group_by(U.tenant_id, TenantModel.subdomain)
+            .order_by(func.sum(U.requests).desc())
+            .limit(50)
+        )
+    ).all()
+
+    consumers = []
+    for row in tenants:
+        policy = await api_limits.policy_for_tenant(db, row.tenant_id)
+        used = int(row.month) - int(row.throttled)
+        quota = policy.monthly_quota
+        consumers.append({
+            "tenant_id": str(row.tenant_id),
+            "subdomain": row.subdomain,
+            "requests_today": int(row.today),
+            "requests_month": int(row.month),
+            "throttled_month": int(row.throttled),
+            "errors_5xx_month": int(row.errors_5xx),
+            "last_activity": row.last_activity.isoformat()
+            if row.last_activity
+            else None,
+            "monthly_quota": quota,
+            "quota_percent": round(100 * used / quota, 1) if quota else None,
+            "per_minute": policy.per_minute,
+            # Throttled on more than a tenth of its calls: the integration
+            # is ignoring 429s or polling.
+            "suspicious": int(row.month) > 0
+            and int(row.throttled) / int(row.month) > 0.1,
+        })
+
+    routes = (
+        await db.execute(
+            select(
+                U.method,
+                U.route,
+                func.sum(U.requests).label("n"),
+                func.sum(U.errors_5xx).label("e5"),
+                func.sum(U.latency_ms_sum).label("ms"),
+            )
+            .where(U.day >= month_start)
+            .group_by(U.method, U.route)
+        )
+    ).all()
+    endpoints = [
+        {
+            "method": r.method,
+            "route": r.route,
+            "requests": int(r.n),
+            "errors_5xx": int(r.e5),
+            "avg_ms": round(int(r.ms) / int(r.n), 1) if r.n else 0,
+        }
+        for r in routes
+    ]
+    totals = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(U.requests), 0),
+                func.coalesce(func.sum(U.throttled), 0),
+                func.coalesce(func.sum(U.errors_5xx), 0),
+            ).where(U.day >= month_start)
+        )
+    ).one()
+    today_total = await db.scalar(
+        select(func.coalesce(func.sum(U.requests), 0)).where(U.day == today)
+    )
+    return SuccessResponse(
+        data={
+            "requests_today": int(today_total or 0),
+            "requests_month": int(totals[0]),
+            "throttled_month": int(totals[1]),
+            "error_5xx_rate": round(int(totals[2]) / int(totals[0]), 4)
+            if totals[0]
+            else 0,
+            "top_consumers": consumers,
+            "near_quota": [c for c in consumers if (c["quota_percent"] or 0) >= 80],
+            "suspicious": [c for c in consumers if c["suspicious"]],
+            "top_endpoints": sorted(endpoints, key=lambda e: -e["requests"])[:15],
+            "slowest_endpoints": sorted(
+                (e for e in endpoints if e["requests"] >= 50),
+                key=lambda e: -e["avg_ms"],
+            )[:15],
+        }
+    )

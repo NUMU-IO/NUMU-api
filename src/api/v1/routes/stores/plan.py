@@ -67,7 +67,7 @@ async def get_plan_usage(
             "products": await meter("products"),
             "orders_this_month": await meter("orders_per_month"),
             "features": {
-                "webhooks": await ents.has(tenant, "api_access"),
+                "webhooks": await ents.has(tenant, "webhooks_access"),
                 "custom_domain": await ents.has(tenant, "custom_domain"),
                 "api_access": await ents.has(tenant, "api_access"),
                 "analytics": legacy.analytics_enabled,
@@ -108,7 +108,7 @@ async def get_all_plan_limits(
             "max_customers": features.max_customers
             if features.max_customers != -1
             else None,
-            "webhooks_enabled": plan.get("api_access") is True,
+            "webhooks_enabled": plan.get("webhooks_access") is True,
             "custom_domain_enabled": plan.get("custom_domain") is True,
             "api_access_enabled": plan.get("api_access") is True,
             "analytics_enabled": features.analytics_enabled,

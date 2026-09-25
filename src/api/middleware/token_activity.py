@@ -29,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import Request
 
 from src.api.middleware.rate_limit import _get_cache, _get_client_ip, _pat_bucket
+from src.application.services.api_limits import queue_usage
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -113,6 +114,16 @@ async def record_token_request(
                 pipe.lpush(key, json.dumps(entry))
                 pipe.ltrim(key, 0, KEEP - 1)
                 pipe.expire(key, IDLE_TTL_SECONDS)
+                if pat.get("tenant_id") and not pat.get("app_id"):
+                    queue_usage(
+                        pipe,
+                        tenant_id=pat["tenant_id"],
+                        token_id=pat["token_id"],
+                        method=request.method,
+                        route=_route(request),
+                        status=status_code,
+                        ms=duration_ms,
+                    )
             if app:
                 _queue_app(pipe, request, app, status_code, duration_ms)
             await pipe.execute()
