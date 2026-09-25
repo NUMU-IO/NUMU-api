@@ -229,3 +229,41 @@ def test_the_pay_page_charges_the_deposit_while_one_is_due():
     )
     assert _amount_due(waiting) == 15_000
     assert _amount_due(open_order) == 150_000
+
+
+# ─── COD Shield gate ──────────────────────────────────────────────
+
+
+class _Session:
+    """scalar() answers in order: the gate config, then the install lookup."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+
+    async def scalar(self, _stmt):
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+async def test_the_gate_is_open_until_it_is_required():
+    from src.application.services.cod_shield import cod_shield_allows
+
+    assert await cod_shield_allows(_Session(None), uuid4()) is True
+    assert await cod_shield_allows(_Session({"required": False}), uuid4()) is True
+
+
+async def test_a_required_gate_needs_the_app_installed():
+    from src.application.services.cod_shield import cod_shield_allows
+
+    required = {"required": True, "app_slug": "cod-shield"}
+    assert await cod_shield_allows(_Session(required, None), uuid4()) is False
+    assert await cod_shield_allows(_Session(required, uuid4()), uuid4()) is True
+
+
+async def test_the_gate_fails_open():
+    from src.application.services.cod_shield import cod_shield_allows
+
+    assert await cod_shield_allows(_Session(RuntimeError("db down")), uuid4()) is True
+    assert await cod_shield_allows(None, uuid4()) is True

@@ -118,6 +118,38 @@ async def _set_checkout_identity_enabled(db: AsyncSession, enabled: bool) -> Non
     await db.commit()
 
 
+async def _set_cod_shield_required(db: AsyncSession, required: bool) -> None:
+    """Upsert the COD Shield gate (application/services/cod_shield.py)."""
+    from src.application.services.cod_shield import (
+        CONFIG_KEY,
+        DEFAULT_APP_SLUG,
+        gate_config,
+    )
+
+    existing = await gate_config(db)
+    merged = {
+        "app_slug": existing.get("app_slug") or DEFAULT_APP_SLUG,
+        "required": bool(required),
+    }
+    stmt = (
+        pg_insert(PlatformConfigModel)
+        .values(
+            key=CONFIG_KEY,
+            value=merged,
+            description="COD protection needs the COD Shield app installed",
+        )
+        .on_conflict_do_update(index_elements=["key"], set_={"value": merged})
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def _cod_shield_cfg(db: AsyncSession) -> dict:
+    from src.application.services.cod_shield import gate_config
+
+    return await gate_config(db)
+
+
 def _resolve_checkout_identity_enabled(checkout_cfg: dict) -> bool:
     """Effective gate value for the snapshot: stored flag, else env default."""
     value = checkout_cfg.get("identity_enabled")
@@ -231,6 +263,10 @@ class UpdatePlatformConfigPayload(BaseModel):
     # store whose merchant hasn't opted out (require_verification defaults
     # true) — the admin UI carries the same warning.
     checkout_identity_enabled: bool | None = None
+    # COD protection (trust check, checkout OTP, deposit, WhatsApp confirm,
+    # COD fee) only for stores with the COD Shield app. Turning this ON
+    # switches those features off for every store without the app.
+    cod_shield_required: bool | None = None
 
 
 class PlatformConfigSnapshot(BaseModel):
@@ -249,6 +285,8 @@ class PlatformConfigSnapshot(BaseModel):
     # Phone-first checkout identity gate (default off; env is the
     # unset-default, the stored flag wins once set).
     checkout_identity_enabled: bool = False
+    # COD protection needs the COD Shield app (default off).
+    cod_shield_required: bool = False
 
 
 @router.get(
@@ -284,6 +322,7 @@ async def get_platform_config(
             ),
             apple_pay_enabled=bool(payments.get("apple_pay_enabled", True)),
             checkout_identity_enabled=_resolve_checkout_identity_enabled(checkout_cfg),
+            cod_shield_required=bool((await _cod_shield_cfg(db)).get("required")),
         ),
         message="Platform config retrieved",
     )
@@ -353,6 +392,16 @@ async def update_platform_config(
             },
         )
 
+    if "cod_shield_required" in fields_set:
+        await _set_cod_shield_required(db, bool(payload.cod_shield_required))
+        logger.info(
+            "platform_cod_shield_required_toggled",
+            extra={
+                "admin_id": str(admin),
+                "new_value": bool(payload.cod_shield_required),
+            },
+        )
+
     if "checkout_identity_enabled" in fields_set:
         await _set_checkout_identity_enabled(
             db, bool(payload.checkout_identity_enabled)
@@ -380,6 +429,7 @@ async def update_platform_config(
             ),
             apple_pay_enabled=bool(payments.get("apple_pay_enabled", True)),
             checkout_identity_enabled=_resolve_checkout_identity_enabled(checkout_cfg),
+            cod_shield_required=bool((await _cod_shield_cfg(db)).get("required")),
         ),
         message="Platform config updated",
     )

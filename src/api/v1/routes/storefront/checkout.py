@@ -502,6 +502,12 @@ async def checkout(
                 },
             )
 
+    # ── COD Shield gate: the OTP, trust check and deposit below are the COD
+    # Shield app's features. Off (the default), every store keeps them. ──
+    from src.application.services.cod_shield import cod_shield_allows
+
+    _cod_shield = await cod_shield_allows(store_repo.session, store_id)
+
     # ── Checkout-fields: validate submitted custom fields against live config ──
     checkout_config = resolve_checkout_config(store.settings)
     accepted_custom_fields, custom_field_errors = validate_custom_field_values(
@@ -523,7 +529,7 @@ async def checkout(
     # should be stamped phone_verified_at once it exists (below).
     identity_phone_just_verified = False
     _identity_cfg = checkout_config.get("identity") or {}
-    if bool(_identity_cfg.get("require_verification")):
+    if bool(_identity_cfg.get("require_verification")) and _cod_shield:
         from src.application.services.checkout_identity import (
             otp_available as _otp_available,
         )
@@ -1024,7 +1030,7 @@ async def checkout(
     # event is recorded below, so the customer's own current order does
     # not inflate their own score during the check.
     trust_decision: CodTrustDecision | None = None
-    if is_cod:
+    if is_cod and _cod_shield:
         customer_phone = (
             request.shipping_address.phone if request.shipping_address else None
         )
@@ -2224,7 +2230,11 @@ async def checkout(
     # Sized server-side from the order we just built. The storefront quotes
     # the same figure from the same policy, but the amount charged is never
     # taken from the client.
-    _deposit_amount = deposit_due_cents(_deposit_policy_raw, created_order.total)
+    _deposit_amount = (
+        deposit_due_cents(_deposit_policy_raw, created_order.total)
+        if _cod_shield
+        else 0
+    )
     if request.payment_method == "cod" and _deposit_amount > 0:
         _allowed_gateways: list[str] = list(
             _deposit_policy_raw.get("allowed_gateways") or []
