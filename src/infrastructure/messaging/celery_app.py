@@ -58,6 +58,10 @@ celery_app.conf.update(
     # Worker settings
     worker_prefetch_multiplier=1,
     worker_concurrency=4,
+    # Recycle a child after the task in which it passes 550 MB (value in KB).
+    # Prod runs one child on a 2 GB box; it sits at ~400 MB after start, so
+    # this only fires if something grows, and never mid-task.
+    worker_max_memory_per_child=550_000,
     # Task autodiscovery - adjust paths as needed
     imports=[
         "src.infrastructure.messaging.tasks",
