@@ -48,3 +48,5 @@ async def test_setup_sets_schema_tenant_and_user_in_one_statement():
     finally:
         connection.reset_tenant_context()
         connection._user_id.set(None)
+        # Pooled connections belong to this test's event loop; drop them.
+        await connection.engine.dispose()

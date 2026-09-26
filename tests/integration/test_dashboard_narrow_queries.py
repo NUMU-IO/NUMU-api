@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from src.infrastructure.database.connection import AsyncSessionLocal
+from src.infrastructure.database.connection import AsyncSessionLocal, engine
 from src.infrastructure.repositories.order_repository import OrderRepository
 from src.infrastructure.repositories.product_repository import ProductRepository
 from src.infrastructure.repositories.variant_repository import VariantRepository
@@ -27,3 +27,5 @@ async def test_narrow_reads_execute_and_are_empty_for_an_unknown_store():
         assert await ProductRepository(s).count_low_stock(store_id) == 0
         assert await ProductRepository(s).cost_cents_by_product(store_id) == {}
         assert await VariantRepository(s).cost_cents_by_variant(store_id) == []
+    # Pooled connections belong to this test's event loop; drop them.
+    await engine.dispose()
