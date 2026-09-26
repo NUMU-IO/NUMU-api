@@ -1,7 +1,9 @@
 """Redis cache service implementation."""
 
+import asyncio
 import json
 import logging
+import weakref
 from typing import Any
 
 import redis.asyncio as redis
@@ -11,6 +13,10 @@ from src.config import settings
 from src.core.interfaces.services.cache_service import ICacheService
 
 logger = logging.getLogger(__name__)
+
+_shared_clients: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[str, redis.Redis]
+] = weakref.WeakKeyDictionary()
 
 
 class RedisCacheService(ICacheService):
@@ -40,20 +46,29 @@ class RedisCacheService(ICacheService):
         self._client: redis.Redis | None = None
 
     async def _get_client(self) -> redis.Redis:
-        """Get or create Redis client."""
+        """The client shared by every service on this event loop and URL.
+
+        ``RedisCacheService()`` is built per request in ~80 places; each used
+        to open its own connection pool, paying a fresh TCP connect per
+        request. Keyed by loop because a redis.asyncio client belongs to the
+        loop it was made on (Celery runs each task on a new one).
+        """
         if self._client is None:
-            self._client = redis.from_url(
-                self.redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-            )
+            per_loop = _shared_clients.setdefault(asyncio.get_running_loop(), {})
+            client = per_loop.get(self.redis_url)
+            if client is None:
+                client = redis.from_url(
+                    self.redis_url,
+                    encoding="utf-8",
+                    decode_responses=True,
+                )
+                per_loop[self.redis_url] = client
+            self._client = client
         return self._client
 
     async def close(self) -> None:
-        """Close Redis connection."""
-        if self._client:
-            await self._client.close()
-            self._client = None
+        """Release this service's handle; the shared client stays open."""
+        self._client = None
 
     def _serialize(self, value: Any) -> str:
         """Serialize value to JSON string."""

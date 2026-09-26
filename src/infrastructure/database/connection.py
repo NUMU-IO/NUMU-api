@@ -296,47 +296,42 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         # — while the tenant schema still takes precedence for tenant tables.
         schema = get_tenant_schema()
         safe_schema = _validate_schema_name(schema)
-        await session.execute(text(f"SET search_path TO {safe_schema}, public"))
 
-        # Set the tenant context for RLS policies
-        tenant_id = get_tenant_id()
+        # Tenant context for RLS policies, and the user context for the
+        # marketplace's user-scoped RLS (policies fall back to admin_bypass
+        # for sessions without a user: cron jobs, admin reads). Both are
+        # validated as UUIDs and only ever bound, never interpolated.
+        tenant_id = get_tenant_id() or ""
         if tenant_id:
-            # Validate UUID format to prevent injection
             try:
                 UUID(tenant_id)
-                await session.execute(
-                    text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
-                    {"tenant_id": tenant_id},
-                )
-                logger.debug("rls_tenant_context_set", tenant_id=tenant_id)
             except ValueError:
                 logger.warning("invalid_tenant_id_format", tenant_id=tenant_id)
-        else:
-            # Clear any existing tenant context when no tenant is set
-            await session.execute(
-                text("SELECT set_config('app.current_tenant', '', true)")
-            )
-
-        # Set the user context for marketplace user-scoped RLS. The
-        # marketplace policies fall back to admin_bypass for sessions
-        # without a user (cron jobs, admin reads); strict policies are
-        # only triggered when the auth middleware populated the
-        # contextvar. Validate UUID format identical to tenant_id —
-        # never interpolate the raw contextvar value.
-        user_id = get_user_id()
+                tenant_id = ""
+        user_id = get_user_id() or ""
         if user_id:
             try:
                 UUID(user_id)
-                await session.execute(
-                    text("SELECT set_config('app.current_user', :user_id, true)"),
-                    {"user_id": user_id},
-                )
             except ValueError:
                 logger.warning("invalid_user_id_format", user_id=user_id)
-        else:
-            await session.execute(
-                text("SELECT set_config('app.current_user', '', true)")
-            )
+                user_id = ""
+
+        # One round trip instead of three: every request paid for these before
+        # its first real query, even when the handler never touched the DB.
+        # search_path stays session-level (is_local=false, same as SET);
+        # the RLS GUCs stay transaction-local.
+        await session.execute(
+            text(
+                "SELECT set_config('search_path', :search_path, false),"
+                " set_config('app.current_tenant', :tenant_id, true),"
+                " set_config('app.current_user', :user_id, true)"
+            ),
+            {
+                "search_path": f"{safe_schema}, public",
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+            },
+        )
 
         try:
             yield session
