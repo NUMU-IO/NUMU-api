@@ -92,6 +92,10 @@ class PromotionResolver:
         promotions = await self._promotion_repo.list_active_for_storefront(
             store_id, moment, include_drafts=preview
         )
+        # Most stores run no promotion; every storefront page asks anyway,
+        # so skip the dismissal/display/target reads that would filter nothing.
+        if not promotions:
+            return ResolvedPromotions()
 
         # 2. Hydrate dismissals once per call.
         dismissed_ids = await self._dismissal_repo.list_dismissed_promotion_ids(
