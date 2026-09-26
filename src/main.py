@@ -125,6 +125,27 @@ async def lifespan(app: FastAPI):
     validate_carrier_registry()
     logger.info("carrier_registry_loaded", carriers=list(carrier_slugs()))
 
+    # Which database this process talks to and which migrations it has, in
+    # the first log lines. A blue/green candidate once reported columns
+    # missing that the live slot saw fine; this line settles that at a glance.
+    try:
+        from sqlalchemy import text as sa_text
+
+        async with AsyncSessionLocal() as db:
+            heads = (
+                (await db.execute(sa_text("SELECT version_num FROM alembic_version")))
+                .scalars()
+                .all()
+            )
+        logger.info(
+            "database_identity",
+            db_host=engine.url.host,
+            db_name=engine.url.database,
+            alembic_heads=sorted(heads),
+        )
+    except Exception:
+        logger.warning("database_identity_check_failed", exc_info=True)
+
     # Load plan-limit overrides from DB so admin changes survive restarts.
     async def _load_plan_limits() -> None:
         from sqlalchemy import select as sa_select
