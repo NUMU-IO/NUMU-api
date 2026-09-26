@@ -24,6 +24,7 @@ from typing import Any
 from uuid import UUID
 
 from src.infrastructure.cache.redis_cache import RedisCacheService
+from src.infrastructure.cache.response_cache import bust_storefront_responses
 from src.infrastructure.observability.prometheus_metrics import (
     record_cache_hit,
     record_cache_invalidate,
@@ -211,6 +212,7 @@ class ProductCacheService:
         # Using pattern matching to clear all pages/filters
         pattern = f"{self.PREFIX}:products:store:{store_id}:*"
         keys_deleted += await self.cache.clear_pattern(pattern)
+        await bust_storefront_responses(store_id)
 
         if keys_deleted:
             record_cache_invalidate("product", reason="product_mutation")
@@ -230,6 +232,7 @@ class ProductCacheService:
         """
         pattern = f"{self.PREFIX}:products:store:{store_id}:*"
         count = await self.cache.clear_pattern(pattern)
+        await bust_storefront_responses(store_id)
         if count:
             record_cache_invalidate("product", reason="store_bulk")
         return count
@@ -246,6 +249,7 @@ class ProductCacheService:
             Number of cache keys invalidated
         """
         pattern = f"{self.PREFIX}:categories:store:{store_id}:*"
+        await bust_storefront_responses(store_id)
         return await self.cache.clear_pattern(pattern)
 
     # =========================================================================

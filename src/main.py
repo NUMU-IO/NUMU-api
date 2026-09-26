@@ -28,6 +28,9 @@ from src.api.middleware import (
     setup_cors,
     setup_exception_handlers,
 )
+from src.api.middleware.storefront_response_cache import (
+    StorefrontResponseCacheMiddleware,
+)
 from src.api.short_link_redirect import router as short_link_redirect_router
 from src.api.v1.routes import api_router
 from src.api.v1.routes.order_redirect import router as order_redirect_router
@@ -402,6 +405,8 @@ def create_app() -> FastAPI:
             app.add_middleware(DocsAuthMiddleware)
         app.add_middleware(CacheHeadersMiddleware)
         app.add_middleware(CompressionMiddleware)
+        # Replays whole storefront read responses; inside the rate limiter.
+        app.add_middleware(StorefrontResponseCacheMiddleware)
         app.add_middleware(RateLimitMiddleware)
         app.add_middleware(SentryMiddleware)
         app.add_middleware(ResponseTimeMiddleware)

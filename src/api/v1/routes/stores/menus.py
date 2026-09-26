@@ -17,6 +17,7 @@ from src.api.v1.schemas.tenant.menu import (
 )
 from src.core.entities.menu import Menu
 from src.core.entities.store import Store
+from src.infrastructure.cache.response_cache import bust_storefront_responses
 from src.infrastructure.repositories.menu_repository import MenuRepository
 
 router = APIRouter(prefix="/{store_id}/menus")
@@ -37,6 +38,7 @@ def _menu_response(entity: Menu) -> MenuResponse:
 
 async def _revalidate(store: Store) -> None:
     """Best-effort: bust the storefront's cached navigation after a change."""
+    await bust_storefront_responses(store.id)
     if not store.subdomain:
         return
     try:
