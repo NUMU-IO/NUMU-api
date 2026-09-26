@@ -133,8 +133,17 @@ class _FakeOrderRepo:
     async def count_by_store(self, *_a, **_k) -> int:
         return len(self._orders)
 
-    async def get_by_date_range(self, *_a, **_k) -> list[Order]:
-        return self._orders
+    async def count_by_status_for_store(self, *_a, **_k) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for o in self._orders:
+            counts[o.status.value] = counts.get(o.status.value, 0) + 1
+        return counts
+
+    async def get_profit_lines(self, *_a, **_k):
+        return [
+            (o.status.value, o.subtotal or 0, o.discount_amount or 0, o.line_items)
+            for o in self._orders
+        ]
 
 
 class _FakeCustomerRepo:
@@ -149,11 +158,11 @@ class _FakeProductRepo:
     async def count_by_store(self, *_a, **_k) -> int:
         return len(self._products)
 
-    async def get_low_stock(self, *_a, **_k) -> list[Product]:
-        return []
+    async def count_low_stock(self, *_a, **_k) -> int:
+        return 0
 
-    async def get_by_store(self, *_a, **_k) -> list[Product]:
-        return self._products
+    async def cost_cents_by_product(self, *_a, **_k) -> dict:
+        return {p.id: p.cost_price.cents for p in self._products if p.cost_price}
 
 
 class _FakeStoreRepo:
@@ -171,8 +180,13 @@ class _FakeVariantRepo:
     def __init__(self, by_product: dict[uuid.UUID, list[_Variant]]) -> None:
         self._by_product = by_product
 
-    async def list_for_products(self, product_ids):
-        return {pid: self._by_product.get(pid, []) for pid in product_ids}
+    async def cost_cents_by_variant(self, *_a, **_k):
+        return [
+            (v.id, pid, v.cost_price.cents)
+            for pid, variants in self._by_product.items()
+            for v in variants
+            if v.cost_price is not None
+        ]
 
 
 async def _run(orders, products, variants_by_product=None):

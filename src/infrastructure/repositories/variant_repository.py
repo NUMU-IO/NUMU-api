@@ -114,6 +114,20 @@ class VariantRepository:
             out[r.product_id].append(_to_entity(r))
         return out
 
+    async def cost_cents_by_variant(
+        self, store_id: UUID
+    ) -> list[tuple[UUID, UUID, int]]:
+        """``(variant_id, product_id, cost cents)`` for every costed variant."""
+        result = await self._session.execute(
+            select(
+                VariantModel.id, VariantModel.product_id, VariantModel.cost_price
+            ).where(
+                VariantModel.store_id == store_id,
+                VariantModel.cost_price.isnot(None),
+            )
+        )
+        return [(vid, pid, cents) for vid, pid, cents in result.all()]
+
     async def find_by_options(
         self, product_id: UUID, option_values: dict[str, str]
     ) -> Variant | None:

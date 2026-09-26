@@ -412,6 +412,29 @@ class ProductRepository(IProductRepository):
         )
         return [self._to_entity(model) for model in result.scalars().all()]
 
+    async def count_low_stock(self, store_id: UUID) -> int:
+        """How many products ``get_low_stock`` would flag, without loading them."""
+        result = await self.session.execute(
+            select(func.count(ProductModel.id)).where(
+                ProductModel.store_id == store_id,
+                ProductModel.quantity <= ProductModel.low_stock_threshold,
+                ProductModel.quantity > 0,
+            )
+        )
+        return result.scalar() or 0
+
+    async def cost_cents_by_product(self, store_id: UUID) -> dict[UUID, int]:
+        """``{product_id: cost cents}`` for costed products. A zero cost counts
+        as unset, exactly like ``_to_entity`` (``if model.cost_price``)."""
+        result = await self.session.execute(
+            select(ProductModel.id, ProductModel.cost_price).where(
+                ProductModel.store_id == store_id,
+                ProductModel.cost_price.isnot(None),
+                ProductModel.cost_price != 0,
+            )
+        )
+        return dict(result.all())
+
     async def get_out_of_stock(
         self,
         store_id: UUID,

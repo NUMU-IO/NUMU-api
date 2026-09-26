@@ -152,28 +152,21 @@ class GetDashboardStatsUseCase:
         else:
             revenue_change_percent = 0.0
 
-        # Get order counts by status (filtered to the period)
-        total_orders = await self.order_repository.count_by_store(
+        # Order counts by status for the period: one GROUP BY instead of
+        # seven counts. The total leaves out unpaid card-gateway orders
+        # (AWAITING_PAYMENT), as count_by_store always has.
+        by_status = await self.order_repository.count_by_status_for_store(
             store_id, date_from=period_start, date_to=now
         )
-        pending_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.PENDING, date_from=period_start, date_to=now
+        total_orders = sum(
+            n for s, n in by_status.items() if s != OrderStatus.AWAITING_PAYMENT.value
         )
-        confirmed_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.CONFIRMED, date_from=period_start, date_to=now
-        )
-        processing_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.PROCESSING, date_from=period_start, date_to=now
-        )
-        shipped_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.SHIPPED, date_from=period_start, date_to=now
-        )
-        completed_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.DELIVERED, date_from=period_start, date_to=now
-        )
-        cancelled_orders = await self.order_repository.count_by_store(
-            store_id, OrderStatus.CANCELLED, date_from=period_start, date_to=now
-        )
+        pending_orders = by_status.get(OrderStatus.PENDING.value, 0)
+        confirmed_orders = by_status.get(OrderStatus.CONFIRMED.value, 0)
+        processing_orders = by_status.get(OrderStatus.PROCESSING.value, 0)
+        shipped_orders = by_status.get(OrderStatus.SHIPPED.value, 0)
+        completed_orders = by_status.get(OrderStatus.DELIVERED.value, 0)
+        cancelled_orders = by_status.get(OrderStatus.CANCELLED.value, 0)
 
         # Get customer counts
         total_customers = await self.customer_repository.count_by_store(store_id)
@@ -183,8 +176,7 @@ class GetDashboardStatsUseCase:
 
         # Get product stats
         total_products = await self.product_repository.count_by_store(store_id)
-        low_stock_products = await self.product_repository.get_low_stock(store_id)
-        low_stock_count = len(low_stock_products)
+        low_stock_count = await self.product_repository.count_low_stock(store_id)
 
         # Avg order value = revenue / orders (for the period), 0 if no orders
         avg_order_value = (
@@ -215,43 +207,33 @@ class GetDashboardStatsUseCase:
         # (coupons) live on the order, so they are allocated to lines
         # pro-rata by share of subtotal, matching
         # `AnalyticsRepository.top_products`.
-        period_orders = await self.order_repository.get_by_date_range(
+        # Only the columns the maths reads: whole orders and products used to be
+        # loaded here (up to 5000 of each, with eager relationships), which
+        # made this the slowest merchant endpoint.
+        period_orders = await self.order_repository.get_profit_lines(
             store_id, period_start, now, limit=5000
         )
-        all_products = await self.product_repository.get_by_store(
-            store_id, skip=0, limit=5000
-        )
-        product_cost_map: dict[UUID, int] = {
-            p.id: p.cost_price.cents for p in all_products if p.cost_price is not None
-        }
+        product_cost_map = await self.product_repository.cost_cents_by_product(store_id)
         variant_cost_map: dict[UUID, int] = {}
-        variants_by_product: dict[UUID, list] = {}
-        if self.variant_repository is not None and all_products:
-            variants_by_product = await self.variant_repository.list_for_products([
-                p.id for p in all_products
-            ])
-            for variants in variants_by_product.values():
-                for variant in variants:
-                    if variant.cost_price is not None:
-                        variant_cost_map[variant.id] = variant.cost_price.cents
-
-        # "N of M products have a cost set" must agree with what the
-        # profit maths can actually use, so a product costed only on its
-        # variants counts as covered.
         costed_product_ids = set(product_cost_map)
-        for product_id, variants in variants_by_product.items():
-            if any(v.cost_price is not None for v in variants):
+        if self.variant_repository is not None:
+            for (
+                variant_id,
+                product_id,
+                cents,
+            ) in await self.variant_repository.cost_cents_by_variant(store_id):
+                variant_cost_map[variant_id] = cents
+                # "N of M products have a cost set" must agree with what the
+                # profit maths can use: a variant-only cost covers the product.
                 costed_product_ids.add(product_id)
         products_with_cost = len(costed_product_ids)
 
         total_cogs = 0
         total_profit = 0
-        for order in period_orders:
-            if str(order.status).lower() in NON_REVENUE_STATUSES_LC:
+        for status, subtotal, order_discount, line_items in period_orders:
+            if status.lower() in NON_REVENUE_STATUSES_LC:
                 continue
-            subtotal = order.subtotal or 0
-            order_discount = order.discount_amount or 0
-            for item in order.line_items:
+            for item in line_items:
                 cost_cents = (
                     variant_cost_map.get(item.variant_id)
                     if item.variant_id is not None
