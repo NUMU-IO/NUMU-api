@@ -763,6 +763,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
             return await call_next(request)
 
+        # Our storefront server filling its own shared data cache: it carries
+        # the internal token but no shopper IP (a per-shopper header would
+        # make the cache key per-shopper). One fill serves every visitor, so
+        # a per-visitor budget does not apply; the stricter tiers still do.
+        if tier == "general" and bucket.startswith("internal:"):
+            return await call_next(request)
+
         is_allowed, count, retry_after = await _check_rate_limit(bucket, tier, limit)
 
         if not is_allowed:
