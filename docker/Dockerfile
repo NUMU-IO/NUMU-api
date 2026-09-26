@@ -11,10 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY pyproject.toml README.md ./
+# constraints.txt pins every transitive version: an unpinned build once
+# pulled a FastAPI release that made each request walk ~1,900 routes.
+COPY pyproject.toml README.md constraints.txt ./
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir build && \
-    pip wheel --no-cache-dir --wheel-dir /app/wheels -e .
+    pip wheel --no-cache-dir --wheel-dir /app/wheels -c constraints.txt -e .
 
 # Production stage
 FROM python:3.11-slim
