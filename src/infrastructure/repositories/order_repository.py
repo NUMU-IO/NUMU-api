@@ -490,6 +490,43 @@ class OrderRepository(IOrderRepository):
         result = await self.session.execute(self._tenant_filter(query))
         return [self._to_entity(model) for model in result.scalars().all()]
 
+    async def get_profit_lines(
+        self,
+        store_id: UUID,
+        start_date: datetime,
+        end_date: datetime,
+        limit: int = 5000,
+    ) -> list[tuple[str, int, int, list[OrderLineItem]]]:
+        """``(status, subtotal, discount_amount, line_items)`` per order in the
+        window, newest first. Four columns instead of whole orders: loading
+        ``OrderModel`` also selectin-loads its store, customer (with
+        addresses), invoice and coupon, none of which profit needs."""
+        query = (
+            select(
+                OrderModel.status,
+                OrderModel.subtotal,
+                OrderModel.discount_amount,
+                OrderModel.line_items,
+            )
+            .where(
+                OrderModel.store_id == store_id,
+                OrderModel.created_at >= start_date,
+                OrderModel.created_at <= end_date,
+            )
+            .order_by(OrderModel.created_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(self._tenant_filter(query))
+        return [
+            (
+                str(getattr(status, "value", status)),
+                subtotal or 0,
+                discount or 0,
+                [self._dict_to_line_item(item) for item in (items or [])],
+            )
+            for status, subtotal, discount, items in result.all()
+        ]
+
     async def count_by_store(
         self,
         store_id: UUID,
