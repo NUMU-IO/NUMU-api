@@ -55,7 +55,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev]" -c constraints.txt
 
       - name: Provision test env
         # Mirror local: pydantic-settings reads .env; the example template
