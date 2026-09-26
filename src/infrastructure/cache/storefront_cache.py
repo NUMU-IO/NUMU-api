@@ -25,6 +25,7 @@ from uuid import UUID
 
 from redis.exceptions import RedisError
 
+from src.infrastructure.cache.response_cache import bust_storefront_responses
 from src.infrastructure.observability.prometheus_metrics import (
     record_cache_hit,
     record_cache_invalidate,
@@ -219,6 +220,7 @@ class StorefrontCache:
             )
         except RedisError as exc:
             logger.warning("storefront_cache.invalidate_theme failed: %s", exc)
+        await bust_storefront_responses(store_id)
         record_cache_invalidate("storefront", reason="theme_mutation")
 
     # ------------------------------------------------------------------ #
