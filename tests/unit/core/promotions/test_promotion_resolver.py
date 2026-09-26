@@ -329,3 +329,25 @@ async def test_unscoped_promo_resolves_either_way():
             store_id=store, context=context, page_path="/cart"
         )
         assert [r.promotion.name for r in out.auto_discounts] == ["store wide"]
+
+
+@pytest.mark.asyncio
+async def test_no_active_promotions_skips_the_other_reads():
+    class _Boom:
+        async def list_for_promotions(self, _ids):
+            raise AssertionError("read while there is nothing to filter")
+
+        async def list_dismissed_promotion_ids(self, *_a, **_k):
+            raise AssertionError("read while there is nothing to filter")
+
+    resolver = PromotionResolver(
+        promotion_repo=_FakePromotionRepo([]),
+        display_repo=_Boom(),
+        target_repo=_Boom(),
+        dismissal_repo=_Boom(),
+        eligibility_checker=PromotionEligibilityChecker(),
+    )
+    out = await resolver.resolve_active_for_visitor(
+        store_id=uuid4(), context=EligibilityContext(), page_path="/"
+    )
+    assert out.announcement_bars == [] and out.cookie_banner is None
