@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import Date as SqlDate
 from sqlalchemy import cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from src.core.entities.order import (
     FulfillmentStatus,
@@ -30,6 +31,18 @@ class OrderRepository(IOrderRepository):
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    # Order lists become entities, and ``_to_entity`` reads none of these
+    # relationships; their ``lazy="selectin"`` default cost a page of 20 orders
+    # ~25 extra queries (store, customer + addresses, invoice, coupon). Only for
+    # list reads: noload marks the attribute loaded, so a later re-select of
+    # the same order in the same session would see None.
+    _LIST_OPTIONS = (
+        noload(OrderModel.store),
+        noload(OrderModel.customer),
+        noload(OrderModel.invoice),
+        noload(OrderModel.coupon),
+    )
 
     def _tenant_filter(self, query):
         """Apply tenant_id filter if a tenant context is active."""
@@ -379,7 +392,11 @@ class OrderRepository(IOrderRepository):
         exclude_statuses: list[OrderStatus] | None = None,
     ) -> list[Order]:
         """Get all orders for a store with optional filters."""
-        query = select(OrderModel).where(OrderModel.store_id == store_id)
+        query = (
+            select(OrderModel)
+            .options(*self._LIST_OPTIONS)
+            .where(OrderModel.store_id == store_id)
+        )
         if customer_id:
             query = query.where(OrderModel.customer_id == customer_id)
         if status:
@@ -869,6 +886,7 @@ class OrderRepository(IOrderRepository):
         search_term = f"%{query_str}%"
         query = (
             select(OrderModel)
+            .options(*self._LIST_OPTIONS)
             .where(
                 OrderModel.store_id == store_id,
                 or_(
