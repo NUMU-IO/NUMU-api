@@ -258,6 +258,10 @@ run_local() {
     "$image" uvicorn src.main:app --host 0.0.0.0 --port 8000 \
       --workers 1 --no-access-log >/dev/null
   wait_local
+  # Each deploy leaves the previous image dangling; nothing removed them and
+  # the canary host's 20 GB disk filled with ~60 of them (1.1 GB each).
+  # prune never touches an image a container (even a stopped one) uses.
+  docker image prune -f >/dev/null || true
 }
 
 run_remote() {
@@ -283,6 +287,7 @@ run_remote() {
     "$image" uvicorn src.main:app --host 127.0.0.1 --port 8000 \
       --workers 1 --no-access-log >/dev/null
   wait_remote
+  remote docker image prune -f >/dev/null || true
 }
 
 apply_router() {
