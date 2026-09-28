@@ -159,7 +159,9 @@ class PlanItem(BaseModel):
     price_monthly: int  # EGP, -1 = custom
     price_annual: int
     currency: str = "EGP"
-    cta: str  # try_demo, subscribe, contact
+    # subscribe, signup_payg, contact. `try_demo` is still accepted from configs
+    # saved before 2026-09-25; the landing maps it to the sign-up modal.
+    cta: str
     popular: bool = False
     features: list[PlanFeatureItem]
 
