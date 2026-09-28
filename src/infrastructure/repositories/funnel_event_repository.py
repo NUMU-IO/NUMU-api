@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.database.connection import get_tenant_id
@@ -181,6 +181,43 @@ class FunnelEventRepository:
         result = await self.session.execute(query)
         row = result.one()
         return float(row.avg_minutes) if row.avg_minutes is not None else None
+
+    async def cart_session_counts(
+        self,
+        store_id: UUID,
+        date_from: datetime,
+        date_to: datetime,
+    ) -> tuple[int, int]:
+        """``(sessions that added to cart, of those, sessions that ordered)``.
+
+        Two numbers computed in SQL, where ``get_steps_per_session`` would
+        ship every (session, step) pair in the window to Python.
+        """
+        per_session = (
+            select(
+                func.max(
+                    case((FunnelEventModel.step == "add_to_cart", 1), else_=0)
+                ).label("carted"),
+                func.max(
+                    case((FunnelEventModel.step == "order_completed", 1), else_=0)
+                ).label("ordered"),
+            )
+            .where(FunnelEventModel.store_id == store_id)
+            .where(FunnelEventModel.created_at >= date_from)
+            .where(FunnelEventModel.created_at <= date_to)
+            .where(FunnelEventModel.session_fingerprint.isnot(None))
+            .where(FunnelEventModel.step.in_(("add_to_cart", "order_completed")))
+            .group_by(FunnelEventModel.session_fingerprint)
+        )
+        per_session = self._tenant_filter(per_session).subquery()
+        row = (
+            await self.session.execute(
+                select(
+                    func.count(), func.coalesce(func.sum(per_session.c.ordered), 0)
+                ).where(per_session.c.carted == 1)
+            )
+        ).one()
+        return int(row[0]), int(row[1])
 
     async def get_steps_per_session(
         self,

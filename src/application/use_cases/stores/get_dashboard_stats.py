@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from src.core.entities.order import OrderStatus, PaymentStatus
+from src.core.entities.order import OrderStatus
 from src.core.exceptions import AuthorizationError, EntityNotFoundError
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.order_repository import IOrderRepository
@@ -178,9 +178,13 @@ class GetDashboardStatsUseCase:
         total_products = await self.product_repository.count_by_store(store_id)
         low_stock_count = await self.product_repository.count_low_stock(store_id)
 
-        # Avg order value = revenue / orders (for the period), 0 if no orders
+        # Avg order value = revenue / the orders that revenue counts. Dividing
+        # by total_orders (which includes cancelled) understated it.
+        revenue_orders = sum(
+            n for s, n in by_status.items() if s.lower() not in NON_REVENUE_STATUSES_LC
+        )
         avg_order_value = (
-            round(current_revenue / total_orders) if total_orders > 0 else 0
+            round(current_revenue / revenue_orders) if revenue_orders > 0 else 0
         )
 
         # Profit / COGS aggregation. Only counts line items whose product
@@ -347,6 +351,7 @@ class GetDashboardStatsUseCase:
         self,
         store_id: UUID,
         user_id: UUID,
+        analytics_repository,
         limit: int = 5,
     ) -> list[TopProductDTO]:
         """Get top selling products for the store."""
@@ -360,42 +365,23 @@ class GetDashboardStatsUseCase:
                 "You don't have permission to view this store's dashboard"
             )
 
-        # Get recent orders to aggregate product sales
+        # Last 30 days, aggregated in SQL over the same revenue orders as the
+        # revenue tile. The old loop loaded up to 1000 whole orders, stopped
+        # there, and counted only PAID ones, so COD sales never ranked.
         now = datetime.now(UTC)
-        period_start = now - timedelta(days=30)
-
-        orders = await self.order_repository.get_by_date_range(
-            store_id, period_start, now, limit=1000
+        rows = await analytics_repository.top_products(
+            store_id, now - timedelta(days=30), now, limit=limit
         )
-
-        # Aggregate by product
-        product_sales: dict[UUID, dict] = {}
-        for order in orders:
-            # Only count completed/paid orders
-            if order.payment_status not in [
-                PaymentStatus.PAID,
-                PaymentStatus.PARTIALLY_REFUNDED,
-            ]:
-                continue
-
-            for item in order.line_items:
-                if item.product_id not in product_sales:
-                    product_sales[item.product_id] = {
-                        "id": item.product_id,
-                        "name": item.product_name,
-                        "sku": item.sku,
-                        "quantity": 0,
-                        "revenue": 0,
-                    }
-                product_sales[item.product_id]["quantity"] += item.quantity
-                product_sales[item.product_id]["revenue"] += item.total_price
-
-        # Sort by quantity sold and take top N
-        sorted_products = sorted(
-            product_sales.values(),
-            key=lambda x: x["quantity"],
-            reverse=True,
-        )[:limit]
+        sorted_products = [
+            {
+                "id": UUID(row["product_id"]),
+                "name": row["product_name"] or "",
+                "sku": None,
+                "quantity": row["units_sold"],
+                "revenue": row["revenue_cents"],
+            }
+            for row in rows
+        ]
 
         # Batch-fetch the products (only the top N) to attach the primary
         # image. Line items don't carry images, so resolve from the product.

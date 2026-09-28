@@ -17,13 +17,17 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.date_range import DateRangeWindow, get_date_range_window
-from src.api.dependencies.repositories import get_page_view_repository
+from src.api.dependencies.repositories import (
+    get_analytics_repository,
+    get_page_view_repository,
+)
 from src.api.responses import SuccessResponse
 from src.application.use_cases.stores import (
     GetDashboardStatsUseCase,
     GetOrderStreakUseCase,
 )
 from src.core.entities.store import Store
+from src.infrastructure.cache.redis_cache import cached_json
 from src.infrastructure.repositories import (
     CustomerRepository,
     OrderRepository,
@@ -31,9 +35,23 @@ from src.infrastructure.repositories import (
     StoreRepository,
     VariantRepository,
 )
+from src.infrastructure.repositories.analytics_repository import AnalyticsRepository
 from src.infrastructure.repositories.page_view_repository import PageViewRepository
 
 router = APIRouter(prefix="/{store_id}/dashboard")
+
+# The dashboard refetches these on every mount and range change. A minute of
+# staleness is invisible next to the hub's own 5-minute staleTime.
+DASHBOARD_CACHE_TTL_SECONDS = 60
+
+
+def dashboard_cache_key(store_id: object, name: str, *parts: object) -> str:
+    """Always scoped by store id, so one store can never read another's."""
+    return ":".join(["dash:v1", str(store_id), name, *map(str, parts)])
+
+
+def window_parts(window: DateRangeWindow) -> tuple[str, str, str]:
+    return window.start.isoformat(), window.end.isoformat(), window.tz
 
 
 class DashboardStatsResponse(BaseModel):
@@ -117,24 +135,23 @@ async def get_dashboard_stats(
     window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get dashboard statistics for the store."""
-    use_case = GetDashboardStatsUseCase(
-        order_repository=order_repo,
-        customer_repository=customer_repo,
-        product_repository=product_repo,
-        store_repository=store_repo,
-        # Needed for gross profit: variants carry their own cost_price.
-        variant_repository=variant_repo,
-    )
 
-    result = await use_case.execute(
-        store_id=store.id,
-        user_id=store.owner_id,
-        period_start=window.start,
-        period_end=window.end,
-    )
-
-    return SuccessResponse(
-        data=DashboardStatsResponse(
+    async def build() -> dict:
+        use_case = GetDashboardStatsUseCase(
+            order_repository=order_repo,
+            customer_repository=customer_repo,
+            product_repository=product_repo,
+            store_repository=store_repo,
+            # Needed for gross profit: variants carry their own cost_price.
+            variant_repository=variant_repo,
+        )
+        result = await use_case.execute(
+            store_id=store.id,
+            user_id=store.owner_id,
+            period_start=window.start,
+            period_end=window.end,
+        )
+        return DashboardStatsResponse(
             total_revenue=result.total_revenue,
             revenue_change_percent=result.revenue_change_percent,
             avg_order_value=result.avg_order_value,
@@ -155,6 +172,13 @@ async def get_dashboard_stats(
             products_with_cost=result.products_with_cost,
             period_start=str(result.period_start),
             period_end=str(result.period_end),
+        ).model_dump(mode="json")
+
+    return SuccessResponse(
+        data=await cached_json(
+            dashboard_cache_key(store.id, "stats", *window_parts(window)),
+            DASHBOARD_CACHE_TTL_SECONDS,
+            build,
         ),
         message="Dashboard stats retrieved successfully",
     )
@@ -176,31 +200,37 @@ async def get_revenue_chart(
     window: Annotated[DateRangeWindow, Depends(get_date_range_window)],
 ):
     """Get revenue data for chart visualization."""
-    use_case = GetDashboardStatsUseCase(
-        order_repository=order_repo,
-        customer_repository=customer_repo,
-        product_repository=product_repo,
-        store_repository=store_repo,
-    )
 
-    result = await use_case.get_revenue_chart(
-        store_id=store.id,
-        user_id=store.owner_id,
-        page_view_repository=pv_repo,
-        period_start=window.start,
-        period_end=window.end,
-    )
-
-    return SuccessResponse(
-        data=[
+    async def build() -> list[dict]:
+        use_case = GetDashboardStatsUseCase(
+            order_repository=order_repo,
+            customer_repository=customer_repo,
+            product_repository=product_repo,
+            store_repository=store_repo,
+        )
+        result = await use_case.get_revenue_chart(
+            store_id=store.id,
+            user_id=store.owner_id,
+            page_view_repository=pv_repo,
+            period_start=window.start,
+            period_end=window.end,
+        )
+        return [
             RevenueDataPointResponse(
                 date=point.date,
                 revenue=point.revenue,
                 orders=point.orders,
                 visits=point.visits,
-            )
+            ).model_dump(mode="json")
             for point in result
-        ],
+        ]
+
+    return SuccessResponse(
+        data=await cached_json(
+            dashboard_cache_key(store.id, "revenue", *window_parts(window)),
+            DASHBOARD_CACHE_TTL_SECONDS,
+            build,
+        ),
         message="Revenue data retrieved successfully",
     )
 
@@ -217,24 +247,25 @@ async def get_dashboard_top_products(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
     product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+    analytics_repo: Annotated[AnalyticsRepository, Depends(get_analytics_repository)],
     limit: int = Query(5, ge=1, le=20, description="Number of products to return"),
 ):
     """Get top selling products for the store."""
-    use_case = GetDashboardStatsUseCase(
-        order_repository=order_repo,
-        customer_repository=customer_repo,
-        product_repository=product_repo,
-        store_repository=store_repo,
-    )
 
-    result = await use_case.get_top_products(
-        store_id=store.id,
-        user_id=store.owner_id,
-        limit=limit,
-    )
-
-    return SuccessResponse(
-        data=[
+    async def build() -> list[dict]:
+        use_case = GetDashboardStatsUseCase(
+            order_repository=order_repo,
+            customer_repository=customer_repo,
+            product_repository=product_repo,
+            store_repository=store_repo,
+        )
+        result = await use_case.get_top_products(
+            store_id=store.id,
+            user_id=store.owner_id,
+            analytics_repository=analytics_repo,
+            limit=limit,
+        )
+        return [
             DashboardTopProductResponse(
                 id=product.id,
                 name=product.name,
@@ -242,9 +273,16 @@ async def get_dashboard_top_products(
                 quantity_sold=product.quantity_sold,
                 revenue=product.revenue,
                 image_url=product.image_url,
-            )
+            ).model_dump(mode="json")
             for product in result
-        ],
+        ]
+
+    return SuccessResponse(
+        data=await cached_json(
+            dashboard_cache_key(store.id, "top-products", limit),
+            DASHBOARD_CACHE_TTL_SECONDS,
+            build,
+        ),
         message="Top products retrieved successfully",
     )
 

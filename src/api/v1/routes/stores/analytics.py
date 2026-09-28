@@ -31,6 +31,11 @@ from src.api.dependencies.repositories import (
     get_store_repository,
 )
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.stores.dashboard import (
+    DASHBOARD_CACHE_TTL_SECONDS,
+    dashboard_cache_key,
+    window_parts,
+)
 from src.application.services.analytics_series import (
     daily_revenue_series,
     local_window_instants,
@@ -49,6 +54,7 @@ from src.core.utils.store_timezone import (
     resolve_store_timezone_name,
     safe_zone,
 )
+from src.infrastructure.cache.redis_cache import cached_json
 from src.infrastructure.repositories import (
     AnalyticsRollupRepository,
     CategoryRepository,
@@ -727,42 +733,49 @@ async def get_conversion_stats(
     period_start = window.start
     now = window.end
 
-    # Real order count (SQL COUNT, no truncation), excluding cancelled/refunded
-    # so the conversion rate isn't deflated by orders that never represented
-    # paid revenue.
-    total_orders = await order_repo.count_by_store(
-        store.id,
-        date_from=period_start,
-        date_to=now,
-        exclude_statuses=[OrderStatus.CANCELLED, OrderStatus.REFUNDED],
-    )
-
-    total_visitors = await pv_repo.count_unique_visitors(store.id, period_start, now)
-    conversion_rate = (total_orders / total_visitors * 100) if total_visitors > 0 else 0
-
-    # Cart abandonment: of the sessions that added to cart, the share that
-    # never completed an order — measured as an intersection over ONE
-    # session set rather than by subtracting two independently-computed
-    # per-step totals (which could exceed one another and drive the rate
-    # negative; see the note in get_funnel).
-    steps_by_fp = await funnel_repo.get_steps_per_session(store.id, period_start, now)
-    cart_sessions = {
-        fp for fp, fp_steps in steps_by_fp.items() if "add_to_cart" in fp_steps
-    }
-    converted = {fp for fp in cart_sessions if "order_completed" in steps_by_fp[fp]}
-    if cart_sessions:
-        cart_abandonment_rate = round(
-            (1 - len(converted) / len(cart_sessions)) * 100, 2
+    async def build() -> dict:
+        # Real order count (SQL COUNT, no truncation), excluding
+        # cancelled/refunded so the conversion rate isn't deflated by orders
+        # that never represented paid revenue.
+        total_orders = await order_repo.count_by_store(
+            store.id,
+            date_from=period_start,
+            date_to=now,
+            exclude_statuses=[OrderStatus.CANCELLED, OrderStatus.REFUNDED],
         )
-    else:
-        cart_abandonment_rate = 0.0
 
-    return SuccessResponse(
-        data=ConversionStatsResponse(
+        total_visitors = await pv_repo.count_unique_visitors(
+            store.id, period_start, now
+        )
+        conversion_rate = (
+            (total_orders / total_visitors * 100) if total_visitors > 0 else 0
+        )
+
+        # Cart abandonment: of the sessions that added to cart, the share that
+        # never completed an order — measured as an intersection over ONE
+        # session set rather than by subtracting two independently-computed
+        # per-step totals (which could exceed one another and drive the rate
+        # negative; see the note in get_funnel).
+        cart_sessions, converted = await funnel_repo.cart_session_counts(
+            store.id, period_start, now
+        )
+        if cart_sessions:
+            cart_abandonment_rate = round((1 - converted / cart_sessions) * 100, 2)
+        else:
+            cart_abandonment_rate = 0.0
+
+        return ConversionStatsResponse(
             total_visitors=total_visitors,
             total_orders=total_orders,
             conversion_rate=round(conversion_rate, 2),
             cart_abandonment_rate=cart_abandonment_rate,
+        ).model_dump(mode="json")
+
+    return SuccessResponse(
+        data=await cached_json(
+            dashboard_cache_key(store.id, "conversion", *window_parts(window)),
+            DASHBOARD_CACHE_TTL_SECONDS,
+            build,
         ),
         message="Conversion stats retrieved successfully",
     )

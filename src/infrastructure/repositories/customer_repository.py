@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from src.core.entities.customer import Customer
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
@@ -94,7 +95,16 @@ class CustomerRepository(ICustomerRepository):
         if not ids:
             return []
         result = await self.session.execute(
-            select(CustomerModel).where(CustomerModel.id.in_(ids))
+            select(CustomerModel)
+            .where(CustomerModel.id.in_(ids))
+            # Callers want names. The selectin defaults would also load each
+            # customer's whole order history, invoices and addresses.
+            .options(
+                noload(CustomerModel.store),
+                noload(CustomerModel.orders),
+                noload(CustomerModel.invoices),
+                noload(CustomerModel.addresses),
+            )
         )
         return [self._to_entity(m) for m in result.scalars().all()]
 
