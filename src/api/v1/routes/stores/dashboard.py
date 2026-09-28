@@ -175,10 +175,12 @@ async def get_dashboard_stats(
         ).model_dump(mode="json")
 
     return SuccessResponse(
-        data=await cached_json(
-            dashboard_cache_key(store.id, "stats", *window_parts(window)),
-            DASHBOARD_CACHE_TTL_SECONDS,
-            build,
+        data=DashboardStatsResponse(
+            **await cached_json(
+                dashboard_cache_key(store.id, "stats", *window_parts(window)),
+                DASHBOARD_CACHE_TTL_SECONDS,
+                build,
+            )
         ),
         message="Dashboard stats retrieved successfully",
     )
@@ -226,11 +228,14 @@ async def get_revenue_chart(
         ]
 
     return SuccessResponse(
-        data=await cached_json(
-            dashboard_cache_key(store.id, "revenue", *window_parts(window)),
-            DASHBOARD_CACHE_TTL_SECONDS,
-            build,
-        ),
+        data=[
+            RevenueDataPointResponse(**point)
+            for point in await cached_json(
+                dashboard_cache_key(store.id, "revenue", *window_parts(window)),
+                DASHBOARD_CACHE_TTL_SECONDS,
+                build,
+            )
+        ],
         message="Revenue data retrieved successfully",
     )
 
@@ -278,11 +283,14 @@ async def get_dashboard_top_products(
         ]
 
     return SuccessResponse(
-        data=await cached_json(
-            dashboard_cache_key(store.id, "top-products", limit),
-            DASHBOARD_CACHE_TTL_SECONDS,
-            build,
-        ),
+        data=[
+            DashboardTopProductResponse(**product)
+            for product in await cached_json(
+                dashboard_cache_key(store.id, "top-products", limit),
+                DASHBOARD_CACHE_TTL_SECONDS,
+                build,
+            )
+        ],
         message="Top products retrieved successfully",
     )
 

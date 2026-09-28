@@ -158,6 +158,17 @@ class _MemoryCache:
 
 
 @pytest.fixture(autouse=True)
+def _dashboard_cache(monkeypatch) -> _MemoryCache:
+    """``cached_json`` (dashboard reads) gets a fresh cache per test, so a
+    developer's local Redis can never serve one test's figures to another."""
+    from src.infrastructure.cache import redis_cache
+
+    cache = _MemoryCache()
+    monkeypatch.setattr(redis_cache, "RedisCacheService", lambda *_a, **_k: cache)
+    return cache
+
+
+@pytest.fixture(autouse=True)
 def _entitlements_cache(monkeypatch) -> _MemoryCache:
     cache = _MemoryCache()
     monkeypatch.setattr(

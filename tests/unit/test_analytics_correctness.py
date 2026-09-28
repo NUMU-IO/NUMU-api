@@ -682,6 +682,10 @@ class FakeFunnelRepo:
     async def get_steps_per_session(self, *_a, **_kw):
         return {k: set(v) for k, v in self._steps_by_fp.items()}
 
+    async def cart_session_counts(self, *_a, **_kw):
+        carted = [s for s in self._steps_by_fp.values() if "add_to_cart" in s]
+        return len(carted), sum("order_completed" in s for s in carted)
+
     async def get_daily_funnel_counts(self, *_a, **_kw):
         return []
 
