@@ -356,3 +356,76 @@ async def test_uncosted_products_are_excluded_from_both_totals():
     assert stats.total_profit == 20_000
     assert stats.products_with_cost == 1
     assert stats.total_products == 2
+
+
+@pytest.mark.asyncio
+async def test_avg_order_value_divides_by_revenue_orders_only():
+    """Revenue leaves cancelled orders out, so the divisor must too."""
+    product = _product(None)
+    orders = [
+        _order(line_items=[_line(product.id, unit_price=10_000)], status=s)
+        for s in (OrderStatus.CONFIRMED, OrderStatus.DELIVERED, OrderStatus.CANCELLED)
+    ]
+
+    class _RevenueRepo(_FakeOrderRepo):
+        async def get_revenue_by_date_range(self, *_a, **_k) -> int:
+            return 20_000
+
+    use_case = GetDashboardStatsUseCase(
+        order_repository=_RevenueRepo(orders),
+        customer_repository=_FakeCustomerRepo(),
+        product_repository=_FakeProductRepo([product]),
+        store_repository=_FakeStoreRepo(),
+    )
+    stats = await use_case.execute(
+        store_id=STORE_ID, user_id=OWNER_ID, period_start=PERIOD_START, period_end=NOW
+    )
+
+    assert stats.total_orders == 3
+    assert stats.avg_order_value == 10_000
+
+
+@pytest.mark.asyncio
+async def test_top_products_come_from_the_sql_aggregate():
+    """No order loop: whatever the SQL top_products returns, in its order."""
+    first, second = uuid.uuid4(), uuid.uuid4()
+
+    class _AnalyticsRepo:
+        async def top_products(self, store_id, date_from, date_to, limit):
+            assert store_id == STORE_ID and limit == 2
+            return [
+                {
+                    "product_id": str(first),
+                    "product_name": "Abaya",
+                    "units_sold": 7,
+                    "revenue_cents": 90_000,
+                },
+                {
+                    "product_id": str(second),
+                    "product_name": None,
+                    "units_sold": 9,
+                    "revenue_cents": 40_000,
+                },
+            ]
+
+    class _ProductRepo(_FakeProductRepo):
+        async def get_by_ids(self, ids):
+            return []
+
+    use_case = GetDashboardStatsUseCase(
+        order_repository=_FakeOrderRepo([]),
+        customer_repository=_FakeCustomerRepo(),
+        product_repository=_ProductRepo([]),
+        store_repository=_FakeStoreRepo(),
+    )
+    top = await use_case.get_top_products(
+        store_id=STORE_ID,
+        user_id=OWNER_ID,
+        analytics_repository=_AnalyticsRepo(),
+        limit=2,
+    )
+
+    assert [(p.id, p.name, p.quantity_sold, p.revenue) for p in top] == [
+        (str(first), "Abaya", 7, 90_000),
+        (str(second), "", 9, 40_000),
+    ]

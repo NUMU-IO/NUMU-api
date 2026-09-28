@@ -495,6 +495,7 @@ class OrderRepository(IOrderRepository):
         """Get orders within a date range."""
         query = (
             select(OrderModel)
+            .options(*self._LIST_OPTIONS)
             .where(
                 OrderModel.store_id == store_id,
                 OrderModel.created_at >= start_date,

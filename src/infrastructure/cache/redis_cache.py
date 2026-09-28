@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import weakref
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import redis.asyncio as redis
@@ -220,3 +221,17 @@ class RedisCacheService(ICacheService):
             )
             return False
         return True
+
+
+async def cached_json(key: str, ttl: int, build: Callable[[], Awaitable[Any]]) -> Any:
+    """Read-through cache for a JSON-serializable value.
+
+    A Redis outage is a miss, so the value is simply built every time.
+    """
+    cache = RedisCacheService()
+    hit = await cache.get(key)
+    if hit is not None:
+        return hit
+    value = await build()
+    await cache.set(key, value, expire=ttl)
+    return value
