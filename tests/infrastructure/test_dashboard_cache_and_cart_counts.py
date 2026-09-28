@@ -16,10 +16,7 @@ from src.infrastructure.repositories.funnel_event_repository import (
 
 
 @pytest.mark.asyncio
-async def test_cached_json_builds_once_then_serves_the_cache(
-    monkeypatch, _entitlements_cache
-):
-    monkeypatch.setattr(redis_cache, "RedisCacheService", lambda: _entitlements_cache)
+async def test_cached_json_builds_once_then_serves_the_cache(_dashboard_cache):
     calls = []
 
     async def build():

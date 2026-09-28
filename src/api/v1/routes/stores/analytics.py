@@ -772,10 +772,12 @@ async def get_conversion_stats(
         ).model_dump(mode="json")
 
     return SuccessResponse(
-        data=await cached_json(
-            dashboard_cache_key(store.id, "conversion", *window_parts(window)),
-            DASHBOARD_CACHE_TTL_SECONDS,
-            build,
+        data=ConversionStatsResponse(
+            **await cached_json(
+                dashboard_cache_key(store.id, "conversion", *window_parts(window)),
+                DASHBOARD_CACHE_TTL_SECONDS,
+                build,
+            )
         ),
         message="Conversion stats retrieved successfully",
     )
