@@ -114,6 +114,8 @@ class OrderDTO(BaseDTO):
     cancelled_at: datetime | None
     paid_at: datetime | None
     cash_received_at: datetime | None
+    deposit_amount_cents: int | None
+    deposit_paid_at: datetime | None
     fulfilled_at: datetime | None
     shipped_at: datetime | None
     delivered_at: datetime | None
@@ -174,6 +176,8 @@ class OrderDTO(BaseDTO):
             cancelled_at=entity.cancelled_at,
             paid_at=entity.paid_at,
             cash_received_at=entity.cash_received_at,
+            deposit_amount_cents=entity.deposit_amount_cents,
+            deposit_paid_at=entity.deposit_paid_at,
             fulfilled_at=entity.fulfilled_at,
             shipped_at=entity.shipped_at,
             delivered_at=entity.delivered_at,
@@ -224,6 +228,8 @@ class OrderListItemDTO(BaseDTO):
     tracking_number: str | None = None
     collected_total: int | None = None
     cash_received_at: datetime | None = None
+    deposit_amount_cents: int | None = None
+    deposit_paid_at: datetime | None = None
 
     @classmethod
     def from_entity(
@@ -244,6 +250,8 @@ class OrderListItemDTO(BaseDTO):
             total=entity.total,
             collected_total=getattr(entity, "collected_total", None),
             cash_received_at=entity.cash_received_at,
+            deposit_amount_cents=entity.deposit_amount_cents,
+            deposit_paid_at=entity.deposit_paid_at,
             currency=entity.currency,
             item_count=entity.item_count,
             payment_method=entity.payment_method,
