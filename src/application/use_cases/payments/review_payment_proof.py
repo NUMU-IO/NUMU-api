@@ -123,6 +123,11 @@ class ReviewPaymentProofUseCase:
                     detail="Order is already paid.",
                 )
 
+            # The intent is what the customer was asked to send, so it is
+            # what approving the proof collects. Without it the proof counts
+            # 0 toward the order's balance.
+            if proof.declared_amount_cents is None:
+                proof.declared_amount_cents = intent.amount_cents
             proof.mark_approved(reviewer_user_id)
             await self.proof_repo.update(proof)
 
@@ -140,6 +145,9 @@ class ReviewPaymentProofUseCase:
             manual_meta["proof_id"] = str(proof.id)
             order.metadata[_method] = manual_meta
             await self.order_repo.update(order)
+            # A COD deposit leaves the order unpaid: the balance is still
+            # collected on delivery, so it is not an OrderPaid.
+            fully_paid = order.payment_status == PaymentStatus.PAID
 
             self.session.add(
                 PaymentTransactionModel(
@@ -152,7 +160,7 @@ class ReviewPaymentProofUseCase:
                         f"{manual_human_name(intent.method)} "
                         f"{intent.display_destination}"
                     ),
-                    amount_cents=order.total,
+                    amount_cents=intent.amount_cents,
                     currency=order.currency,
                     status="success",
                     gateway_transaction_id=intent.reference_code,
@@ -172,27 +180,29 @@ class ReviewPaymentProofUseCase:
                 FunnelEventRepository,
             )
 
-            await emit_order_completed(
-                order,
-                FunnelEventRepository(self.session),
-                payment_method=_method,
-            )
+            if fully_paid:
+                await emit_order_completed(
+                    order,
+                    FunnelEventRepository(self.session),
+                    payment_method=_method,
+                )
 
             try:
                 from src.infrastructure.events.setup import get_event_bus
 
                 bus = get_event_bus()
-                bus.publish(
-                    OrderPaidEvent(
-                        order_id=order.id,
-                        order_number=order.order_number,
-                        store_id=order.store_id,
-                        customer_id=order.customer_id,
-                        payment_id=intent.reference_code,
-                        payment_method=_method,
-                        total=float(order.total),
+                if fully_paid:
+                    bus.publish(
+                        OrderPaidEvent(
+                            order_id=order.id,
+                            order_number=order.order_number,
+                            store_id=order.store_id,
+                            customer_id=order.customer_id,
+                            payment_id=intent.reference_code,
+                            payment_method=_method,
+                            total=float(order.total),
+                        )
                     )
-                )
                 bus.publish(
                     PaymentProofApprovedEvent(
                         proof_id=proof.id,
@@ -203,7 +213,7 @@ class ReviewPaymentProofUseCase:
                         customer_id=order.customer_id,
                         reference_code=intent.reference_code,
                         payment_method=intent.method.value,
-                        amount_cents=order.total,
+                        amount_cents=intent.amount_cents,
                         currency=order.currency,
                         auto_approved=False,
                     )

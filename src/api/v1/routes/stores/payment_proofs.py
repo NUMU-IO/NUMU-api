@@ -657,6 +657,45 @@ async def _payment_totals(
     return paid, max(0, order.collectible_total - paid)
 
 
+async def _duplicate_receipt_conflict(
+    order, holder_id: UUID, order_repo: OrderRepository, *, what: str
+) -> HTTPException:
+    """409 that says WHERE the receipt already is.
+
+    The usual hit is a receipt the customer already uploaded on this same
+    order (a COD deposit, say): the merchant saves the screenshot the
+    customer sent and records it again. Naming the order lets them see the
+    money is already counted instead of hunting for a phantom duplicate.
+    """
+    if holder_id == order.id:
+        en = (
+            "This receipt is already attached to this order and counted in what's paid."
+            if what == "receipt"
+            else "This transaction reference is already recorded on this order."
+        )
+        ar = (
+            "الإيصال ده متسجّل على الطلب ده بالفعل ومحسوب في المدفوع."
+            if what == "receipt"
+            else "رقم العملية ده متسجّل على الطلب ده بالفعل."
+        )
+    else:
+        holder = await order_repo.get_by_id(holder_id)
+        number = holder.order_number if holder else "another order"
+        en = (
+            f"This receipt is already recorded on order {number}."
+            if what == "receipt"
+            else f"This transaction reference is already used on order {number}."
+        )
+        ar = (
+            f"الإيصال ده متسجّل قبل كده على الطلب {number}."
+            if what == "receipt"
+            else f"رقم العملية ده اتستخدم قبل كده على الطلب {number}."
+        )
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT, detail=_bilingual(en, ar)
+    )
+
+
 @router.post(
     "/orders/{order_id}/payments",
     operation_id="merchant_record_order_payment",
@@ -809,21 +848,15 @@ async def record_order_payment(
     transaction_ref = (reference or "").strip() or f"MAN-{secrets.token_hex(4).upper()}"
 
     image_hash = hashlib.sha256(sanitized.bytes).digest()
-    if await proof_repo.image_hash_exists(store.id, image_hash):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=_bilingual(
-                "This receipt has already been recorded in your store.",
-                "الصورة دي اتسجلت قبل كده في المتجر.",
-            ),
+    holder_id = await proof_repo.image_hash_exists(store.id, image_hash)
+    if holder_id is not None:
+        raise await _duplicate_receipt_conflict(
+            order, holder_id, order_repo, what="receipt"
         )
-    if await proof_repo.transaction_ref_exists(store.id, transaction_ref):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=_bilingual(
-                "This transaction reference has already been used.",
-                "رقم العملية ده اتستخدم قبل كده.",
-            ),
+    holder_id = await proof_repo.transaction_ref_exists(store.id, transaction_ref)
+    if holder_id is not None:
+        raise await _duplicate_receipt_conflict(
+            order, holder_id, order_repo, what="reference"
         )
 
     uploaded = await storage_service.upload_file(

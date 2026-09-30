@@ -306,7 +306,9 @@ async def test_large_order_routes_to_merchant_review(seeded):
         image_bytes=b"\x89PNG\r\n\x1a\nanother-payload",
         image_content_type="image/png",
         transaction_ref="BANK-REF-REVIEW",
-        auto_approval_config=_auto_config(threshold_cents=50_000),
+        # The threshold is measured against the intent (what this proof
+        # moves), which the fixture sized at the original 10,000.
+        auto_approval_config=_auto_config(threshold_cents=5_000),
     )
 
     assert result.decision.approved is False
