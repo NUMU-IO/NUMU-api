@@ -380,7 +380,9 @@ class SubmitPaymentProofUseCase:
             order.store_id, since=day_start
         )
         facts = AutoApprovalFacts(
-            order_total_cents=order.total,
+            # The money this proof moves: a COD deposit is only part of the
+            # order total, and the threshold caps what gets approved unseen.
+            order_total_cents=intent.amount_cents,
             daily_auto_approved_count=daily_count,
             daily_auto_approved_cents=daily_cents,
             merchant_ipa=merchant_ipa,
@@ -466,6 +468,8 @@ class SubmitPaymentProofUseCase:
                 )
 
         if decision.approved:
+            if proof.declared_amount_cents is None:
+                proof.declared_amount_cents = intent.amount_cents
             proof.mark_auto_approved()
 
         # (#2) The pre-check above closes the common case but two
@@ -510,6 +514,9 @@ class SubmitPaymentProofUseCase:
             manual_meta["proof_id"] = str(proof.id)
             order.metadata[_method] = manual_meta
             await self.order_repo.update(order)
+            # A COD deposit leaves the order unpaid: the balance is still
+            # collected on delivery, so it is not an OrderPaid.
+            fully_paid = order.payment_status == PaymentStatus.PAID
 
             self.session.add(
                 PaymentTransactionModel(
@@ -522,7 +529,7 @@ class SubmitPaymentProofUseCase:
                         f"{manual_human_name(intent.method)} "
                         f"{intent.display_destination}"
                     ),
-                    amount_cents=order.total,
+                    amount_cents=intent.amount_cents,
                     currency=order.currency,
                     status="success",
                     gateway_transaction_id=intent.reference_code,
@@ -542,27 +549,29 @@ class SubmitPaymentProofUseCase:
                 FunnelEventRepository,
             )
 
-            await emit_order_completed(
-                order,
-                FunnelEventRepository(self.session),
-                payment_method=_method,
-            )
+            if fully_paid:
+                await emit_order_completed(
+                    order,
+                    FunnelEventRepository(self.session),
+                    payment_method=_method,
+                )
 
             try:
                 from src.infrastructure.events.setup import get_event_bus
 
                 bus = get_event_bus()
-                bus.publish(
-                    OrderPaidEvent(
-                        order_id=order.id,
-                        order_number=order.order_number,
-                        store_id=order.store_id,
-                        customer_id=order.customer_id,
-                        payment_id=intent.reference_code,
-                        payment_method=_method,
-                        total=float(order.total),
+                if fully_paid:
+                    bus.publish(
+                        OrderPaidEvent(
+                            order_id=order.id,
+                            order_number=order.order_number,
+                            store_id=order.store_id,
+                            customer_id=order.customer_id,
+                            payment_id=intent.reference_code,
+                            payment_method=_method,
+                            total=float(order.total),
+                        )
                     )
-                )
                 # Separate event drives the short "payment received"
                 # email independently of invoice generation — see
                 # handle_payment_proof_approved.
@@ -576,7 +585,7 @@ class SubmitPaymentProofUseCase:
                         customer_id=order.customer_id,
                         reference_code=intent.reference_code,
                         payment_method=intent.method.value,
-                        amount_cents=order.total,
+                        amount_cents=intent.amount_cents,
                         currency=order.currency,
                         auto_approved=True,
                     )

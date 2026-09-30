@@ -101,31 +101,39 @@ class _FakeProofRepo:
             in (PaymentProofStatus.APPROVED, PaymentProofStatus.AUTO_APPROVED)
         )
 
-    async def image_hash_exists(self, store_id, image_hash) -> bool:
+    async def image_hash_exists(self, store_id, image_hash):
         # Mirrors the real query, including the exemption for voided
         # merchant-recorded rows. Getting this wrong would make the
         # re-record test pass against a fake kinder than the database.
-        return any(
-            p.store_id == store_id
-            and p.proof_image_hash == image_hash
-            and not (
-                p.recorded_method is not None
-                and p.status is PaymentProofStatus.REJECTED
-            )
-            for p in self.rows
+        return next(
+            (
+                p.order_id
+                for p in self.rows
+                if p.store_id == store_id
+                and p.proof_image_hash == image_hash
+                and not (
+                    p.recorded_method is not None
+                    and p.status is PaymentProofStatus.REJECTED
+                )
+            ),
+            None,
         )
 
-    async def transaction_ref_exists(self, store_id, transaction_ref) -> bool:
+    async def transaction_ref_exists(self, store_id, transaction_ref):
         # Mirrors the real query, including the exemption for voided
         # merchant-recorded rows — same reason as image_hash_exists.
-        return any(
-            p.store_id == store_id
-            and p.transaction_ref == transaction_ref
-            and not (
-                p.recorded_method is not None
-                and p.status is PaymentProofStatus.REJECTED
-            )
-            for p in self.rows
+        return next(
+            (
+                p.order_id
+                for p in self.rows
+                if p.store_id == store_id
+                and p.transaction_ref == transaction_ref
+                and not (
+                    p.recorded_method is not None
+                    and p.status is PaymentProofStatus.REJECTED
+                )
+            ),
+            None,
         )
 
     async def create(self, proof):
@@ -324,6 +332,7 @@ async def test_same_receipt_cannot_be_recorded_twice(wiring, paid_calls):
         await _record(order, amount=5000, image=same)
 
     assert exc.value.status_code == 409
+    assert "already attached to this order" in exc.value.detail["message"]
     assert len(wiring.proofs.rows) == 1
 
 
@@ -897,19 +906,19 @@ async def test_partial_unique_index_lets_a_voided_receipt_be_reused(test_session
     await repo.create(first)
 
     # While it stands, the hash is taken.
-    assert await repo.image_hash_exists(STORE_ID, shared_hash) is True
+    assert await repo.image_hash_exists(STORE_ID, shared_hash) is not None
 
     first.mark_rejected(USER_ID, "typo")
     await repo.update(first)
 
     # Voided: the merchant may re-record from the same receipt.
-    assert await repo.image_hash_exists(STORE_ID, shared_hash) is False
+    assert await repo.image_hash_exists(STORE_ID, shared_hash) is None
     second = _proof("CORRECTED")
     second.mark_approved(USER_ID)
     await repo.create(second)
 
     # ...but only once. The live row holds the hash again.
-    assert await repo.image_hash_exists(STORE_ID, shared_hash) is True
+    assert await repo.image_hash_exists(STORE_ID, shared_hash) is not None
     third = _proof("REPLAY")
     third.mark_approved(USER_ID)
     with pytest.raises(IntegrityError):
@@ -953,19 +962,19 @@ async def test_partial_unique_index_lets_a_voided_reference_be_reused(
     await repo.create(first)
 
     # While it stands, the reference is taken.
-    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is True
+    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is not None
 
     first.mark_rejected(USER_ID, "typo")
     await repo.update(first)
 
     # Voided: the merchant may re-record with the same reference.
-    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is False
+    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is None
     second = _proof("receipt-again")
     second.mark_approved(USER_ID)
     await repo.create(second)
 
     # ...but only once. The live row holds the reference again.
-    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is True
+    assert await repo.transaction_ref_exists(STORE_ID, shared_ref) is not None
     third = _proof("replay")
     third.mark_approved(USER_ID)
     with pytest.raises(IntegrityError):

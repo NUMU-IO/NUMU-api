@@ -113,6 +113,7 @@ class OrderDTO(BaseDTO):
     can_be_cancelled: bool
     cancelled_at: datetime | None
     paid_at: datetime | None
+    cash_received_at: datetime | None
     fulfilled_at: datetime | None
     shipped_at: datetime | None
     delivered_at: datetime | None
@@ -172,6 +173,7 @@ class OrderDTO(BaseDTO):
             can_be_cancelled=entity.can_be_cancelled,
             cancelled_at=entity.cancelled_at,
             paid_at=entity.paid_at,
+            cash_received_at=entity.cash_received_at,
             fulfilled_at=entity.fulfilled_at,
             shipped_at=entity.shipped_at,
             delivered_at=entity.delivered_at,
@@ -221,6 +223,7 @@ class OrderListItemDTO(BaseDTO):
     shipping_method: str | None = None
     tracking_number: str | None = None
     collected_total: int | None = None
+    cash_received_at: datetime | None = None
 
     @classmethod
     def from_entity(
@@ -240,6 +243,7 @@ class OrderListItemDTO(BaseDTO):
             fulfillment_status=entity.fulfillment_status.value,
             total=entity.total,
             collected_total=getattr(entity, "collected_total", None),
+            cash_received_at=entity.cash_received_at,
             currency=entity.currency,
             item_count=entity.item_count,
             payment_method=entity.payment_method,

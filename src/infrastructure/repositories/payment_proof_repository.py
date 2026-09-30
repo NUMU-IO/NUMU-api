@@ -243,6 +243,7 @@ class PaymentProofRepository:
         model.review_decision_by = proof.review_decision_by
         model.review_decision_at = proof.review_decision_at
         model.rejection_reason = proof.rejection_reason
+        model.declared_amount_cents = proof.declared_amount_cents
         # Phase C OCR fields are written after the initial ``create`` —
         # the use case calls vision after persistence and then folds
         # the result back via ``update``. Mirroring the existing
@@ -257,8 +258,11 @@ class PaymentProofRepository:
         await self.session.flush()
         return self._to_entity(model)
 
-    async def image_hash_exists(self, store_id: UUID, image_hash: bytes) -> bool:
-        """Returns True if the same screenshot was already uploaded in this store.
+    async def image_hash_exists(self, store_id: UUID, image_hash: bytes) -> UUID | None:
+        """The order holding the same screenshot in this store, or None.
+
+        Returns the order id rather than a bool so the merchant can be told
+        where the receipt already is, not just that it exists somewhere.
 
         Voided merchant-recorded payments are excluded, and must be: the
         merchant mistyped an amount, voided it, and is re-recording from the
@@ -272,7 +276,7 @@ class PaymentProofRepository:
         Mirrors the partial unique index of the same name; the two must stay
         in step, or a passing pre-check becomes a 500 at INSERT.
         """
-        query = select(PaymentProofModel.id).where(
+        query = select(PaymentProofModel.order_id).where(
             and_(
                 PaymentProofModel.store_id == store_id,
                 PaymentProofModel.proof_image_hash == image_hash,
@@ -283,12 +287,12 @@ class PaymentProofRepository:
             )
         )
         result = await self.session.execute(query)
-        return result.scalar_one_or_none() is not None
+        return result.scalars().first()
 
     async def transaction_ref_exists(
         self, store_id: UUID, transaction_ref: str
-    ) -> bool:
-        """Returns True if the same bank ref was already used in this store.
+    ) -> UUID | None:
+        """The order that already used this bank ref in this store, or None.
 
         Voided merchant-recorded payments are excluded, for the same reason
         as ``image_hash_exists``: void-then-re-record with the same reference
@@ -300,7 +304,7 @@ class PaymentProofRepository:
         Mirrors the partial unique index of the same name; the two must stay
         in step, or a passing pre-check becomes a 500 at INSERT.
         """
-        query = select(PaymentProofModel.id).where(
+        query = select(PaymentProofModel.order_id).where(
             and_(
                 PaymentProofModel.store_id == store_id,
                 PaymentProofModel.transaction_ref == transaction_ref,
@@ -311,7 +315,7 @@ class PaymentProofRepository:
             )
         )
         result = await self.session.execute(query)
-        return result.scalar_one_or_none() is not None
+        return result.scalars().first()
 
     async def list_purgeable_images(
         self,

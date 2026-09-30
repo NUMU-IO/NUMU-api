@@ -230,6 +230,11 @@ class OrderModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     paid_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # COD: when the merchant actually got the cash from the courier. The
+    # customer paid at the door (paid_at); the courier remits later.
+    cash_received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     fulfilled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
