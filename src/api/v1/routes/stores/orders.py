@@ -244,6 +244,10 @@ def _order_to_response(order_dto) -> OrderResponse:
         cash_received_at=(
             str(order_dto.cash_received_at) if order_dto.cash_received_at else None
         ),
+        deposit_amount_cents=order_dto.deposit_amount_cents,
+        deposit_paid_at=(
+            str(order_dto.deposit_paid_at) if order_dto.deposit_paid_at else None
+        ),
         fulfilled_at=str(order_dto.fulfilled_at) if order_dto.fulfilled_at else None,
         shipped_at=str(order_dto.shipped_at) if order_dto.shipped_at else None,
         delivered_at=str(order_dto.delivered_at) if order_dto.delivered_at else None,
@@ -279,6 +283,10 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
         collected_total=getattr(order_dto, "collected_total", None),
         cash_received_at=(
             str(order_dto.cash_received_at) if order_dto.cash_received_at else None
+        ),
+        deposit_amount_cents=order_dto.deposit_amount_cents,
+        deposit_paid_at=(
+            str(order_dto.deposit_paid_at) if order_dto.deposit_paid_at else None
         ),
         currency=order_dto.currency,
         item_count=order_dto.item_count,
