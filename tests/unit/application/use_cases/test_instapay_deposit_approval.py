@@ -79,7 +79,7 @@ def _intent(order: Order, amount_cents: int) -> ManualPaymentIntent:
     )
 
 
-async def _approve(order: Order, intent: ManualPaymentIntent):
+async def _approve(order: Order, intent: ManualPaymentIntent, declared=None):
     proof = PaymentProof.new(
         tenant_id=order.tenant_id,
         store_id=order.store_id,
@@ -87,6 +87,7 @@ async def _approve(order: Order, intent: ManualPaymentIntent):
         proof_image_key="k",
         proof_image_hash=b"h" * 32,
         transaction_ref="01509939127",
+        declared_amount_cents=declared,
     )
     proof_repo = MagicMock()
     proof_repo.get_by_id = AsyncMock(return_value=proof)
@@ -130,6 +131,7 @@ async def test_deposit_approval_records_deposit_and_leaves_order_unpaid():
     assert order.payment_status == PaymentStatus.PENDING
     assert order.status == OrderStatus.CONFIRMED
     assert order.deposit_paid_at is not None
+    assert order.deposit_amount_cents == 42_000
     assert proof.declared_amount_cents == 42_000
     assert txn.amount_cents == 42_000
     assert "OrderPaidEvent" not in published
@@ -147,3 +149,17 @@ async def test_full_payment_approval_still_marks_order_paid():
     assert txn.amount_cents == 84_000
     assert "OrderPaidEvent" in published
     funnel.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_short_deposit_records_what_was_approved():
+    """Asked 1,165, customer sent 1,000, merchant approved: the deposit is
+    1,000, not the required amount checkout stamped on the order."""
+    order = _order(OrderStatus.PENDING_DEPOSIT)
+    order.deposit_required_cents = 116_500
+    order.deposit_amount_cents = 116_500
+    _, _, txn, _ = await _approve(order, _intent(order, 116_500), declared=100_000)
+
+    assert order.deposit_amount_cents == 100_000
+    assert order.deposit_required_cents == 116_500
+    assert txn.amount_cents == 100_000

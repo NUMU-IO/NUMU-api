@@ -411,7 +411,10 @@ class OrderResponse(BaseModel):
     )
     deposit_amount_cents: int | None = Field(
         default=None,
-        description="COD deposit asked for / collected up front; null = no deposit",
+        description="COD deposit collected (the required amount until paid); null = no deposit",
+    )
+    deposit_required_cents: int | None = Field(
+        default=None, description="COD deposit the store's policy asked for"
     )
     deposit_paid_at: str | None = Field(
         default=None, description="When the COD deposit was paid; null = not paid"
@@ -468,7 +471,10 @@ class OrderListItemResponse(BaseModel):
     )
     deposit_amount_cents: int | None = Field(
         default=None,
-        description="COD deposit asked for / collected up front; null = no deposit",
+        description="COD deposit collected (the required amount until paid); null = no deposit",
+    )
+    deposit_required_cents: int | None = Field(
+        default=None, description="COD deposit the store's policy asked for"
     )
     deposit_paid_at: str | None = Field(
         default=None, description="When the COD deposit was paid; null = not paid"
