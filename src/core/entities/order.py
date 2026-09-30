@@ -300,6 +300,9 @@ class Order(BaseEntity):
     version: int = 1  # optimistic locking
     cancelled_at: datetime | None = None
     paid_at: datetime | None = None
+    # COD: when the courier's cash reached the merchant. None while the
+    # money is still with the courier.
+    cash_received_at: datetime | None = None
     fulfilled_at: datetime | None = None
     shipped_at: datetime | None = None
     delivered_at: datetime | None = None
@@ -627,6 +630,7 @@ class Order(BaseEntity):
         self.payment_status = PaymentStatus.PENDING
         self.paid_at = None
         self.payment_id = None
+        self.cash_received_at = None
         self.touch()
         return amount
 

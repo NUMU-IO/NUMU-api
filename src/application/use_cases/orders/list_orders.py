@@ -50,6 +50,7 @@ class ListOrdersUseCase:
         search: str | None = None,
         customer_id: UUID | None = None,
         exclude_statuses: list[OrderStatus] | None = None,
+        cash_received: bool | None = None,
     ) -> ListOrdersResult:
         """List orders for a store with optional filters."""
         # Verify store exists and user has permission
@@ -103,6 +104,7 @@ class ListOrdersUseCase:
                 date_to=date_to,
                 customer_id=customer_id,
                 exclude_statuses=exclude_statuses,
+                cash_received=cash_received,
             )
             total = await self.order_repository.count_by_store(
                 store_id,
@@ -113,6 +115,7 @@ class ListOrdersUseCase:
                 date_to=date_to,
                 customer_id=customer_id,
                 exclude_statuses=exclude_statuses,
+                cash_received=cash_received,
             )
 
         # Customer names in ONE query. This was a per-customer lookup, so a

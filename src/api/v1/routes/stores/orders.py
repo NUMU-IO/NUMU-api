@@ -241,6 +241,9 @@ def _order_to_response(order_dto) -> OrderResponse:
         can_be_cancelled=order_dto.can_be_cancelled,
         cancelled_at=str(order_dto.cancelled_at) if order_dto.cancelled_at else None,
         paid_at=str(order_dto.paid_at) if order_dto.paid_at else None,
+        cash_received_at=(
+            str(order_dto.cash_received_at) if order_dto.cash_received_at else None
+        ),
         fulfilled_at=str(order_dto.fulfilled_at) if order_dto.fulfilled_at else None,
         shipped_at=str(order_dto.shipped_at) if order_dto.shipped_at else None,
         delivered_at=str(order_dto.delivered_at) if order_dto.delivered_at else None,
@@ -274,6 +277,9 @@ def _order_list_item_to_response(order_dto) -> OrderListItemResponse:
         fulfillment_status=order_dto.fulfillment_status,
         total=order_dto.total,
         collected_total=getattr(order_dto, "collected_total", None),
+        cash_received_at=(
+            str(order_dto.cash_received_at) if order_dto.cash_received_at else None
+        ),
         currency=order_dto.currency,
         item_count=order_dto.item_count,
         payment_method=order_dto.payment_method,
@@ -645,6 +651,10 @@ async def list_orders(
     ),
     search: str | None = Query(None),
     customer_id: str | None = Query(None, description="Filter by customer ID"),
+    cash_received: bool | None = Query(
+        None,
+        description="COD cash: false = paid but still with the courier, true = received",
+    ),
 ):
     """List orders for a store with optional filtering and pagination.
 
@@ -685,6 +695,7 @@ async def list_orders(
         search=search,
         customer_id=UUID(customer_id) if customer_id else None,
         exclude_statuses=exclude_statuses,
+        cash_received=cash_received,
     )
 
     orders = [_order_list_item_to_response(order) for order in result.orders]
@@ -1769,6 +1780,65 @@ async def bulk_update_order_status(
             errors=errors,
         ),
         message=f"Bulk status update completed: {updated} updated, {failed} failed",
+    )
+
+
+class CashReceivedRequest(BaseModel):
+    order_ids: list[UUID] = Field(min_length=1, max_length=500)
+    received: bool = True
+
+
+class CashReceivedResponse(BaseModel):
+    updated: int
+
+
+@router.post(
+    "/cash-received",
+    response_model=SuccessResponse[CashReceivedResponse],
+    summary="Mark COD cash as received from the courier (or undo)",
+    operation_id="mark_orders_cash_received",
+)
+async def mark_orders_cash_received(
+    request: CashReceivedRequest,
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Record that the courier handed over the cash for these paid orders.
+
+    The customer paying at the door makes the order PAID; the courier
+    remits days later. This only stamps ``cash_received_at`` — revenue,
+    invoice and commission already happened at payment. Works the same for
+    integrated couriers and custom shipments. Unpaid orders and orders
+    already in the requested state are skipped, so the call is idempotent.
+    """
+    from sqlalchemy import func, update
+
+    from src.core.entities.order import PaymentStatus
+    from src.infrastructure.database.models import OrderModel
+
+    result = await db.execute(
+        update(OrderModel)
+        .where(
+            OrderModel.store_id == store.id,
+            OrderModel.id.in_(request.order_ids),
+            OrderModel.payment_status == PaymentStatus.PAID,
+            OrderModel.cash_received_at.is_(None)
+            if request.received
+            else OrderModel.cash_received_at.is_not(None),
+        )
+        .values(
+            cash_received_at=func.now() if request.received else None,
+            updated_at=func.now(),
+            # Core UPDATE bypasses the ORM's version_id_col; bump it so a
+            # stale in-flight ORM write fails instead of undoing this.
+            version=OrderModel.version + 1,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    updated = result.rowcount or 0
+    return SuccessResponse(
+        data=CashReceivedResponse(updated=updated),
+        message=f"{updated} order(s) updated",
     )
 
 

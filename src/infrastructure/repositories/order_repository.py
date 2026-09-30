@@ -22,6 +22,18 @@ from src.infrastructure.database.models import OrderModel
 from src.infrastructure.database.order_status_filters import exclude_non_revenue
 
 
+def _cash_received_filter(received: bool):
+    """COD orders paid at the door, split by whether the courier's cash
+    has reached the merchant yet."""
+    if received:
+        return OrderModel.cash_received_at.is_not(None)
+    return (
+        (OrderModel.payment_status == PaymentStatus.PAID)
+        & (OrderModel.payment_method == "cod")
+        & OrderModel.cash_received_at.is_(None)
+    )
+
+
 class OrderRepository(IOrderRepository):
     """Order repository implementation using SQLAlchemy.
 
@@ -201,6 +213,7 @@ class OrderRepository(IOrderRepository):
             version=model.version,
             cancelled_at=model.cancelled_at,
             paid_at=model.paid_at,
+            cash_received_at=model.cash_received_at,
             fulfilled_at=model.fulfilled_at,
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -264,6 +277,7 @@ class OrderRepository(IOrderRepository):
             version=entity.version,
             cancelled_at=entity.cancelled_at,
             paid_at=entity.paid_at,
+            cash_received_at=entity.cash_received_at,
             fulfilled_at=entity.fulfilled_at,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
@@ -356,6 +370,7 @@ class OrderRepository(IOrderRepository):
             model.extra_data = entity.metadata
             model.cancelled_at = entity.cancelled_at
             model.paid_at = entity.paid_at
+            model.cash_received_at = entity.cash_received_at
             model.fulfilled_at = entity.fulfilled_at
             await self.session.flush()
             await self.session.refresh(model)
@@ -390,6 +405,7 @@ class OrderRepository(IOrderRepository):
         date_to: datetime | None = None,
         customer_id: UUID | None = None,
         exclude_statuses: list[OrderStatus] | None = None,
+        cash_received: bool | None = None,
     ) -> list[Order]:
         """Get all orders for a store with optional filters."""
         query = (
@@ -405,6 +421,8 @@ class OrderRepository(IOrderRepository):
             query = query.where(OrderModel.status.notin_(exclude_statuses))
         if payment_status:
             query = query.where(OrderModel.payment_status == payment_status)
+        if cash_received is not None:
+            query = query.where(_cash_received_filter(cash_received))
         if fulfillment_status:
             query = query.where(OrderModel.fulfillment_status == fulfillment_status)
         if date_from:
@@ -555,6 +573,7 @@ class OrderRepository(IOrderRepository):
         date_to: datetime | None = None,
         customer_id: UUID | None = None,
         exclude_statuses: list[OrderStatus] | None = None,
+        cash_received: bool | None = None,
     ) -> int:
         """Get total count of orders for a store with optional filters.
 
@@ -570,6 +589,8 @@ class OrderRepository(IOrderRepository):
             query = query.where(OrderModel.status == status)
         if payment_status:
             query = query.where(OrderModel.payment_status == payment_status)
+        if cash_received is not None:
+            query = query.where(_cash_received_filter(cash_received))
         if fulfillment_status:
             query = query.where(OrderModel.fulfillment_status == fulfillment_status)
         if exclude_statuses:

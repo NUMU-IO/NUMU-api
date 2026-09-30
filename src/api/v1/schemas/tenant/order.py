@@ -405,6 +405,10 @@ class OrderResponse(BaseModel):
     )
     cancelled_at: str | None = Field(description="ISO 8601 cancellation timestamp")
     paid_at: str | None = Field(description="ISO 8601 payment timestamp")
+    cash_received_at: str | None = Field(
+        default=None,
+        description="COD: when the courier's cash reached the merchant; null = still with the courier",
+    )
     fulfilled_at: str | None = Field(description="ISO 8601 fulfilment timestamp")
     shipped_at: str | None = Field(description="ISO 8601 shipment timestamp")
     delivered_at: str | None = Field(description="ISO 8601 delivery timestamp")
@@ -450,6 +454,10 @@ class OrderListItemResponse(BaseModel):
     collected_total: int | None = Field(
         default=None,
         description="Cash actually collected after a partial acceptance; null = total",
+    )
+    cash_received_at: str | None = Field(
+        default=None,
+        description="COD: when the courier's cash reached the merchant; null = still with the courier",
     )
     currency: str = Field(description="Currency code")
     item_count: int = Field(description="Total items")
