@@ -505,6 +505,13 @@ class SubmitPaymentProofUseCase:
                 payment_id=intent.reference_code,
                 payment_method=_method,
             )
+            # A COD deposit leaves the order unpaid: the balance is still
+            # collected on delivery, so it is not an OrderPaid.
+            fully_paid = order.payment_status == PaymentStatus.PAID
+            if not fully_paid:
+                # Checkout stamped the REQUIRED deposit here; record what was
+                # actually approved (a customer can send less than asked).
+                order.deposit_amount_cents = proof.declared_amount_cents
             # Keep each rail's metadata under its own sub-dict (keyed by
             # method) so future additions don't scatter keys across the
             # Order blob and so a later cleanup is a single dict delete.
@@ -514,9 +521,6 @@ class SubmitPaymentProofUseCase:
             manual_meta["proof_id"] = str(proof.id)
             order.metadata[_method] = manual_meta
             await self.order_repo.update(order)
-            # A COD deposit leaves the order unpaid: the balance is still
-            # collected on delivery, so it is not an OrderPaid.
-            fully_paid = order.payment_status == PaymentStatus.PAID
 
             self.session.add(
                 PaymentTransactionModel(
@@ -529,7 +533,7 @@ class SubmitPaymentProofUseCase:
                         f"{manual_human_name(intent.method)} "
                         f"{intent.display_destination}"
                     ),
-                    amount_cents=intent.amount_cents,
+                    amount_cents=proof.declared_amount_cents,
                     currency=order.currency,
                     status="success",
                     gateway_transaction_id=intent.reference_code,
@@ -585,7 +589,7 @@ class SubmitPaymentProofUseCase:
                         customer_id=order.customer_id,
                         reference_code=intent.reference_code,
                         payment_method=intent.method.value,
-                        amount_cents=intent.amount_cents,
+                        amount_cents=proof.declared_amount_cents,
                         currency=order.currency,
                         auto_approved=True,
                     )
