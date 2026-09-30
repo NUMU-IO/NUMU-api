@@ -106,3 +106,17 @@ def test_unmarking_paid_clears_cash_received():
     order.cash_received_at = datetime.now(UTC)
     order.reverse_payment(reason="wrong order")
     assert order.cash_received_at is None
+
+
+def test_list_item_carries_deposit():
+    from datetime import UTC, datetime
+
+    from src.api.v1.routes.stores.orders import _order_list_item_to_response
+    from src.application.dto.order import OrderListItemDTO
+
+    order = _order(PaymentStatus.PENDING)
+    order.deposit_amount_cents = 42_000
+    order.deposit_paid_at = datetime.now(UTC)
+    item = _order_list_item_to_response(OrderListItemDTO.from_entity(order))
+    assert item.deposit_amount_cents == 42_000
+    assert item.deposit_paid_at is not None

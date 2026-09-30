@@ -409,6 +409,13 @@ class OrderResponse(BaseModel):
         default=None,
         description="COD: when the courier's cash reached the merchant; null = still with the courier",
     )
+    deposit_amount_cents: int | None = Field(
+        default=None,
+        description="COD deposit asked for / collected up front; null = no deposit",
+    )
+    deposit_paid_at: str | None = Field(
+        default=None, description="When the COD deposit was paid; null = not paid"
+    )
     fulfilled_at: str | None = Field(description="ISO 8601 fulfilment timestamp")
     shipped_at: str | None = Field(description="ISO 8601 shipment timestamp")
     delivered_at: str | None = Field(description="ISO 8601 delivery timestamp")
@@ -458,6 +465,13 @@ class OrderListItemResponse(BaseModel):
     cash_received_at: str | None = Field(
         default=None,
         description="COD: when the courier's cash reached the merchant; null = still with the courier",
+    )
+    deposit_amount_cents: int | None = Field(
+        default=None,
+        description="COD deposit asked for / collected up front; null = no deposit",
+    )
+    deposit_paid_at: str | None = Field(
+        default=None, description="When the COD deposit was paid; null = not paid"
     )
     currency: str = Field(description="Currency code")
     item_count: int = Field(description="Total items")
