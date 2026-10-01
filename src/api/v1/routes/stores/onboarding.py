@@ -15,7 +15,11 @@ from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies import get_store_repository, verify_store_ownership
+from src.api.dependencies import (
+    get_store_repository,
+    get_storefront_cache_service,
+    verify_store_ownership,
+)
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
     get_category_repository,
@@ -53,6 +57,7 @@ from src.core.entities.onboarding import (
 from src.core.entities.store import Store
 from src.core.logging import get_logger
 from src.core.sector_presets import get_preset
+from src.infrastructure.cache import StorefrontCache
 from src.infrastructure.repositories import (
     OnboardingRepository,
     OrderRepository,
@@ -296,7 +301,10 @@ class WizardConfigRequest(BaseModel):
 
     business_type: str = Field(
         ...,
-        description="fashion, electronics, beauty, home, food, accessories, other",
+        description=(
+            "fashion, electronics, beauty, home, food, accessories, books, "
+            "handmade, other"
+        ),
     )
     country: str = Field(default="EG", max_length=2)
     shipping_preference: str = Field(..., description="bosta, manual, both")
@@ -331,6 +339,74 @@ class WizardConfigResponse(BaseModel):
     settings_applied: list[str]
 
 
+# Wizard categories that differ from the sector preset key. Unlisted ones are
+# looked up as-is (fashion, electronics, accessories); food, home, beauty and
+# handmade have no preset and get none.
+SECTOR_FOR_BUSINESS = {"books": "bookstore"}
+
+
+async def _fill_starter_hero(store_theme_repo, store_id, line: str) -> bool:
+    """Put the starter hero line into the active theme's published and draft
+    customization, where the hero's line is still empty."""
+    import copy
+
+    from src.application.services.starter_copy import fill_hero_line
+
+    store_theme = await store_theme_repo.get_active_for_store(store_id)
+    if not store_theme:
+        return False
+    changed = False
+    for attr in ("customization_v3", "draft_customization_v3"):
+        current = getattr(store_theme, attr, None)
+        if not current:
+            continue
+        # A fresh dict, so the JSONB column registers the change.
+        updated = copy.deepcopy(current)
+        if fill_hero_line(updated, store_theme.section_schemas, line):
+            setattr(store_theme, attr, updated)
+            changed = True
+    if changed:
+        await store_theme_repo.update(store_theme)
+    return changed
+
+
+class ReadinessItem(BaseModel):
+    key: str
+    done: bool
+
+
+class ReadinessResponse(BaseModel):
+    """The four conditions for taking orders, plus whether shoppers can see
+    the store yet (``lock_reason`` is None when it is open)."""
+
+    items: list[ReadinessItem]
+    done: int
+    total: int
+    ready: bool
+    lock_reason: str | None = None
+
+
+@router.get(
+    "/readiness",
+    response_model=SuccessResponse[ReadinessResponse],
+    summary="Is the store ready to take orders?",
+    operation_id="get_store_readiness",
+)
+async def get_store_readiness(
+    store: Annotated[Store, Depends(verify_store_ownership)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from src.api.v1.routes.storefront.public import storefront_billing_lock_reason
+    from src.application.services.store_readiness import store_readiness
+
+    readiness = await store_readiness(db, store)
+    lock = await storefront_billing_lock_reason(db, store)
+    return SuccessResponse(
+        data=ReadinessResponse(**readiness, lock_reason=lock),
+        message="Store readiness",
+    )
+
+
 @router.post(
     "/configure",
     response_model=SuccessResponse[WizardConfigResponse],
@@ -349,6 +425,7 @@ async def configure_from_wizard(
     store_theme_repo: Annotated[
         StoreThemeRepository, Depends(get_store_theme_repository)
     ],
+    cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
     """Auto-configure store based on onboarding wizard answers.
 
@@ -495,6 +572,19 @@ async def configure_from_wizard(
             seo_block["business_type"] = schema_type
             settings_applied.append(f"seo:business_type:{schema_type}")
 
+    # ── 5c. Starter copy from the category, empty fields only ──
+    from src.application.services.starter_copy import starter_copy
+
+    hero_line, about = starter_copy(
+        request.business_type, store.name, request.store_language
+    )
+    if not store.description:
+        store.description = about
+        settings_applied.append("starter_copy:description")
+    hero_filled = await _fill_starter_hero(store_theme_repo, store.id, hero_line)
+    if hero_filled:
+        settings_applied.append("starter_copy:hero")
+
     # ── 6. Persist ──
     store.settings = settings
     await store_repo.update(store)
@@ -505,7 +595,9 @@ async def configure_from_wizard(
     # category tiles on a new homepage would be invented content again.
     # Payments and shipping are NOT auto-completed here any more; those
     # steps finish when a gateway is connected or a priced zone exists.
-    preset = get_preset(request.business_type)
+    preset = get_preset(
+        SECTOR_FOR_BUSINESS.get(request.business_type, request.business_type)
+    )
     if preset is not None:
         try:
             async with db.begin_nested():
@@ -534,6 +626,19 @@ async def configure_from_wizard(
         city=request.city,
     )
     await db.commit()
+
+    if hero_filled:
+        # Post-commit, like the customizer's publish: the storefront must
+        # refetch the committed hero, not re-cache the old one.
+        try:
+            await cache.invalidate_store(
+                store_id=store.id,
+                subdomain=store.subdomain,
+                custom_domain=store.custom_domain,
+            )
+            await cache.invalidate_theme(store.id)
+        except Exception:
+            logger.warning("wizard_starter_copy_cache_bust_failed", exc_info=True)
 
     return SuccessResponse(
         data=WizardConfigResponse(
