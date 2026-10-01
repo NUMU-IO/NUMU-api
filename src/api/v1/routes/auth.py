@@ -128,6 +128,7 @@ def _user_response(user) -> UserResponse:
         created_at=str(user.created_at),
         updated_at=str(user.updated_at),
         trial_ends_at=str(user.trial_ends_at) if user.trial_ends_at else None,
+        language=getattr(user, "language", None),
     )
 
 
@@ -318,6 +319,7 @@ async def register(
         first_name=request.first_name,
         last_name=request.last_name,
         phone=request.phone,
+        language=request.language,
     )
     try:
         result = await use_case.execute(dto)
@@ -501,17 +503,24 @@ async def google_oauth(
     referral_code = (
         referral_code[:32] if isinstance(referral_code, str) and referral_code else None
     )
+    from sqlalchemy import update as sa_update
+
+    from src.infrastructure.database.models.public.user import UserModel
+
+    # First touch only: a returning user's earlier choices stand.
     if plan_intent:
-        from sqlalchemy import update as sa_update
-
-        from src.infrastructure.database.models.public.user import UserModel
-
-        # First touch only: a returning user's earlier intent stands.
         await db.execute(
             sa_update(UserModel)
             .where(UserModel.id == result.user.id, UserModel.plan_intent.is_(None))
             .values(plan_intent=plan_intent)
         )
+    if language and result.user.language is None:
+        await db.execute(
+            sa_update(UserModel)
+            .where(UserModel.id == result.user.id, UserModel.language.is_(None))
+            .values(language=language)
+        )
+        result.user.language = language
     await record_lead(
         db,
         email=str(result.user.email),
@@ -717,6 +726,7 @@ async def resend_verification(
         email=str(user.email),
         token=verification_token,
         code=code,
+        language=user.language or "ar",
     )
 
     return SuccessResponse(
@@ -1076,6 +1086,7 @@ async def get_current_user(
             created_at=str(user.created_at),
             updated_at=str(user.updated_at),
             trial_ends_at=str(user.trial_ends_at) if user.trial_ends_at else None,
+            language=user.language,
             tenant=tenant_info,
         ),
         message="User retrieved successfully",
@@ -1341,6 +1352,7 @@ async def update_profile(
             phone=request.phone,
             avatar_url=request.avatar_url,
             email=request.email,
+            language=request.language,
         )
 
         result = await use_case.execute(
@@ -1365,6 +1377,7 @@ async def update_profile(
                 trial_ends_at=str(getattr(result, "trial_ends_at", None))
                 if getattr(result, "trial_ends_at", None)
                 else None,
+                language=result.language,
             ),
             message="Profile updated successfully",
         )

@@ -69,6 +69,7 @@ class RegisterUserUseCase:
             first_name=dto.first_name,
             last_name=dto.last_name,
             phone=PhoneNumber(value=dto.phone) if dto.phone else None,
+            language=dto.language,
             role=UserRole.STORE_OWNER,
             status=UserStatus.PENDING_VERIFICATION,
             trial_ends_at=datetime.now(UTC) + timedelta(days=TRIAL_LIFETIME_DAYS),
@@ -108,6 +109,7 @@ class RegisterUserUseCase:
                     email=dto.email,
                     token=verification_token,
                     code=code,
+                    language=dto.language or "ar",
                 )
             except Exception as exc:
                 log.warning("verification_email_dispatch_failed", error=str(exc))

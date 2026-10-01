@@ -76,6 +76,9 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    # 'ar' | 'en', picked on the signup page and changed from the hub. NULL
+    # means never chosen; readers fall back to Arabic.
+    language: Mapped[str | None] = mapped_column(String(2), nullable=True)
     auth_provider: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
     )

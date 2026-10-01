@@ -20,6 +20,8 @@ class TestAuthRoutes:
         assert "user" in data["data"]
         assert "tokens" in data["data"]
         assert data["data"]["user"]["email"] == sample_user_data["email"]
+        # The signup page's language (schema default "ar") is kept on the user.
+        assert data["data"]["user"]["language"] == "ar"
         assert data["data"]["tokens"]["token_type"] == "bearer"
 
     @pytest.mark.asyncio

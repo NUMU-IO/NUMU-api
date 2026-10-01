@@ -180,6 +180,9 @@ class UserResponse(BaseModel):
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
     trial_ends_at: str | None = Field(None, description="Trial period end date")
+    language: str | None = Field(
+        None, description="Merchant's language: 'ar' | 'en'; null = never chosen"
+    )
 
     # Tenant lifecycle info (populated by GET /auth/me)
     tenant: "TenantInfoResponse | None" = Field(
@@ -318,6 +321,9 @@ class UpdateProfileRequest(BaseModel):
             "New login email. Must be unused; changing it clears email "
             "verification for the account (auth emails go to the new address)."
         ),
+    )
+    language: Literal["ar", "en"] | None = Field(
+        None, description="Merchant's language for the hub and auth emails."
     )
 
 

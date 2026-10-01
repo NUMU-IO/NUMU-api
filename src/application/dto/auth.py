@@ -40,6 +40,7 @@ class RegisterDTO(BaseDTO):
     first_name: str
     last_name: str
     phone: str | None = None
+    language: str | None = None
 
 
 @dataclass

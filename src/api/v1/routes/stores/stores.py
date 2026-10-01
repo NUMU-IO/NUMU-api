@@ -272,7 +272,7 @@ async def create_store(
             send_welcome_email_task.delay(
                 email=str(user.email),
                 merchant_name=user.first_name or "",
-                language=request.default_language or "ar",
+                language=user.language or request.default_language or "ar",
             )
         except Exception:
             logger.warning("welcome_email_dispatch_failed", exc_info=True)
