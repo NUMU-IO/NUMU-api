@@ -658,8 +658,9 @@ async def platform_indexing_block_reason(session, store) -> str | None:
     * ``demo_seed``   — seeded showcase data (``scripts/seed_fake_brands.py``).
     * ``load_test``   — ``load-store-*`` fixtures from the k6 suite.
     * ``demo_tenant`` — try-a-demo throwaway tenants (auto-purged).
-    * ``no_products`` — nothing to show. A catalogue-less storefront renders an
-      empty grid, which is a soft 404; volunteering those is how a domain
+    * ``no_products`` — nothing to show (sample products excluded). A
+      catalogue-less storefront renders an empty grid, which is a soft 404;
+      volunteering those is how a domain
       stops being trusted. **Self-correcting**: publish one product and the
       store becomes indexable again on the next payload fetch (60s cache), so
       no flag has to be flipped by hand.
@@ -691,9 +692,15 @@ async def platform_indexing_block_reason(session, store) -> str | None:
         # handler below turns the whole gate into a silent no-op — green in
         # prod-shaped manual checks, dead in tests. Caught by
         # test_platform_indexing_gate.
+        # Sample products seeded at store creation don't count: a store
+        # showing only those is still empty of anything the merchant made.
+        # ponytail: matches the seeder's `demo-` slug prefix, so a real
+        # product the merchant slugs `demo-...` is ignored too; switch to
+        # attributes.demo_seed if that ever bites.
         has_active_product = exists().where(
             ProductModel.store_id == store.id,
             ProductModel.status == ProductStatus.ACTIVE,
+            ~ProductModel.slug.startswith("demo-"),
         )
         row = (
             await session.execute(

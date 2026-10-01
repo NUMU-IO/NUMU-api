@@ -55,13 +55,13 @@ async def _mk_store(session, *, subdomain: str, plan: str = "pro", settings=None
     return store
 
 
-async def _add_product(session, store, *, status: str = "ACTIVE"):
+async def _add_product(session, store, *, status: str = "ACTIVE", slug: str = "thing"):
     product = ProductModel(
         id=uuid4(),
         tenant_id=store.tenant_id,
         store_id=store.id,
         name="Thing",
-        slug=f"thing-{uuid4().hex[:6]}",
+        slug=f"{slug}-{uuid4().hex[:6]}",
         status=status,
     )
     session.add(product)
@@ -112,6 +112,10 @@ async def test_empty_store_blocked_then_self_corrects(test_session):
 
     # A DRAFT product is not public — still blocked.
     await _add_product(test_session, store, status="DRAFT")
+    assert await platform_indexing_block_reason(test_session, store) == "no_products"
+
+    # Sample products seeded at store creation are not the merchant's.
+    await _add_product(test_session, store, slug="demo")
     assert await platform_indexing_block_reason(test_session, store) == "no_products"
 
     await _add_product(test_session, store, status="ACTIVE")
