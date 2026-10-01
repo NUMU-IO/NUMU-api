@@ -43,7 +43,7 @@ class ChangePasswordUseCase:
             raise EntityNotFoundError("User", str(user_id))
 
         # Verify current password
-        if not await self.password_service.verify_password(
+        if not self.password_service.verify_password(
             dto.current_password, user.hashed_password
         ):
             raise AuthenticationError("Current password is incorrect")
@@ -52,9 +52,7 @@ class ChangePasswordUseCase:
         await enforce_password_policy(dto.new_password)
 
         # Hash new password
-        new_hashed_password = await self.password_service.hash_password(
-            dto.new_password
-        )
+        new_hashed_password = self.password_service.hash_password(dto.new_password)
 
         # Update password
         user.hashed_password = new_hashed_password

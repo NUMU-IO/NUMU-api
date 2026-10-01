@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import get_store_repository
 from src.api.dependencies.services import get_email_service, get_storage_service
+from src.api.middleware.rate_limit import _get_client_ip
 from src.api.responses import SuccessResponse
 from src.api.utils.upload_validation import validate_image_upload
 from src.application.services.notification_feed import (
@@ -52,13 +53,6 @@ class ProductRequestAck(BaseModel):
 
     id: str | None = None
     received: bool = True
-
-
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 async def _over_rate_limit(store_id: UUID, ip: str) -> bool:
@@ -151,7 +145,7 @@ async def create_product_request(
         logger.info("product_request_honeypot", store_id=str(store_id))
         return SuccessResponse(data=ProductRequestAck(), message="Request received")
 
-    if await _over_rate_limit(store_id, _client_ip(request)):
+    if await _over_rate_limit(store_id, _get_client_ip(request)):
         logger.info("product_request_rate_limited", store_id=str(store_id))
         return SuccessResponse(data=ProductRequestAck(), message="Request received")
 
