@@ -32,5 +32,8 @@ async def test_auth_email_links_point_at_merchant_hub(monkeypatch, send, path):
     await send(service)
 
     links = re.findall(r'href="([^"]+)"', sent[0].html_content)
-    assert f"https://merchant.numueg.app{path}?token=tok" in links
+    assert any(
+        link.startswith(f"https://merchant.numueg.app{path}?token=tok")
+        for link in links
+    )
     assert not any("localhost" in link for link in links)

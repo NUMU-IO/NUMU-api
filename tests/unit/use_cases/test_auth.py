@@ -87,6 +87,24 @@ class TestRegisterUserUseCase:
         )
 
     @pytest.mark.asyncio
+    async def test_register_saves_phone(self):
+        """The signup phone is stored, not asked for again at create-store."""
+        self.mock_user_repo.create.side_effect = lambda user: user
+
+        await self.use_case.execute(
+            RegisterDTO(
+                email="phone@example.com",
+                password="SecurePassword123!",
+                first_name="New",
+                last_name="User",
+                phone="+201012345678",
+            )
+        )
+
+        saved = self.mock_user_repo.create.call_args.args[0]
+        assert str(saved.phone) == "+201012345678"
+
+    @pytest.mark.asyncio
     async def test_register_duplicate_email(self):
         """Test registration with existing email."""
         # Mock email_exists to return True (duplicate email)

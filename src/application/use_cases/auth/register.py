@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from src.application.dto.auth import AuthResponseDTO, RegisterDTO, TokenDTO
 from src.application.dto.user import UserDTO
+from src.application.services.password_policy import enforce_password_policy
 from src.core.entities.user import User, UserRole, UserStatus
 from src.core.exceptions import EntityAlreadyExistsError
 from src.core.interfaces.repositories.user_repository import IUserRepository
@@ -12,8 +13,8 @@ from src.core.interfaces.services.email_service import IEmailService
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
 from src.core.logging import get_logger
-from src.core.validators.password import validate_password
 from src.core.value_objects.email import Email
+from src.core.value_objects.phone import PhoneNumber
 from src.infrastructure.tenancy.service import TRIAL_LIFETIME_DAYS
 
 logger = get_logger(__name__)
@@ -56,7 +57,7 @@ class RegisterUserUseCase:
             raise EntityAlreadyExistsError("User", "email", dto.email)
 
         # Enforce password policy before hashing
-        validate_password(dto.password)
+        await enforce_password_policy(dto.password)
 
         # Hash password
         hashed_password = self.password_service.hash_password(dto.password)
@@ -67,6 +68,7 @@ class RegisterUserUseCase:
             hashed_password=hashed_password,
             first_name=dto.first_name,
             last_name=dto.last_name,
+            phone=PhoneNumber(value=dto.phone) if dto.phone else None,
             role=UserRole.STORE_OWNER,
             status=UserStatus.PENDING_VERIFICATION,
             trial_ends_at=datetime.now(UTC) + timedelta(days=TRIAL_LIFETIME_DAYS),
@@ -89,11 +91,6 @@ class RegisterUserUseCase:
                 )
                 # Generate a 6-digit code and store it in Redis keyed to user id
                 code = _generate_verification_code()
-                log.info(
-                    "verification_code_generated",
-                    code=code,
-                    hint="DEV ONLY — remove this log in production",
-                )
                 try:
                     from src.infrastructure.cache.redis_cache import RedisCacheService
 

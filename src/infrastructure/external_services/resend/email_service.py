@@ -475,8 +475,10 @@ class ResendEmailService(IEmailService):
             wrap,
         )
 
+        # lang: the reset page opens in the language this email is written in.
         reset_url = (
-            f"{settings.merchant_hub_url.rstrip('/')}/reset-password?token={token}"
+            f"{settings.merchant_hub_url.rstrip('/')}/reset-password"
+            f"?token={token}&lang={language}"
         )
 
         body = f"""

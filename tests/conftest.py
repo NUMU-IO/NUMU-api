@@ -622,6 +622,16 @@ def tenant_b_headers(tenant_b: dict[str, Any]) -> dict[str, str]:
 # =============================================================================
 
 
+@pytest.fixture(autouse=True)
+def _no_breached_password_lookup(monkeypatch):
+    from src.application.services import password_policy
+
+    async def not_breached(_password: str) -> bool:
+        return False
+
+    monkeypatch.setattr(password_policy, "_is_breached", not_breached)
+
+
 @pytest.fixture
 def sample_user_data() -> dict[str, Any]:
     """Return sample user registration data."""
@@ -630,6 +640,7 @@ def sample_user_data() -> dict[str, Any]:
         "password": "TestPassword123!",
         "first_name": "Test",
         "last_name": "User",
+        "phone": "+201012345678",
     }
 
 

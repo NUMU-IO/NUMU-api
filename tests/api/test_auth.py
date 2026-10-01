@@ -33,12 +33,8 @@ class TestAuthRoutes:
         # Try to register again with same email
         response = await client.post("/api/v1/auth/register", json=sample_user_data)
 
-        assert response.status_code == 400
-        data = response.json()
-        assert (
-            "already exists" in data["message"].lower()
-            or "duplicate" in data["message"].lower()
-        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "EMAIL_ALREADY_REGISTERED"
 
     @pytest.mark.asyncio
     async def test_register_invalid_email(
