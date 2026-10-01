@@ -44,6 +44,7 @@ from src.infrastructure.cache.idempotency_keys import (
     IdempotencyKeys,
     get_idempotency_keys,
 )
+from src.infrastructure.external_services.token_service import token_service
 from src.infrastructure.repositories.funnel_event_repository import (
     FunnelEventRepository,
 )
@@ -448,6 +449,24 @@ class TrackPageViewRequest(BaseModel):
     customer_id: UUID | None = None
 
 
+def is_store_insider(viewer_token: str | None, store: Store) -> bool:
+    """The store's owner or staff browsing their own storefront.
+
+    The storefront proxy forwards the merchant-hub session cookie (scoped to
+    .numueg.app, so it rides along on the store's subdomain) as
+    ``X-Numu-Viewer``. A merchant checking their own store is not a visitor.
+    """
+    if not viewer_token:
+        return False
+    try:
+        payload = token_service.verify_token(viewer_token)
+    except Exception:  # noqa: BLE001 — expired/garbage token = a shopper
+        return False
+    return payload.user_id == store.owner_id or (
+        payload.tenant_id is not None and payload.tenant_id == store.tenant_id
+    )
+
+
 @router.post("/track", status_code=204)
 async def track_page_view(
     body: TrackPageViewRequest,
@@ -484,7 +503,11 @@ async def track_page_view(
         is_internal_traffic,
     )
 
-    if is_bot_user_agent(ua) or is_internal_traffic(body.referrer, body.path):
+    if (
+        is_bot_user_agent(ua)
+        or is_internal_traffic(body.referrer, body.path)
+        or is_store_insider(request.headers.get("x-numu-viewer"), store)
+    ):
         return Response(status_code=204)
 
     step = resolve_funnel_step(body.step, body.path)

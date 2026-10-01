@@ -9,7 +9,6 @@ Provides REST endpoints for merchant onboarding progress:
 - POST /{store_id}/onboarding/configure       - Auto-configure from wizard
 """
 
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
@@ -19,8 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import get_store_repository, verify_store_ownership
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
+    get_category_repository,
+    get_metafield_definition_repository,
     get_onboarding_repository,
     get_order_repository,
+    get_store_theme_repository,
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.stores.niche_templates import (
@@ -32,6 +34,7 @@ from src.api.v1.schemas.tenant.onboarding import (
     OnboardingResponse,
     OnboardingStepResponse,
 )
+from src.application.services.sector_preset_service import SectorPresetService
 from src.application.use_cases.onboarding import (
     CompleteOnboardingStepUseCase,
     DismissOnboardingUseCase,
@@ -48,11 +51,20 @@ from src.core.entities.onboarding import (
     StoreOnboarding,
 )
 from src.core.entities.store import Store
+from src.core.logging import get_logger
+from src.core.sector_presets import get_preset
 from src.infrastructure.repositories import (
     OnboardingRepository,
     OrderRepository,
     StoreRepository,
 )
+from src.infrastructure.repositories.category_repository import CategoryRepository
+from src.infrastructure.repositories.metafield_repository import (
+    MetafieldDefinitionRepository,
+)
+from src.infrastructure.repositories.store_theme_repository import StoreThemeRepository
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/{store_id}/onboarding")
 
@@ -329,10 +341,14 @@ async def configure_from_wizard(
     request: WizardConfigRequest,
     store: Annotated[Store, Depends(verify_store_ownership)],
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    onboarding_repo: Annotated[
-        OnboardingRepository, Depends(get_onboarding_repository)
-    ],
     db: Annotated[AsyncSession, Depends(get_db)],
+    definition_repo: Annotated[
+        MetafieldDefinitionRepository, Depends(get_metafield_definition_repository)
+    ],
+    category_repo: Annotated[CategoryRepository, Depends(get_category_repository)],
+    store_theme_repo: Annotated[
+        StoreThemeRepository, Depends(get_store_theme_repository)
+    ],
 ):
     """Auto-configure store based on onboarding wizard answers.
 
@@ -405,22 +421,13 @@ async def configure_from_wizard(
     }
     settings_applied.append("payment:cod")
 
-    for method in request.payment_methods:
-        if method == "cod":
-            continue
-        # Map wizard names to settings keys
-        method_map = {
-            "paymob_card": "paymob",
-            "paymob_wallet": "paymob",
-            "fawry": "fawry",
-            "kashier": "bank_transfer",
-        }
-        settings_key = method_map.get(method, method)
-        if settings_key in payment_settings and isinstance(
-            payment_settings[settings_key], dict
-        ):
-            payment_settings[settings_key]["enabled"] = True
-            settings_applied.append(f"payment:{method}")
+    # Online gateways need credentials the wizard never asks for, so ticking
+    # one here used to switch on a method checkout could not take (Kashier
+    # even landed as bank transfer). Keep it as interest the dashboard can
+    # turn into a "connect" reminder; COD is the day-one method.
+    interest = sorted({m for m in request.payment_methods if m != "cod"})
+    settings.setdefault("onboarding", {})["payment_interest"] = interest
+    settings_applied.extend(f"payment_interest:{m}" for m in interest)
 
     settings["payment"] = payment_settings
 
@@ -458,23 +465,15 @@ async def configure_from_wizard(
         settings_applied.append("shipping:bosta")
 
     if request.shipping_preference in ("manual", "both"):
+        # Zones and prices come from the merchant (the wizard applies the
+        # Egypt 4-zone preset with the rates they confirm); no 50 EGP
+        # placeholder zones written on their behalf.
         shipping_settings["manual"] = {
             "enabled": True,
             "is_configured": True,
             "last_configured": None,
         }
-        # Create default zones for the country
-        zones = []
-        for zone_name in country_data.get("shipping_zones", []):
-            zones.append({
-                "id": str(uuid.uuid4()),
-                "zone": zone_name,
-                "governorates": zone_name,
-                "rate": 50,
-                "estimated_days": "2-4 days",
-            })
-        shipping_settings["zones"] = zones
-        settings_applied.append("shipping:manual_zones")
+        settings_applied.append("shipping:manual")
 
     settings["shipping"] = shipping_settings
 
@@ -500,13 +499,25 @@ async def configure_from_wizard(
     store.settings = settings
     await store_repo.update(store)
 
-    # ── 7. Auto-complete onboarding steps ──
-    await try_complete_onboarding_step(
-        onboarding_repo, store.id, OnboardingStepKey.CONFIGURE_PAYMENT
-    )
-    await try_complete_onboarding_step(
-        onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
-    )
+    # ── 7. Sector preset from the business type ──
+    # Fields, capabilities and settings["sector"] only: categories and theme
+    # layout stay a choice in Settings → Sectors, since empty English-named
+    # category tiles on a new homepage would be invented content again.
+    # Payments and shipping are NOT auto-completed here any more; those
+    # steps finish when a gateway is connected or a priced zone exists.
+    preset = get_preset(request.business_type)
+    if preset is not None:
+        try:
+            async with db.begin_nested():
+                report = await SectorPresetService(
+                    definition_repo=definition_repo,
+                    category_repo=category_repo,
+                    store_repo=store_repo,
+                    store_theme_repo=store_theme_repo,
+                ).apply(store, preset, apply_categories=False)
+            settings_applied.append(f"sector:{report['preset']}")
+        except Exception:
+            logger.warning("wizard_sector_preset_failed", exc_info=True)
 
     # ── 8. Qualification onto the merchant lead ──
     # Separate from the store config on purpose: this is who the merchant

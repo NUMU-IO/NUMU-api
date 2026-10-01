@@ -580,22 +580,6 @@ async def verify_email(
     )
     await use_case.execute(request.token)
 
-    # Dispatch welcome email now that the address is verified
-    try:
-        payload = token_service.verify_token(request.token)
-        user = await user_repo.get_by_id(payload.user_id)
-        if user:
-            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
-                send_welcome_email_task,
-            )
-
-            send_welcome_email_task.delay(
-                email=str(user.email),
-                merchant_name=user.first_name or "",
-            )
-    except Exception:
-        pass  # Non-critical; don't block verification response
-
     return SuccessResponse(
         data=MessageResponse(message="Email verified successfully"),
         message="Email verified successfully",
@@ -672,19 +656,6 @@ async def verify_email_code(
     if not user.is_verified:
         user.verify_email()
         await user_repo.update(user)
-
-        # Dispatch welcome email now that the address is verified
-        try:
-            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
-                send_welcome_email_task,
-            )
-
-            send_welcome_email_task.delay(
-                email=str(user.email),
-                merchant_name=user.first_name or "",
-            )
-        except Exception:
-            pass  # Non-critical; don't block verification response
 
     # Clean up the used code
     await cache.delete(cache_key)

@@ -283,30 +283,58 @@ async def seed_demo_catalog(
     }
 
 
-async def remove_demo_catalog(store_id: UUID) -> int:
-    """Bulk delete every demo-tagged product from the store.
+async def delete_demo_products(session, store_id: UUID) -> int:
+    """Delete the seeded sample products in ``session``; caller commits.
 
-    Used by the hub's "Reset demo" button — merchants who started
-    seeded but want a clean slate before launch run this.
-    Returns the number of products deleted.
+    Matches two seeder markers (the ``demo-`` slug AND
+    ``attributes.demo_seed``), so a merchant's own product that merely carries
+    a "demo" tag or slug survives.
     """
     from sqlalchemy import select
 
-    from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.product import ProductModel
 
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(ProductModel).where(
-                ProductModel.store_id == store_id,
-                ProductModel.tags.contains(["demo"]),
-            )
+    result = await session.execute(
+        select(ProductModel).where(
+            ProductModel.store_id == store_id,
+            ProductModel.slug.startswith("demo-"),
+            ProductModel.attributes["demo_seed"].as_boolean().is_(True),
         )
-        rows = list(result.scalars().all())
-        for row in rows:
-            await session.delete(row)
-        await session.commit()
-    logger.info(
-        "demo_catalog_removed", extra={"store_id": str(store_id), "count": len(rows)}
     )
+    rows = list(result.scalars().all())
+    for row in rows:
+        await session.delete(row)
+    if rows:
+        logger.info(
+            "demo_catalog_removed",
+            extra={"store_id": str(store_id), "count": len(rows)},
+        )
     return len(rows)
+
+
+async def remove_demo_catalog(store_id: UUID) -> int:
+    """Bulk delete the store's sample products in a session of its own.
+
+    Used by the hub's "Reset demo" button, and after a merchant creates
+    their first real product (samples are a preview, never stock a
+    shopper should be able to order). Returns the number deleted.
+    """
+    from src.infrastructure.database.connection import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        deleted = await delete_demo_products(session, store_id)
+        await session.commit()
+    return deleted
+
+
+async def handle_product_created_remove_samples(event) -> None:
+    """ProductCreatedEvent handler: a real product retires the samples.
+
+    The seeder writes products straight through the repository and never
+    raises this event, so every event here is the merchant's own product.
+    Post-commit and best-effort: it never fails the create.
+    """
+    try:
+        await remove_demo_catalog(event.store_id)
+    except Exception:
+        logger.warning("demo_catalog_auto_remove_failed", exc_info=True)

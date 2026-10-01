@@ -1,7 +1,7 @@
 """Onboarding email templates for merchant registration flow.
 
 Sent at four milestones:
-1. Welcome — on merchant registration
+1. Welcome — when the merchant creates their first store
 2. First product added
 3. First order received
 4. Store approved (live)
@@ -24,7 +24,7 @@ _WELCOME = {
         "title": 'أهلاً بيك في <span class="brand">نُمو</span>',
         "subtitle": "رحلتك مع التجارة الإلكترونية بتبدأ من هنا",
         "greeting": "أهلاً {merchant_name}،",
-        "intro": 'مبروك على إنشاء متجرك على <span class="brand">نُمو</span>! انت دلوقتي جزء من أسرع منصة تجارة إلكترونية في مصر.',
+        "intro": 'مبروك على إنشاء متجرك على <span class="brand">نُمو</span>!',
         "next_steps": "الخطوات الجاية",
         "step_label": "الخطوة",
         "steps": [
@@ -41,7 +41,7 @@ _WELCOME = {
         "title": "Welcome to NUMU",
         "subtitle": "Your e-commerce journey starts here",
         "greeting": "Hi {merchant_name},",
-        "intro": "Congratulations on creating your NUMU store! You're now part of Egypt's fastest-growing e-commerce platform.",
+        "intro": "Congratulations on creating your NUMU store!",
         "next_steps": "Next Steps",
         "step_label": "Step",
         "steps": [

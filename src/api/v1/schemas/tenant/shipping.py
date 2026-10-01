@@ -184,6 +184,15 @@ class CoverageResponse(BaseModel):
     conflicts: list[CoverageConflict] = Field(default_factory=list)
 
 
+class PresetRequest(BaseModel):
+    """Optional rates for the Egypt 4-zone preset, in preset zone order:
+    Greater Cairo, Alexandria & Delta, Canal/Sinai/Upper Egypt, Remote."""
+
+    rates_cents: list[Annotated[int, Field(ge=0, le=2_000_000)]] | None = Field(
+        None, min_length=4, max_length=4
+    )
+
+
 class PresetResponse(BaseModel):
     """One-shot result of applying the Egypt 4-zone preset."""
 

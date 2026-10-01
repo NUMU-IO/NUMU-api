@@ -19,6 +19,12 @@ from pydantic import (
 from src.api.dependencies.sanitization import SanitizedStr
 from src.core.value_objects.money import Currency
 
+# Prices are stored as 32-bit integer cents, so anything above this
+# overflows the column and the save used to 500.
+# ponytail: 32-bit cents column ceiling (21,474,836.47); widen
+# products/variants price columns to BIGINT if a merchant ever needs more.
+MAX_PRICE = Decimal("21474836.47")
+
 
 class ProductLabelSchema(BaseModel):
     """Merchant-assigned product label stored at ``attributes.label``.
@@ -168,7 +174,9 @@ class CreateProductRequest(BaseModel):
     product_type: str = Field(
         default="physical", description="Product type: physical or digital"
     )
-    price: Decimal = Field(..., ge=0, description="Product price in the store currency")
+    price: Decimal = Field(
+        ..., ge=0, le=MAX_PRICE, description="Product price in the store currency"
+    )
     price_currency: str | None = Field(
         default=None,
         max_length=3,
@@ -179,10 +187,13 @@ class CreateProductRequest(BaseModel):
         ),
     )
     compare_at_price: Decimal | None = Field(
-        None, ge=0, description="Original price before discount (strike-through price)"
+        None,
+        ge=0,
+        le=MAX_PRICE,
+        description="Original price before discount (strike-through price)",
     )
     cost_price: Decimal | None = Field(
-        None, ge=0, description="Cost of goods for profit calculation"
+        None, ge=0, le=MAX_PRICE, description="Cost of goods for profit calculation"
     )
     quantity: int = Field(default=0, ge=0, description="Available stock quantity")
     low_stock_threshold: int = Field(
@@ -276,6 +287,7 @@ class CreateProductRequest(BaseModel):
     sale_price: Decimal | None = Field(
         None,
         ge=0,
+        le=MAX_PRICE,
         description=(
             "Scheduled sale price. Send the sale fields together: with a "
             "price to start or change a sale, without one to end it."
@@ -317,10 +329,10 @@ class VariantInput(BaseModel):
     id: UUID | None = None
     position: int = Field(default=0, ge=0)
     option_values: dict[str, str] = Field(default_factory=dict)
-    price: Decimal = Field(..., ge=0)
+    price: Decimal = Field(..., ge=0, le=MAX_PRICE)
     price_currency: str = Field(default="EGP", max_length=3)
-    compare_at_price: Decimal | None = Field(None, ge=0)
-    cost_price: Decimal | None = Field(None, ge=0)
+    compare_at_price: Decimal | None = Field(None, ge=0, le=MAX_PRICE)
+    cost_price: Decimal | None = Field(None, ge=0, le=MAX_PRICE)
     sku: str | None = Field(None, max_length=100)
     barcode: str | None = Field(None, max_length=100)
     inventory_quantity: int = Field(default=0, ge=0)
@@ -368,13 +380,13 @@ class UpdateProductRequest(BaseModel):
         None, max_length=500, description="Brief description for listings"
     )
     price: Decimal | None = Field(
-        None, ge=0, description="Product price in the store currency"
+        None, ge=0, le=MAX_PRICE, description="Product price in the store currency"
     )
     compare_at_price: Decimal | None = Field(
-        None, ge=0, description="Original price before discount"
+        None, ge=0, le=MAX_PRICE, description="Original price before discount"
     )
     cost_price: Decimal | None = Field(
-        None, ge=0, description="Cost of goods for profit calculation"
+        None, ge=0, le=MAX_PRICE, description="Cost of goods for profit calculation"
     )
     quantity: int | None = Field(None, ge=0, description="Available stock quantity")
     low_stock_threshold: int | None = Field(
@@ -459,6 +471,7 @@ class UpdateProductRequest(BaseModel):
     sale_price: Decimal | None = Field(
         None,
         ge=0,
+        le=MAX_PRICE,
         description=(
             "Scheduled sale price. Send the sale fields together: with a "
             "price to start or change a sale, without one to end it."

@@ -1763,7 +1763,8 @@ async def checkout(
     restrict_to_zones = bool(_ship_settings.get("restrict_to_zones", False))
 
     if not request.selected_shipping_rate_id:
-        if store_has_zones:
+        # restrict_to_zones: no zone means nowhere to ship yet, not free.
+        if store_has_zones or restrict_to_zones:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=("Please select a shipping option before placing your order."),

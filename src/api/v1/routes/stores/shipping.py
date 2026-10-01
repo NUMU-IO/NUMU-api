@@ -16,13 +16,17 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import ValidationError
 
 from src.api.dependencies.auth import get_current_store
-from src.api.dependencies.repositories import get_shipping_zone_repository
+from src.api.dependencies.repositories import (
+    get_onboarding_repository,
+    get_shipping_zone_repository,
+)
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.tenant.shipping import (
     CoverageResponse,
     CreateRateRequest,
     CreateZoneRequest,
     FreeShippingProgressResponse,
+    PresetRequest,
     PresetResponse,
     RateCalculatorRequest,
     RateResponse,
@@ -33,6 +37,10 @@ from src.api.v1.schemas.tenant.shipping import (
     ZoneResponse,
 )
 from src.application.services.shipping_resolver import ShippingResolver
+from src.application.use_cases.onboarding.auto_complete import (
+    try_complete_onboarding_step,
+)
+from src.core.entities.onboarding import OnboardingStepKey
 from src.core.entities.shipping_rate import RateType, ShippingRate, parse_rate_config
 from src.core.entities.shipping_zone import ShippingZone
 from src.core.entities.store import Store
@@ -42,6 +50,7 @@ from src.core.value_objects.geography import (
     get_governorate_by_code,
     resolve_governorate,
 )
+from src.infrastructure.repositories import OnboardingRepository
 from src.infrastructure.repositories.shipping_zone_repository import (
     ShippingZoneRepository,
 )
@@ -274,6 +283,9 @@ async def create_rate(
     request: CreateRateRequest,
     store: Annotated[Store, Depends(get_current_store)],
     repo: Annotated[ShippingZoneRepository, Depends(get_shipping_zone_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
 ):
     zone = await repo.get_zone(zone_id)
     if zone is None or zone.store_id != store.id:
@@ -297,6 +309,11 @@ async def create_rate(
         sort_order=request.sort_order,
     )
     created = await repo.create_rate(rate)
+    # A priced zone is what "shipping is set up" means; nothing earlier is.
+    if created.is_active:
+        await try_complete_onboarding_step(
+            onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
+        )
     return SuccessResponse(data=_rate_to_response(created))
 
 
@@ -394,8 +411,15 @@ async def get_coverage(
 async def apply_egypt_4_zone_preset(
     store: Annotated[Store, Depends(get_current_store)],
     repo: Annotated[ShippingZoneRepository, Depends(get_shipping_zone_repository)],
+    onboarding_repo: Annotated[
+        OnboardingRepository, Depends(get_onboarding_repository)
+    ],
+    request: PresetRequest | None = None,
 ):
     """Create 4 zones with default rates covering all 27 governorates.
+
+    ``rates_cents`` (optional) carries the prices the merchant confirmed,
+    one per zone in preset order; without it the defaults below apply.
 
     Rejects if the store already has any active zones — merchants who
     want to re-apply the preset should first deactivate existing zones
@@ -456,6 +480,12 @@ async def apply_egypt_4_zone_preset(
         ),
     ]
 
+    if request is not None and request.rates_cents is not None:
+        preset_zones = [
+            (*zone[:3], rate, *zone[4:])
+            for zone, rate in zip(preset_zones, request.rates_cents, strict=True)
+        ]
+
     created_zone_ids: list[UUID] = []
     assigned_codes: list[str] = []
 
@@ -501,6 +531,9 @@ async def apply_egypt_4_zone_preset(
         )
         await repo.create_rate(rate_entity)
 
+    await try_complete_onboarding_step(
+        onboarding_repo, store.id, OnboardingStepKey.ADD_SHIPPING
+    )
     return SuccessResponse(
         data=PresetResponse(
             created_zone_ids=created_zone_ids,
