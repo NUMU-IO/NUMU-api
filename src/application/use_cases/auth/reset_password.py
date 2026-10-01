@@ -1,7 +1,10 @@
 """Reset password use case."""
 
+import time
+
 from src.application.dto.auth import PasswordResetDTO
 from src.application.services.password_policy import enforce_password_policy
+from src.application.services.token_revocation_service import TokenRevocationService
 from src.core.exceptions import (
     AuthenticationError,
     EntityNotFoundError,
@@ -20,10 +23,12 @@ class ResetPasswordUseCase:
         user_repository: IUserRepository,
         token_service: ITokenService,
         password_service: IPasswordService,
+        revocation_service: TokenRevocationService,
     ) -> None:
         self.user_repository = user_repository
         self.token_service = token_service
         self.password_service = password_service
+        self.revocation_service = revocation_service
 
     async def execute(self, dto: PasswordResetDTO) -> None:
         """Reset user password using token."""
@@ -53,3 +58,7 @@ class ResetPasswordUseCase:
         # Update user password
         user.hashed_password = new_hashed_password
         await self.user_repository.update(user)
+
+        # Whoever knew the old password (the reason for a reset, often) is
+        # signed out everywhere.
+        await self.revocation_service.revoke_all(user.id, int(time.time()))

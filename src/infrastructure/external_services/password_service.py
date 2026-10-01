@@ -16,7 +16,9 @@ class PasswordService(IPasswordService):
         return self._context.hash(password)
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        """Verify a password against its hash."""
+        """Verify a password against its hash. No password set never matches."""
+        if not hashed_password:
+            return False
         return self._context.verify(plain_password, hashed_password)
 
 
