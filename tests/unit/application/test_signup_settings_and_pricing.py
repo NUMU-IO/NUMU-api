@@ -157,3 +157,34 @@ async def test_public_pricing_paid_prices_always_match_plan_catalog(test_session
     assert by_key["pro"]["price_annual"] == pro.annual_price_piasters // 100
     # Marketing copy from the stored config is preserved.
     assert by_key["pro"]["popular"] is True
+
+
+def test_card_limits_come_from_the_entitlement_catalog():
+    from src.api.v1.routes.public.landing import _apply_live_limits
+    from src.core.entitlements import UNLIMITED
+
+    grants = {
+        "starter": {"orders_per_month": UNLIMITED, "products": UNLIMITED, "stores": 1},
+        "pro": {"orders_per_month": UNLIMITED, "products": UNLIMITED, "stores": 3},
+        "payg": {"orders_per_month": UNLIMITED, "products": 100, "stores": 1},
+    }
+    stale = [
+        {"en": "100 products", "ar": "١٠٠ منتج"},
+        {"en": "Multi-store", "ar": "متاجر متعددة"},
+        {"en": "Product reviews", "ar": "تقييمات المنتجات"},
+        {"en": "3% of each paid order", "ar": "3% من كل أوردر اتدفع"},
+    ]
+
+    def lines(key):
+        card = _apply_live_limits({"key": key, "features": list(stale)}, grants)
+        return [f["en"] for f in card["features"]]
+
+    assert lines("starter") == [
+        "Unlimited orders",
+        "Unlimited products",
+        "Product reviews",
+        "3% of each paid order",
+    ]
+    assert "3 stores" in lines("pro")
+    assert "100 products" in lines("payg")
+    assert "Multi-store" not in lines("pro")

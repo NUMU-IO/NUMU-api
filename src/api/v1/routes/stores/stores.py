@@ -273,6 +273,8 @@ async def create_store(
                 email=str(user.email),
                 merchant_name=user.first_name or "",
                 language=user.language or request.default_language or "ar",
+                store_name=result.name,
+                store_url=result.store_url,
             )
         except Exception:
             logger.warning("welcome_email_dispatch_failed", exc_info=True)

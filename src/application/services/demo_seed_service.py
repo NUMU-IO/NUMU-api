@@ -305,11 +305,37 @@ async def delete_demo_products(session, store_id: UUID) -> int:
     for row in rows:
         await session.delete(row)
     if rows:
+        await session.flush()
+        await _delete_empty_sample_collection(session, store_id)
         logger.info(
             "demo_catalog_removed",
             extra={"store_id": str(store_id), "count": len(rows)},
         )
     return len(rows)
+
+
+async def _delete_empty_sample_collection(session, store_id: UUID) -> None:
+    """The seeded "Starter Collection" goes with its samples — unless the
+    merchant has put a product of their own in it."""
+    from sqlalchemy import exists, select
+
+    from src.infrastructure.database.models.tenant.category import CategoryModel
+    from src.infrastructure.database.models.tenant.product import ProductModel
+
+    collection = await session.scalar(
+        select(CategoryModel).where(
+            CategoryModel.store_id == store_id,
+            CategoryModel.slug == "starter-collection",
+            CategoryModel.extra_data["demo_seed"].as_boolean().is_(True),
+        )
+    )
+    if collection is None:
+        return
+    in_use = await session.scalar(
+        select(exists().where(ProductModel.category_id == collection.id))
+    )
+    if not in_use:
+        await session.delete(collection)
 
 
 async def remove_demo_catalog(store_id: UUID) -> int:

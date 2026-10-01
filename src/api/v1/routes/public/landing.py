@@ -211,8 +211,6 @@ DEFAULT_PRICING_PLANS = {
             "cta": "subscribe",
             "popular": False,
             "features": [
-                {"en": "500 orders/month", "ar": "٥٠٠ أوردر شهريًا"},
-                {"en": "100 products", "ar": "١٠٠ منتج"},
                 {"en": "Custom domain", "ar": "دومين خاص"},
                 {"en": "All premium themes", "ar": "كل الثيمات"},
                 {"en": "Basic analytics", "ar": "تحليلات أساسية"},
@@ -231,13 +229,14 @@ DEFAULT_PRICING_PLANS = {
             "cta": "subscribe",
             "popular": False,
             "features": [
-                {"en": "Unlimited orders", "ar": "أوردرات بلا حدود"},
-                {"en": "100 products", "ar": "١٠٠ منتج"},
                 {"en": "Custom domain", "ar": "دومين خاص"},
                 {"en": "All premium themes", "ar": "كل الثيمات"},
                 {"en": "Discount codes", "ar": "أكواد خصم"},
-                {"en": "3 staff members", "ar": "٣ أعضاء فريق"},
-                {"en": "Webhooks", "ar": "ويب هوكس"},
+                {"en": "3 staff members", "ar": "3 أعضاء فريق"},
+                {
+                    "en": "Connect your other systems (webhooks)",
+                    "ar": "ربط مع أنظمتك التانية",
+                },
             ],
         },
         {
@@ -250,12 +249,11 @@ DEFAULT_PRICING_PLANS = {
             "cta": "subscribe",
             "popular": True,
             "features": [
-                {"en": "Unlimited products", "ar": "منتجات بلا حدود"},
                 {"en": "Advanced analytics", "ar": "تحليلات متقدمة"},
                 {"en": "Automations", "ar": "أتمتة"},
                 {"en": "Abandoned cart recovery", "ar": "استرداد السلات المتروكة"},
-                {"en": "API access", "ar": "وصول API"},
-                {"en": "10 staff members", "ar": "١٠ أعضاء فريق"},
+                {"en": "For developers (API)", "ar": "للمطورين (API)"},
+                {"en": "10 staff members", "ar": "10 أعضاء فريق"},
                 {"en": "Priority support", "ar": "دعم أولوية"},
             ],
         },
@@ -270,17 +268,16 @@ DEFAULT_PRICING_PLANS = {
             "popular": False,
             "features": [
                 {"en": "Everything in Pro", "ar": "كل مميزات برو"},
-                {"en": "Multi-store", "ar": "متاجر متعددة"},
                 {"en": "Dedicated account manager", "ar": "مدير حساب مخصص"},
-                {"en": "SLA & uptime guarantee", "ar": "ضمان SLA"},
+                {"en": "Written uptime guarantee", "ar": "ضمان وقت تشغيل مكتوب"},
                 {"en": "White-glove onboarding", "ar": "إعداد مخصص"},
             ],
         },
     ],
     "promo": {
         "code": "LAUNCH50",
-        "text_en": "Launch offer: 50% off first 3 months with code LAUNCH50",
-        "text_ar": "عرض الإطلاق: ٥٠٪ خصم أول ٣ شهور بكود LAUNCH50",
+        "text_en": "Launch offer: 50% off your first card payment with code LAUNCH50",
+        "text_ar": "عرض الإطلاق: خصم 50% على أول دفعة بالكارت بكود LAUNCH50",
     },
 }
 
@@ -307,12 +304,12 @@ def build_payg_plan_card(commission_percent: float) -> dict:
             {"en": "Unlimited orders", "ar": "أوردرات بلا حدود"},
             {"en": "No monthly subscription", "ar": "بدون اشتراك شهري"},
             {
-                "en": f"{pct_en} per paid order only",
-                "ar": f"{pct_en} فقط على كل طلب مدفوع",
+                "en": f"{pct_en} of each paid order (cash on delivery: once delivered)",
+                "ar": f"{pct_en} من كل أوردر اتدفع (في الدفع عند الاستلام: لما يتسلّم)",
             },
             {
-                "en": "Prepaid wallet — top up as you grow",
-                "ar": "محفظة مسبقة الشحن — اشحن مع نموك",
+                "en": "Top up your wallet with the amount that suits you",
+                "ar": "بتشحن محفظتك بالمبلغ اللي يناسبك",
             },
             {
                 "en": "Rate locked from the day you join",
@@ -321,6 +318,82 @@ def build_payg_plan_card(commission_percent: float) -> dict:
             {"en": "All Starter features", "ar": "كل مميزات ستارتر"},
         ],
     }
+
+
+# (grant key, unit en, unit ar, unlimited en, unlimited ar, words en, words ar)
+_LIVE_LIMITS = (
+    (
+        "orders_per_month",
+        "orders/month",
+        "أوردر شهريًا",
+        "Unlimited orders",
+        "أوردرات بلا حدود",
+        ("order",),
+        ("أوردر", "اوردر", "طلب"),
+    ),
+    (
+        "products",
+        "products",
+        "منتج",
+        "Unlimited products",
+        "منتجات بلا حدود",
+        ("product",),
+        ("منتج",),
+    ),
+    (
+        "stores",
+        "stores",
+        "متاجر",
+        "Unlimited stores",
+        "متاجر بلا حدود",
+        ("store",),
+        ("متجر", "متاجر"),
+    ),
+)
+
+
+def _apply_live_limits(card: dict, grants: dict) -> dict:
+    """Order, product and store lines come from the entitlement catalog, never
+    from stored card copy, so a card can't promise "100 products" on a plan
+    with no cap (or hide the cap on one that has it). Stored lines quoting one
+    of those limits are dropped; everything else is kept as written."""
+    plan = grants.get(card.get("key"), {})
+    generated: list[dict] = []
+    replaced: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+    for key, unit_en, unit_ar, unl_en, unl_ar, words_en, words_ar in _LIVE_LIMITS:
+        value = plan.get(key, UNLIMITED if key == "orders_per_month" else None)
+        if value is None:
+            continue
+        replaced.append((words_en, words_ar))
+        if key == "stores" and value == 1:
+            continue  # one store is the default, not a selling point
+        generated.append(
+            {"en": unl_en, "ar": unl_ar}
+            if value == UNLIMITED
+            else {"en": f"{value:,} {unit_en}", "ar": f"{value:,} {unit_ar}"}
+        )
+
+    def quotes_a_limit(item: dict) -> bool:
+        en, ar = item.get("en", "").lower(), item.get("ar", "")
+        if "%" in en + ar:
+            return False  # the PAYG commission line
+        quantified = (
+            any(ch.isdigit() for ch in en + ar)
+            or "unlimited" in en
+            or "multi" in en
+            or "بلا حدود" in ar
+            or "متعددة" in ar
+        )
+        return quantified and any(
+            any(w in en for w in words_en) or any(w in ar for w in words_ar)
+            for words_en, words_ar in replaced
+        )
+
+    card["features"] = [
+        *generated,
+        *[i for i in card.get("features", []) if not quotes_a_limit(i)],
+    ]
+    return card
 
 
 @router.get(
@@ -374,48 +447,7 @@ async def get_public_pricing_plans(
                 p["price_monthly"] = f.monthly_price_piasters // 100
             if f.annual_price_piasters > 0:
                 p["price_annual"] = f.annual_price_piasters // 100
-            orders = grants.get(key, {}).get("orders_per_month", UNLIMITED)
-            order_feature = {
-                "en": (
-                    "Unlimited orders"
-                    if orders == UNLIMITED
-                    else f"{orders:,} orders/month"
-                ),
-                "ar": (
-                    "أوردرات بلا حدود"
-                    if orders == UNLIMITED
-                    else f"{orders:,} أوردر شهريًا"
-                ),
-            }
-            features = p.get("features", [])
-            p["features"] = [
-                order_feature,
-                *[
-                    item
-                    for item in features
-                    if not (
-                        any(
-                            ch.isdigit()
-                            for ch in f"{item.get('en', '')}{item.get('ar', '')}"
-                        )
-                        and (
-                            "order" in item.get("en", "").lower()
-                            or "أوردر" in item.get("ar", "")
-                            or "اوردر" in item.get("ar", "")
-                            or "طلب" in item.get("ar", "")
-                        )
-                    )
-                    and "unlimited orders" not in item.get("en", "").lower()
-                    and not (
-                        "بلا حدود" in item.get("ar", "")
-                        and (
-                            "أوردر" in item.get("ar", "")
-                            or "اوردر" in item.get("ar", "")
-                            or "طلب" in item.get("ar", "")
-                        )
-                    )
-                ],
-            ]
+            _apply_live_limits(p, grants)
             if key == "trial":
                 p["name_en"] = f"{signup.trial_days}-Day Free Trial"
                 p["name_ar"] = f"تجربة مجانية {signup.trial_days} يوم"
@@ -430,7 +462,7 @@ async def get_public_pricing_plans(
         payg_bps = resolve_commission_bps(
             get_plan_features("payg").commission_bps, None, wallet_admin
         )
-        payg_card = build_payg_plan_card(payg_bps / 100)
+        payg_card = _apply_live_limits(build_payg_plan_card(payg_bps / 100), grants)
         existing = next(
             (i for i, p in enumerate(plans) if p.get("key") == "payg"), None
         )
@@ -438,12 +470,15 @@ async def get_public_pricing_plans(
             # Admin customized the card text — keep it, but the live
             # commission % always wins so marketing can't drift from
             # what the wallet charges.
-            plans[existing] = {
-                **payg_card,
-                **plans[existing],
-                "commission_percent": payg_card["commission_percent"],
-                "cta": "signup_payg",
-            }
+            plans[existing] = _apply_live_limits(
+                {
+                    **payg_card,
+                    **plans[existing],
+                    "commission_percent": payg_card["commission_percent"],
+                    "cta": "signup_payg",
+                },
+                grants,
+            )
         else:
             # After the trial card (or first) — payg is the free tier.
             insert_at = next(
