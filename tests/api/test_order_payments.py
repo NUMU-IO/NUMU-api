@@ -86,6 +86,17 @@ class _FakeProofRepo:
     def __init__(self) -> None:
         self.rows: list = []
 
+    async def find_perceptual_neighbours(
+        self, store_id, phash, *, max_distance, since, limit=500
+    ):
+        return [
+            (p, (p.perceptual_hash ^ phash).bit_count())
+            for p in self.rows
+            if p.store_id == store_id
+            and p.perceptual_hash is not None
+            and (p.perceptual_hash ^ phash).bit_count() <= max_distance
+        ]
+
     async def get_by_idempotency_key(self, store_id, idempotency_key):
         for p in self.rows:
             if p.store_id == store_id and p.idempotency_key == idempotency_key:
@@ -189,6 +200,7 @@ def _order(total: int = 35000, **overrides) -> SimpleNamespace:
         "currency": "EGP",
         "payment_status": PaymentStatus.PENDING,
         "status": OrderStatus.PENDING,
+        "created_at": None,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -236,6 +248,10 @@ async def _record(order, *, amount, method="vodafone_cash", image=None, **kwargs
         method=method,
         reference=kwargs.pop("reference", None),
         idempotency_key=kwargs.pop("idempotency_key", None),
+        # Solid-colour test images all share one pHash, so every multi-payment
+        # test would trip the look-alike confirmation. Tests of that guard
+        # pass False explicitly.
+        confirm_duplicate=kwargs.pop("confirm_duplicate", True),
     )
 
 
@@ -979,3 +995,34 @@ async def test_partial_unique_index_lets_a_voided_reference_be_reused(
     third.mark_approved(USER_ID)
     with pytest.raises(IntegrityError):
         await repo.create(third)
+
+
+@pytest.mark.asyncio
+async def test_look_alike_receipt_on_same_order_needs_confirmation(wiring, paid_calls):
+    """The customer's receipt, re-saved by the merchant, is the
+    same picture in different bytes. SHA-256 misses it; the pHash check on the
+    same order asks for confirmation instead of counting the money twice."""
+    order = _order(total=233000)
+    await _record(order, amount=100000, image=_png((7, 7, 7)))
+
+    with pytest.raises(HTTPException) as exc:
+        await _record(
+            order, amount=100000, image=_png((8, 8, 8)), confirm_duplicate=False
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "POSSIBLE_DUPLICATE_RECEIPT"
+    assert len(wiring.proofs.rows) == 1
+
+    # A genuinely different transfer the merchant confirms still records.
+    await _record(order, amount=100000, image=_png((8, 8, 8)), confirm_duplicate=True)
+    assert len(wiring.proofs.rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_look_alike_receipt_on_another_order_is_not_questioned(
+    wiring, paid_calls
+):
+    """InstaPay screens are a template: across orders, alike is normal."""
+    await _record(_order(), amount=5000, image=_png((7, 7, 7)))
+    await _record(_order(), amount=5000, image=_png((8, 8, 8)), confirm_duplicate=False)
+    assert len(wiring.proofs.rows) == 2

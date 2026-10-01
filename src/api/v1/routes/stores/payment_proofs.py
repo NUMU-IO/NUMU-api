@@ -696,6 +696,40 @@ async def _duplicate_receipt_conflict(
     )
 
 
+# Near-identical, not merely similar: a re-saved or re-sent screenshot lands
+# at 0-2 bits; the "possibly related" review hint uses 8.
+_SAME_RECEIPT_MAX_DISTANCE = 4
+
+
+async def _looks_counted_on_order(
+    proof_repo: PaymentProofRepository, order, phash: int | None
+) -> bool:
+    """True when a near-identical receipt already counts on THIS order.
+
+    The SHA-256 gate only stops the exact same file. A screenshot the
+    customer uploaded and the merchant then saved from WhatsApp is the same
+    picture in different bytes, and could be recorded twice.
+
+    Scoped to the same order and asked as a confirmation, never a hard
+    block: InstaPay's success screen is a fixed template, so two genuine
+    transfers of the same amount can hash alike. Across orders that is the
+    common case, which is why the customer upload path does not gate on
+    pHash at all.
+    """
+    if phash is None:
+        return False
+    neighbours = await proof_repo.find_perceptual_neighbours(
+        order.store_id,
+        phash,
+        max_distance=_SAME_RECEIPT_MAX_DISTANCE,
+        since=order.created_at,
+    )
+    return any(
+        p.order_id == order.id and p.status is not PaymentProofStatus.REJECTED
+        for p, _ in neighbours
+    )
+
+
 @router.post(
     "/orders/{order_id}/payments",
     operation_id="merchant_record_order_payment",
@@ -718,6 +752,7 @@ async def record_order_payment(
     method: Annotated[str, Form()],
     reference: Annotated[str | None, Form()] = None,
     idempotency_key: Annotated[str | None, Form()] = None,
+    confirm_duplicate: Annotated[bool, Form()] = False,
 ) -> SuccessResponse[RecordedPaymentResult]:
     """Attach a receipt and the amount paid; the balance follows.
 
@@ -857,6 +892,21 @@ async def record_order_payment(
     if holder_id is not None:
         raise await _duplicate_receipt_conflict(
             order, holder_id, order_repo, what="reference"
+        )
+    if not confirm_duplicate and await _looks_counted_on_order(
+        proof_repo, order, sanitized.perceptual_hash
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                **_bilingual(
+                    "This receipt looks like one already counted on this order. "
+                    "Record it only if it is a different transfer.",
+                    "الإيصال ده شبه إيصال متحسب بالفعل على الطلب ده. "
+                    "سجّله بس لو دي تحويلة تانية.",
+                ),
+                "code": "POSSIBLE_DUPLICATE_RECEIPT",
+            },
         )
 
     uploaded = await storage_service.upload_file(
