@@ -26,6 +26,7 @@ class UserDTO(BaseDTO):
     updated_at: datetime
     is_active: bool
     trial_ends_at: datetime | None = None
+    language: str | None = None
 
     @classmethod
     def from_entity(cls, entity: User) -> "UserDTO":
@@ -45,6 +46,7 @@ class UserDTO(BaseDTO):
             updated_at=entity.updated_at,
             is_active=entity.is_active,
             trial_ends_at=entity.trial_ends_at,
+            language=entity.language,
         )
 
 

@@ -1,41 +1,20 @@
-"""Password policy validator.
+"""Password length rule.
 
-Policy: minimum 8 characters, at least one uppercase letter,
-one lowercase letter, and one digit.
+Composition rules (upper/lower/digit) were dropped per NIST SP 800-63B;
+the breached-password check lives in
+``src.application.services.password_policy``, which every password-setting
+use case goes through.
 """
-
-import re
 
 from src.core.exceptions import ValidationError
 
 _MIN_LENGTH = 8
-_RE_UPPER = re.compile(r"[A-Z]")
-_RE_LOWER = re.compile(r"[a-z]")
-_RE_DIGIT = re.compile(r"\d")
 
 
 def validate_password(password: str) -> None:
-    """Raise ValidationError if password doesn't meet policy requirements.
-
-    Rules:
-    - At least 8 characters
-    - At least one uppercase letter (A-Z)
-    - At least one lowercase letter (a-z)
-    - At least one digit (0-9)
-    """
-    errors: list[str] = []
-
+    """Raise ValidationError if the password is shorter than 8 characters."""
     if len(password) < _MIN_LENGTH:
-        errors.append(f"at least {_MIN_LENGTH} characters")
-    if not _RE_UPPER.search(password):
-        errors.append("at least one uppercase letter")
-    if not _RE_LOWER.search(password):
-        errors.append("at least one lowercase letter")
-    if not _RE_DIGIT.search(password):
-        errors.append("at least one digit")
-
-    if errors:
         raise ValidationError(
-            f"Password must contain {', '.join(errors)}.",
+            f"Password must be at least {_MIN_LENGTH} characters.",
             field="password",
         )

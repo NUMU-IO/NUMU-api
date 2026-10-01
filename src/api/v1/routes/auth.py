@@ -90,7 +90,11 @@ from src.application.use_cases.auth.two_factor import (
     Verify2FAUseCase,
 )
 from src.config import settings
-from src.core.exceptions import EntityNotFoundError, ValidationError
+from src.core.exceptions import (
+    EntityAlreadyExistsError,
+    EntityNotFoundError,
+    ValidationError,
+)
 from src.core.interfaces.services.token_service import TokenPayload
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.external_services import (
@@ -124,6 +128,7 @@ def _user_response(user) -> UserResponse:
         created_at=str(user.created_at),
         updated_at=str(user.updated_at),
         trial_ends_at=str(user.trial_ends_at) if user.trial_ends_at else None,
+        language=getattr(user, "language", None),
     )
 
 
@@ -314,8 +319,15 @@ async def register(
         first_name=request.first_name,
         last_name=request.last_name,
         phone=request.phone,
+        language=request.language,
     )
-    result = await use_case.execute(dto)
+    try:
+        result = await use_case.execute(dto)
+    except EntityAlreadyExistsError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "EMAIL_ALREADY_REGISTERED", "message": str(e)},
+        ) from e
 
     # Apply admin-controlled signup settings on top of the use case's
     # defaults (the use case stamps the legacy 30-day constant): the
@@ -430,8 +442,9 @@ async def google_oauth(
 ):
     """Authenticate or register a user via Google ID token.
 
-    Expects JSON body: { "id_token": "...", "phone": "...", "attribution": {...} }
-    Only ``id_token`` is required. If the user doesn't exist, creates a new
+    Expects JSON body: { "id_token": "...", "phone": "...", "attribution": {...},
+    "plan_intent": "payg", "referral_code": "...", "language": "ar" }
+    Only ``id_token`` is required; the rest mirror ``/register``. If the user doesn't exist, creates a new
     auto-verified account. If the user exists (by Google ID or email), logs
     them in.
 
@@ -481,12 +494,42 @@ async def google_oauth(
     from src.application.services.merchant_leads import Attribution, record_lead
 
     raw_attr = body.get("attribution")
+    # Same contract as /register, validated by hand because this route reads
+    # the raw body: unknown values are dropped, never stored.
+    plan_intent = body.get("plan_intent")
+    plan_intent = plan_intent if plan_intent in ("payg", "starter", "pro") else None
+    language = body.get("language") if body.get("language") in ("ar", "en") else None
+    referral_code = body.get("referral_code")
+    referral_code = (
+        referral_code[:32] if isinstance(referral_code, str) and referral_code else None
+    )
+    from sqlalchemy import update as sa_update
+
+    from src.infrastructure.database.models.public.user import UserModel
+
+    # First touch only: a returning user's earlier choices stand.
+    if plan_intent:
+        await db.execute(
+            sa_update(UserModel)
+            .where(UserModel.id == result.user.id, UserModel.plan_intent.is_(None))
+            .values(plan_intent=plan_intent)
+        )
+    if language and result.user.language is None:
+        await db.execute(
+            sa_update(UserModel)
+            .where(UserModel.id == result.user.id, UserModel.language.is_(None))
+            .values(language=language)
+        )
+        result.user.language = language
     await record_lead(
         db,
         email=str(result.user.email),
         source="signup",
         name=f"{result.user.first_name} {result.user.last_name}".strip(),
         phone=result.user.phone,
+        language=language,
+        plan_intent=plan_intent,
+        referral_code=referral_code,
         user_id=result.user.id,
         status="registered",
         registered_at=datetime.now(UTC),
@@ -546,22 +589,6 @@ async def verify_email(
     )
     await use_case.execute(request.token)
 
-    # Dispatch welcome email now that the address is verified
-    try:
-        payload = token_service.verify_token(request.token)
-        user = await user_repo.get_by_id(payload.user_id)
-        if user:
-            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
-                send_welcome_email_task,
-            )
-
-            send_welcome_email_task.delay(
-                email=str(user.email),
-                merchant_name=user.first_name or "",
-            )
-    except Exception:
-        pass  # Non-critical; don't block verification response
-
     return SuccessResponse(
         data=MessageResponse(message="Email verified successfully"),
         message="Email verified successfully",
@@ -571,6 +598,9 @@ async def verify_email(
 # ---------------------------------------------------------------------------
 # Verify Email by Code
 # ---------------------------------------------------------------------------
+
+
+MAX_VERIFY_CODE_ATTEMPTS = 5
 
 
 @router.post(
@@ -589,12 +619,42 @@ async def verify_email_code(
 
     cache = RedisCacheService()
     cache_key = f"email_verify_code:{user_id}"
+    attempts_key = f"email_verify_attempts:{user_id}"
     stored_code = await cache.get(cache_key)
 
-    if not stored_code or stored_code != request.code:
+    if not stored_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code",
+            detail={
+                "code": "VERIFICATION_CODE_EXPIRED",
+                "message": "Verification code expired. Request a new one.",
+            },
+        )
+    if stored_code != request.code:
+        # SET NX EX then INCR: atomic under parallel guesses, and the counter
+        # expires with the code it guards.
+        await cache.set_if_absent(attempts_key, 0, expire=86400)
+        attempts_left = max(
+            0, MAX_VERIFY_CODE_ATTEMPTS - await cache.increment(attempts_key)
+        )
+        if attempts_left == 0:
+            await cache.delete(cache_key)
+            await cache.delete(attempts_key)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "VERIFICATION_CODE_LOCKED",
+                    "message": "Too many wrong codes. Request a new one.",
+                    "attempts_left": 0,
+                },
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "INVALID_VERIFICATION_CODE",
+                "message": "Invalid verification code",
+                "attempts_left": attempts_left,
+            },
         )
 
     # Code matches — verify the user
@@ -606,21 +666,9 @@ async def verify_email_code(
         user.verify_email()
         await user_repo.update(user)
 
-        # Dispatch welcome email now that the address is verified
-        try:
-            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
-                send_welcome_email_task,
-            )
-
-            send_welcome_email_task.delay(
-                email=str(user.email),
-                merchant_name=user.first_name or "",
-            )
-        except Exception:
-            pass  # Non-critical; don't block verification response
-
     # Clean up the used code
     await cache.delete(cache_key)
+    await cache.delete(attempts_key)
 
     return SuccessResponse(
         data=MessageResponse(message="Email verified successfully"),
@@ -668,6 +716,7 @@ async def resend_verification(
         code,
         expire=86400,  # 24 hours
     )
+    await cache.delete(f"email_verify_attempts:{user_id}")
 
     # Generate new verification token (link)
     verification_token = token_service.create_email_verification_token(user)
@@ -677,6 +726,7 @@ async def resend_verification(
         email=str(user.email),
         token=verification_token,
         code=code,
+        language=user.language or "ar",
     )
 
     return SuccessResponse(
@@ -1036,6 +1086,7 @@ async def get_current_user(
             created_at=str(user.created_at),
             updated_at=str(user.updated_at),
             trial_ends_at=str(user.trial_ends_at) if user.trial_ends_at else None,
+            language=user.language,
             tenant=tenant_info,
         ),
         message="User retrieved successfully",
@@ -1301,6 +1352,7 @@ async def update_profile(
             phone=request.phone,
             avatar_url=request.avatar_url,
             email=request.email,
+            language=request.language,
         )
 
         result = await use_case.execute(
@@ -1325,6 +1377,7 @@ async def update_profile(
                 trial_ends_at=str(getattr(result, "trial_ends_at", None))
                 if getattr(result, "trial_ends_at", None)
                 else None,
+                language=result.language,
             ),
             message="Profile updated successfully",
         )

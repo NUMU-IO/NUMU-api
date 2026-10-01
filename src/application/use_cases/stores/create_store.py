@@ -16,51 +16,12 @@ from src.core.interfaces.repositories.onboarding_repository import (
     IOnboardingRepository,
 )
 from src.core.interfaces.repositories.store_repository import IStoreRepository
+from src.core.reserved_subdomains import is_reserved_subdomain
 from src.core.value_objects.money import Currency
 from src.infrastructure.database.models.public.tenant import TenantLifecycleState
 from src.infrastructure.tenancy.service import TenantService
 
 logger = logging.getLogger(__name__)
-
-# Reserved subdomains that cannot be used
-RESERVED_SUBDOMAINS = {
-    "www",
-    "api",
-    "admin",
-    "dashboard",
-    "app",
-    "mail",
-    "email",
-    "ftp",
-    "ssh",
-    "sftp",
-    "cpanel",
-    "webmail",
-    "ns1",
-    "ns2",
-    "shop",
-    "store",
-    "checkout",
-    "pay",
-    "payment",
-    "billing",
-    "support",
-    "help",
-    "docs",
-    "blog",
-    "cdn",
-    "static",
-    "assets",
-    "test",
-    "staging",
-    "dev",
-    "demo",
-    "beta",
-    "alpha",
-    "numu",
-    "numo",
-    "numa",
-}
 
 
 def validate_subdomain(subdomain: str) -> str:
@@ -103,7 +64,7 @@ def validate_subdomain(subdomain: str) -> str:
         )
 
     # Check reserved subdomains
-    if subdomain in RESERVED_SUBDOMAINS:
+    if is_reserved_subdomain(subdomain):
         raise ValidationError(
             f"'{subdomain}' is a reserved subdomain", field="subdomain"
         )
@@ -216,6 +177,11 @@ class CreateStoreUseCase:
             "seo": {
                 "robots_indexing_enabled": True,
             },
+            # No silent free "Standard Shipping" for destinations no zone
+            # covers: until the merchant prices a zone, checkout shows "no
+            # shipping options" instead of shipping every order at their
+            # cost. Existing stores keep the old default (the key is absent).
+            "shipping": {"restrict_to_zones": True},
         }
 
         # tenant.is_active gates TenantMiddleware routing — never leave a

@@ -41,7 +41,7 @@ from src.api.v1.schemas.public.waitlist import (
     BetaRedeemRequest,
 )
 from src.application.dto.auth import RegisterDTO
-from src.application.dto.store import CreateStoreDTO
+from src.application.dto.store import CreateStoreDTO, StoreDTO
 from src.application.use_cases.auth import RegisterUserUseCase
 from src.application.use_cases.stores import CreateStoreUseCase
 from src.config import settings
@@ -87,7 +87,7 @@ def _user_response(user) -> UserResponse:
     )
 
 
-def _send_welcome_email(email: str, first_name: str | None) -> None:
+def _send_welcome_email(email: str, first_name: str | None, store: StoreDTO) -> None:
     """Best-effort welcome-email dispatch. Never blocks the response."""
     try:
         from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
@@ -97,6 +97,8 @@ def _send_welcome_email(email: str, first_name: str | None) -> None:
         send_welcome_email_task.delay(
             email=email,
             merchant_name=first_name or "",
+            store_name=store.name,
+            store_url=store.store_url,
         )
     except Exception:
         logger.warning("welcome_email_dispatch_failed", exc_info=True)
@@ -108,7 +110,7 @@ async def _create_store_for_user(
     owner_id: UUID,
     store_name: str,
     subdomain: str,
-) -> None:
+) -> StoreDTO:
     """Create the store + tenant for a freshly-redeemed beta merchant."""
     store_repo = StoreRepository(db)
     onboarding_repo = OnboardingRepository(db)
@@ -120,7 +122,7 @@ async def _create_store_for_user(
         onboarding_repository=onboarding_repo,
     )
 
-    await create_store_use_case.execute(
+    return await create_store_use_case.execute(
         CreateStoreDTO(name=store_name, subdomain=subdomain),
         owner_id=owner_id,
         plan="beta",
@@ -257,7 +259,7 @@ async def redeem_beta_invite(
         await user_repo.update(fresh_user)
 
     # Step 3 — create the store
-    await _create_store_for_user(
+    store = await _create_store_for_user(
         db,
         owner_id=new_user_id,
         store_name=request.store_name,
@@ -268,7 +270,7 @@ async def redeem_beta_invite(
     await _mark_converted(waitlist_repo, entry)
 
     # Step 5 — fire the welcome email (non-blocking)
-    _send_welcome_email(canonical_email, request.first_name)
+    _send_welcome_email(canonical_email, request.first_name, store)
 
     logger.info(
         "beta_invite_redeemed",
@@ -400,7 +402,7 @@ async def redeem_beta_invite_google(
     created_user = await user_repo.create(new_user)
 
     # Step 6 — create the store
-    await _create_store_for_user(
+    store = await _create_store_for_user(
         db,
         owner_id=created_user.id,
         store_name=request.store_name,
@@ -411,7 +413,7 @@ async def redeem_beta_invite_google(
     await _mark_converted(waitlist_repo, entry)
 
     # Step 8 — fire welcome email (non-blocking)
-    _send_welcome_email(canonical_email, given_name)
+    _send_welcome_email(canonical_email, given_name, store)
 
     # Step 9 — issue auth tokens
     access_token = token_service.create_access_token(created_user)

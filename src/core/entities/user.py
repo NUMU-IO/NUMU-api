@@ -51,6 +51,7 @@ class User(BaseEntity):
     trial_ends_at: datetime | None = None
     auth_provider: str | None = None  # "google", None = email/password
     google_id: str | None = None  # Google sub claim
+    language: str | None = None  # "ar" | "en"; None = never chosen (Arabic)
 
     @property
     def full_name(self) -> str:

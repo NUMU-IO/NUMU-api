@@ -20,6 +20,8 @@ class TestAuthRoutes:
         assert "user" in data["data"]
         assert "tokens" in data["data"]
         assert data["data"]["user"]["email"] == sample_user_data["email"]
+        # The signup page's language (schema default "ar") is kept on the user.
+        assert data["data"]["user"]["language"] == "ar"
         assert data["data"]["tokens"]["token_type"] == "bearer"
 
     @pytest.mark.asyncio
@@ -33,12 +35,8 @@ class TestAuthRoutes:
         # Try to register again with same email
         response = await client.post("/api/v1/auth/register", json=sample_user_data)
 
-        assert response.status_code == 400
-        data = response.json()
-        assert (
-            "already exists" in data["message"].lower()
-            or "duplicate" in data["message"].lower()
-        )
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "EMAIL_ALREADY_REGISTERED"
 
     @pytest.mark.asyncio
     async def test_register_invalid_email(

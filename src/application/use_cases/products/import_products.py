@@ -351,6 +351,20 @@ class ImportProductsUseCase:
                 await self._sync_variant_row(created, quantity, sku)
                 result.created += 1
 
+        # An imported catalog retires the starter samples, same as a product
+        # created by hand (that path does it from ProductCreatedEvent).
+        session = getattr(self.product_repository, "session", None)
+        if result.created and session is not None:
+            from src.application.services.demo_seed_service import (
+                delete_demo_products,
+            )
+
+            try:
+                async with session.begin_nested():
+                    await delete_demo_products(session, store_id)
+            except Exception:
+                logger.warning("import_demo_catalog_remove_failed", exc_info=True)
+
         return result
 
     async def _sync_variant_row(self, product, quantity: int, sku: str | None) -> None:

@@ -32,6 +32,7 @@ from src.api.dependencies import (
     verify_store_ownership,
 )
 from src.api.dependencies.database import get_db
+from src.api.v1.schemas.tenant.product import MAX_PRICE
 from src.application.services.variant_sync_service import recompute_product_quantity
 from src.core.entities.store import Store
 from src.core.entities.variant import FulfillmentType, Variant
@@ -84,10 +85,10 @@ class CreateVariantRequest(BaseModel):
     optional with sensible defaults."""
 
     option_values: dict[str, str] = Field(default_factory=dict)
-    price: Decimal = Field(..., ge=0)
+    price: Decimal = Field(..., ge=0, le=MAX_PRICE)
     price_currency: str = Field(default="EGP", max_length=3)
-    compare_at_price: Decimal | None = Field(None, ge=0)
-    cost_price: Decimal | None = Field(None, ge=0)
+    compare_at_price: Decimal | None = Field(None, ge=0, le=MAX_PRICE)
+    cost_price: Decimal | None = Field(None, ge=0, le=MAX_PRICE)
     sku: str | None = Field(None, max_length=100)
     barcode: str | None = Field(None, max_length=100)
     inventory_quantity: int = Field(default=0, ge=0)
@@ -108,10 +109,10 @@ class UpdateVariantRequest(BaseModel):
     """
 
     option_values: dict[str, str] | None = None
-    price: Decimal | None = Field(None, ge=0)
+    price: Decimal | None = Field(None, ge=0, le=MAX_PRICE)
     price_currency: str | None = Field(None, max_length=3)
-    compare_at_price: Decimal | None = Field(None, ge=0)
-    cost_price: Decimal | None = Field(None, ge=0)
+    compare_at_price: Decimal | None = Field(None, ge=0, le=MAX_PRICE)
+    cost_price: Decimal | None = Field(None, ge=0, le=MAX_PRICE)
     sku: str | None = Field(None, max_length=100)
     barcode: str | None = Field(None, max_length=100)
     inventory_quantity: int | None = Field(None, ge=0)

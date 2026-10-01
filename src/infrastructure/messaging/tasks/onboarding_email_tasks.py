@@ -42,13 +42,17 @@ def send_welcome_email_task(
     merchant_name: str,
     dashboard_url: str = "https://merchant.numueg.app",
     language: str = "ar",
+    store_name: str | None = None,
+    store_url: str | None = None,
 ):
-    """Send welcome email on merchant registration.
+    """Send the welcome email when the merchant's first store is created.
 
     Args:
         email: Merchant email address.
         merchant_name: Merchant first name or business name.
         dashboard_url: URL to the merchant dashboard.
+        store_name: The new store's name, shown in the greeting.
+        store_url: The store's public URL (custom domain first).
     """
     from src.core.interfaces.services.email_service import EmailMessage
     from src.infrastructure.external_services.resend.email_service import (
@@ -62,7 +66,11 @@ def send_welcome_email_task(
     try:
         service = ResendEmailService()
         html = WELCOME_TEMPLATE["html_fn"](
-            merchant_name, dashboard_url, language=language
+            merchant_name,
+            dashboard_url,
+            language=language,
+            store_name=store_name,
+            store_url=store_url,
         )
         message = EmailMessage(
             to=email,

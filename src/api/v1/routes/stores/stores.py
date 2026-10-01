@@ -41,12 +41,10 @@ from src.application.use_cases.stores import (
     ListStoresUseCase,
     UpdateStoreUseCase,
 )
-from src.application.use_cases.stores.create_store import (
-    RESERVED_SUBDOMAINS,
-    validate_subdomain,
-)
+from src.application.use_cases.stores.create_store import validate_subdomain
 from src.core.entities.store import Store
 from src.core.exceptions import ValidationError
+from src.core.reserved_subdomains import is_reserved_subdomain
 
 logger = logging.getLogger(__name__)
 from src.core.value_objects.money import Currency
@@ -130,7 +128,7 @@ async def check_subdomain(
     subdomain = request.subdomain.lower().strip()
 
     # Check reserved
-    if subdomain in RESERVED_SUBDOMAINS:
+    if is_reserved_subdomain(subdomain):
         return SuccessResponse(
             data=CheckSubdomainResponse(
                 subdomain=subdomain,
@@ -261,6 +259,25 @@ async def create_store(
     result = await use_case.execute(
         dto, owner_id=user_id, plan=plan, trial_expires_at=trial_expires_at
     )
+
+    # The welcome email congratulates them on the store, so it goes out with
+    # the first one (it used to fire on email verification, before any store
+    # existed). `primary` was looked up before this store was created.
+    if primary is None:
+        try:
+            from src.infrastructure.messaging.tasks.onboarding_email_tasks import (
+                send_welcome_email_task,
+            )
+
+            send_welcome_email_task.delay(
+                email=str(user.email),
+                merchant_name=user.first_name or "",
+                language=user.language or request.default_language or "ar",
+                store_name=result.name,
+                store_url=result.store_url,
+            )
+        except Exception:
+            logger.warning("welcome_email_dispatch_failed", exc_info=True)
 
     # Landing plan intent: a visitor who clicked "Pay as you Grow" on the
     # pricing page goes straight onto payg — no billing page detour. The

@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from src.core.reserved_subdomains import is_reserved_subdomain
+
 
 class CreateTenantRequest(BaseModel):
     """Request schema for creating a new tenant/store."""
@@ -48,18 +50,7 @@ class CreateTenantRequest(BaseModel):
                 "Cannot start or end with a hyphen."
             )
 
-        # Reserved subdomains
-        reserved = {
-            "www",
-            "api",
-            "admin",
-            "app",
-            "dashboard",
-            "mail",
-            "ftp",
-            "localhost",
-        }
-        if v in reserved:
+        if is_reserved_subdomain(v):
             raise ValueError(f"Subdomain '{v}' is reserved and cannot be used")
 
         return v

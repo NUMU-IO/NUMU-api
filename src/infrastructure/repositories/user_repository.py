@@ -35,6 +35,7 @@ class UserRepository(IUserRepository):
             trial_ends_at=model.trial_ends_at,
             auth_provider=model.auth_provider,
             google_id=model.google_id,
+            language=model.language,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -56,6 +57,7 @@ class UserRepository(IUserRepository):
             trial_ends_at=entity.trial_ends_at,
             auth_provider=entity.auth_provider,
             google_id=entity.google_id,
+            language=entity.language,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
@@ -104,6 +106,7 @@ class UserRepository(IUserRepository):
             model.last_login_at = entity.last_login_at
             model.auth_provider = entity.auth_provider
             model.google_id = entity.google_id
+            model.language = entity.language
             await self.session.flush()
             await self.session.refresh(model)
             return self._to_entity(model)

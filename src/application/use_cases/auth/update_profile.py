@@ -22,6 +22,7 @@ class UpdateProfileDTO:
     # cleared) — nothing in the merchant path gates on verification, so the
     # account keeps working; auth emails simply go to the new address.
     email: str | None = None
+    language: str | None = None
 
 
 @dataclass
@@ -41,6 +42,7 @@ class UserProfileDTO:
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    language: str | None = None
 
 
 class UpdateProfileUseCase:
@@ -81,6 +83,9 @@ class UpdateProfileUseCase:
                 # The new address has never been verified.
                 user.email_verified_at = None
 
+        if dto.language is not None:
+            user.language = dto.language
+
         user.touch()
 
         # Save updated user
@@ -100,4 +105,5 @@ class UpdateProfileUseCase:
             is_active=updated_user.is_active,
             created_at=updated_user.created_at,
             updated_at=updated_user.updated_at,
+            language=updated_user.language,
         )

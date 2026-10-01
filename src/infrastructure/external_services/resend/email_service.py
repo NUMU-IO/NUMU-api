@@ -254,7 +254,7 @@ class ResendEmailService(IEmailService):
     ) -> bool:
         """Send email verification email with a 6-digit code and a verification link.
 
-        Egyptian Arabic by default — matches NUMU brand identity.
+        Egyptian Arabic by default, English when ``language="en"``.
 
         ``store_id`` is optional and almost never supplied — this email
         usually fires before a tenant/store even exists. When supplied,
@@ -267,38 +267,64 @@ class ResendEmailService(IEmailService):
 
         # Point the verification link at the merchant hub (not the landing) —
         # that's where the authenticated session lives and the canonical
-        # verify + onboarding flow runs. cors_origins[0] is typically the
-        # landing, whose verify page only forwards here anyway. Mirrors the
-        # FRONTEND_URL default used by notification_service.
-        frontend_url = getattr(settings, "FRONTEND_URL", "https://merchant.numueg.app")
-        verify_url = f"{frontend_url}/verify-email?token={token}"
+        # verify + onboarding flow runs.
+        verify_url = (
+            f"{settings.merchant_hub_url.rstrip('/')}/verify-email?token={token}"
+        )
         code_display = code or "------"
+        lang = "en" if language == "en" else "ar"
+        c = {
+            "ar": {
+                "title": "تأكيد البريد الإلكتروني",
+                "subtitle": "خطوة واحدة وخلصت",
+                "lead": 'أهلاً بيك في <span class="brand">نُمو</span>،',
+                "enter": "دخّل الكود ده في لوحة التحكم عشان تأكّد إيميلك:",
+                "valid": "الكود ده صلاحيته ٢٤ ساعة",
+                "or": "أو اضغط الزرار ده عشان تأكّد على طول:",
+                "btn": "تأكيد الإيميل",
+                "ignore": "لو ماعملتش حساب على نُمو، تجاهل الإيميل ده ببساطة.",
+                "preheader": "كود تأكيد إيميلك على نُمو",
+                "subject": "تأكيد إيميلك على نُمو",
+            },
+            "en": {
+                "title": "Confirm your email",
+                "subtitle": "One step and you're done",
+                "lead": 'Welcome to <span class="brand">numu</span>,',
+                "enter": "Enter this code in your dashboard to confirm your email:",
+                "valid": "This code is valid for 24 hours",
+                "or": "Or press this button to confirm right away:",
+                "btn": "Confirm email",
+                "ignore": "If you didn't create a numu account, just ignore this email.",
+                "preheader": "Your numu email confirmation code",
+                "subject": "Confirm your email on numu",
+            },
+        }[lang]
 
         body = f"""
-        {header("تأكيد البريد الإلكتروني", "خطوة واحدة وخلصت", language="ar")}
+        {header(c["title"], c["subtitle"], language=lang)}
         <div class="body">
-            <p class="lead">أهلاً بيك في <span class="brand">نُمو</span>،</p>
-            <p>دخّل الكود ده في لوحة التحكم عشان تأكّد إيميلك:</p>
+            <p class="lead">{c["lead"]}</p>
+            <p>{c["enter"]}</p>
 
             <div class="code-box">
                 <p class="digits">{code_display}</p>
-                <p class="hint">الكود ده صلاحيته ٢٤ ساعة</p>
+                <p class="hint">{c["valid"]}</p>
             </div>
 
             <hr class="divider">
 
-            <p>أو اضغط الزرار ده عشان تأكّد على طول:</p>
+            <p>{c["or"]}</p>
             <p class="center" style="margin:20px 0;">
-                <a href="{verify_url}" class="btn">تأكيد الإيميل</a>
+                <a href="{verify_url}" class="btn">{c["btn"]}</a>
             </p>
 
             <p class="muted" style="margin-top:24px;">
-                لو ماعملتش حساب على نُمو، تجاهل الإيميل ده ببساطة.
+                {c["ignore"]}
             </p>
         </div>"""
 
-        legacy_html = wrap(body, language="ar", preheader="كود تأكيد إيميلك على نُمو")
-        legacy_subject = "تأكيد إيميلك على نُمو"
+        legacy_html = wrap(body, language=lang, preheader=c["preheader"])
+        legacy_subject = c["subject"]
 
         rendered = await self._render_or_legacy(
             event_type="email_verification",
@@ -470,34 +496,62 @@ class ResendEmailService(IEmailService):
         user_name: str | None = None,
         language: str = "ar",
     ) -> bool:
-        """Send password reset email — Egyptian Arabic, NUMU brand."""
+        """Send password reset email in Egyptian Arabic or English, NUMU brand."""
         from src.infrastructure.external_services.resend.email_templates._base import (
             header,
             wrap,
         )
 
-        reset_url = f"{settings.cors_origins[0]}/reset-password?token={token}"
+        lang = "en" if language == "en" else "ar"
+        # lang: the reset page opens in the language this email is written in.
+        reset_url = (
+            f"{settings.merchant_hub_url.rstrip('/')}/reset-password"
+            f"?token={token}&lang={lang}"
+        )
+
+        c = {
+            "ar": {
+                "title": "إعادة تعيين كلمة المرور",
+                "subtitle": "طلبنا تغيير الباسورد",
+                "lead": "أهلاً بيك،",
+                "intro": 'وصلنا طلب لإعادة تعيين كلمة المرور بتاعتك على <span class="brand">نُمو</span>. اضغط على الزرار ده عشان تظبط باسورد جديد:',
+                "btn": "إعادة تعيين كلمة المرور",
+                "valid": "اللينك ده صلاحيته ساعة واحدة بس.",
+                "ignore": "لو ماطلبتش إعادة تعيين كلمة المرور، تجاهل الإيميل ده وحسابك في أمان.",
+                "preheader": "إعادة تعيين كلمة المرور بتاعتك على نُمو",
+                "subject": "إعادة تعيين كلمة المرور — نُمو",
+            },
+            "en": {
+                "title": "Reset your password",
+                "subtitle": "A password change was requested",
+                "lead": "Hi,",
+                "intro": 'We got a request to reset your <span class="brand">numu</span> password. Press this button to set a new one:',
+                "btn": "Reset password",
+                "valid": "This link is valid for one hour only.",
+                "ignore": "If you didn't ask to reset your password, ignore this email; your account is safe.",
+                "preheader": "Reset your numu password",
+                "subject": "Reset your password — numu",
+            },
+        }[lang]
 
         body = f"""
-        {header("إعادة تعيين كلمة المرور", "طلبنا تغيير الباسورد", language="ar")}
+        {header(c["title"], c["subtitle"], language=lang)}
         <div class="body">
-            <p class="lead">أهلاً بيك،</p>
-            <p>وصلنا طلب لإعادة تعيين كلمة المرور بتاعتك على <span class="brand">نُمو</span>. اضغط على الزرار ده عشان تظبط باسورد جديد:</p>
+            <p class="lead">{c["lead"]}</p>
+            <p>{c["intro"]}</p>
 
             <p class="center" style="margin:28px 0;">
-                <a href="{reset_url}" class="btn">إعادة تعيين كلمة المرور</a>
+                <a href="{reset_url}" class="btn">{c["btn"]}</a>
             </p>
 
             <hr class="divider">
 
-            <p class="muted">اللينك ده صلاحيته ساعة واحدة بس.</p>
-            <p class="muted">لو ماطلبتش إعادة تعيين كلمة المرور، تجاهل الإيميل ده وحسابك في أمان.</p>
+            <p class="muted">{c["valid"]}</p>
+            <p class="muted">{c["ignore"]}</p>
         </div>"""
 
-        legacy_html = wrap(
-            body, language="ar", preheader="إعادة تعيين كلمة المرور بتاعتك على نُمو"
-        )
-        legacy_subject = "إعادة تعيين كلمة المرور — نُمو"
+        legacy_html = wrap(body, language=lang, preheader=c["preheader"])
+        legacy_subject = c["subject"]
 
         rendered = await self._render_or_legacy(
             event_type="password_reset",

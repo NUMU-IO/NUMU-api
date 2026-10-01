@@ -614,11 +614,13 @@ async def update_payment_settings(
     store.settings = settings
     await store_repo.update(store)
 
-    # Auto-complete configure_payment onboarding step when any method is enabled
+    # Auto-complete configure_payment only once an online method is enabled
+    # AND configured. COD is on for every store from day one, so counting it
+    # ticked "Activate payments" for stores that could take nothing else.
     any_enabled = any(
         payment_settings.get(m, {}).get("enabled", False)
+        and payment_settings.get(m, {}).get("is_configured", False)
         for m in (
-            "cod",
             "fawry",
             "fawaterak",
             "paymob",

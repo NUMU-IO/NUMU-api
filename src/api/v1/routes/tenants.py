@@ -31,6 +31,7 @@ from src.application.services.api_access import decide as decide_api_access
 from src.application.services.audit_service import AuditService
 from src.application.services.entitlement_service import plan_grants
 from src.config import settings
+from src.core.reserved_subdomains import is_reserved_subdomain
 from src.infrastructure.database.models.public.entitlements import (
     EntitlementOverrideModel,
 )
@@ -117,6 +118,9 @@ async def check_subdomain_availability(
     """Check if a subdomain is available."""
     # Ensure we're querying public schema
     await db.execute(text("SET search_path TO public"))
+
+    if is_reserved_subdomain(subdomain):
+        return {"subdomain": subdomain.lower(), "available": False}
 
     tenant_repo = TenantRepository(db)
     existing = await tenant_repo.get_by_subdomain(subdomain.lower())

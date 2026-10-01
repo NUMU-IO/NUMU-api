@@ -1,13 +1,15 @@
 """Onboarding email templates for merchant registration flow.
 
 Sent at four milestones:
-1. Welcome — on merchant registration
+1. Welcome — when the merchant creates their first store
 2. First product added
 3. First order received
 4. Store approved (live)
 
 Egyptian Arabic ("ar") is the default. Brand chrome lives in `_base`.
 """
+
+from html import escape
 
 from src.infrastructure.external_services.resend.email_templates._base import (
     GOLD,
@@ -21,62 +23,64 @@ from src.infrastructure.external_services.resend.email_templates._base import (
 
 _WELCOME = {
     "ar": {
-        "title": 'أهلاً بيك في <span class="brand">نُمو</span>',
-        "subtitle": "رحلتك مع التجارة الإلكترونية بتبدأ من هنا",
-        "greeting": "أهلاً {merchant_name}،",
-        "intro": 'مبروك على إنشاء متجرك على <span class="brand">نُمو</span>! انت دلوقتي جزء من أسرع منصة تجارة إلكترونية في مصر.',
-        "next_steps": "الخطوات الجاية",
-        "step_label": "الخطوة",
-        "steps": [
-            "ضيف أول منتج في متجرك",
-            "اظبط طرق الدفع (باي موب، فوري، الدفع عند الاستلام)",
-            "جهّز الشحن مع بوسطة",
-            "شارك لينك متجرك وابدأ البيع",
-        ],
-        "btn": "روح للوحة التحكم",
+        "title": 'متجرك جاهز على <span class="brand">نُمو</span>',
+        "subtitle": "الخطوة الجاية: أول منتج",
+        "greeting": "أهلاً يا {merchant_name}!",
+        "greeting_anon": "أهلاً!",
+        "ready": "متجرك «{store_name}» جاهز على {store_link}",
+        "ready_anon": "متجرك جاهز على {store_link}",
+        "next": "الخطوة الجاية: ضيف أول منتج.",
+        "btn": "ضيف أول منتج",
         "help": "محتاج مساعدة؟ فريق الدعم موجود عشانك في أي وقت.",
-        "preheader": "أهلاً بيك في نُمو — يلا نبني متجرك",
+        "preheader": "متجرك جاهز — ضيف أول منتج",
     },
     "en": {
-        "title": "Welcome to NUMU",
-        "subtitle": "Your e-commerce journey starts here",
-        "greeting": "Hi {merchant_name},",
-        "intro": "Congratulations on creating your NUMU store! You're now part of Egypt's fastest-growing e-commerce platform.",
-        "next_steps": "Next Steps",
-        "step_label": "Step",
-        "steps": [
-            "Add your first product to your store",
-            "Configure payment methods (Paymob, Fawry, COD)",
-            "Set up shipping with Bosta",
-            "Share your store link and start selling",
-        ],
-        "btn": "Go to Dashboard",
+        "title": "Your NUMU store is ready",
+        "subtitle": "Next step: your first product",
+        "greeting": "Hi {merchant_name}!",
+        "greeting_anon": "Hi!",
+        "ready": "Your store “{store_name}” is ready at {store_link}",
+        "ready_anon": "Your store is ready at {store_link}",
+        "next": "Next step: add your first product.",
+        "btn": "Add your first product",
         "help": "Need help? Our support team is here for you.",
-        "preheader": "Welcome to NUMU — let's build your store",
+        "preheader": "Your store is ready — add your first product",
     },
 }
 
 
-def welcome_html(merchant_name: str, dashboard_url: str, language: str = "ar") -> str:
+def welcome_html(
+    merchant_name: str,
+    dashboard_url: str,
+    language: str = "ar",
+    *,
+    store_name: str | None = None,
+    store_url: str | None = None,
+) -> str:
     c = _WELCOME.get(language, _WELCOME["ar"])
-    steps = "".join(
-        f'<div class="panel" style="margin:12px 0; padding:16px 20px;">'
-        f'<p class="label">{c["step_label"]} {i + 1}</p>'
-        f'<p style="margin:4px 0 0; font-size:15px; color:#1A1A2E;">{s}</p>'
-        f"</div>"
-        for i, s in enumerate(c["steps"])
+    greeting = (
+        c["greeting"].format(merchant_name=escape(merchant_name))
+        if merchant_name
+        else c["greeting_anon"]
     )
+    ready = ""
+    if store_url:
+        host = escape(store_url.removeprefix("https://").removeprefix("http://"))
+        link = f'<a href="{escape(store_url)}" dir="ltr">{host}</a>'
+        ready = (
+            c["ready"].format(store_name=escape(store_name), store_link=link)
+            if store_name
+            else c["ready_anon"].format(store_link=link)
+        )
     body = f"""
     {header(c["title"], c["subtitle"], language=language)}
     <div class="body">
-        <p class="lead">{c["greeting"].format(merchant_name=merchant_name)}</p>
-        <p>{c["intro"]}</p>
-
-        <h2>{c["next_steps"]}</h2>
-        {steps}
+        <p class="lead">{greeting}</p>
+        <p>{ready}</p>
+        <p>{c["next"]}</p>
 
         <p class="center" style="margin-top:30px;">
-            <a href="{dashboard_url}" class="btn">{c["btn"]}</a>
+            <a href="{dashboard_url.rstrip("/")}/products/new" class="btn">{c["btn"]}</a>
         </p>
         <p class="muted" style="margin-top:24px;">{c["help"]}</p>
     </div>"""
@@ -85,8 +89,8 @@ def welcome_html(merchant_name: str, dashboard_url: str, language: str = "ar") -
 
 WELCOME_TEMPLATE = {
     "subject": {
-        "ar": "أهلاً بيك في نُمو — يلا نبني متجرك",
-        "en": "Welcome to NUMU — Let's Build Your Store",
+        "ar": "متجرك جاهز على نُمو — ضيف أول منتج",
+        "en": "Your NUMU store is ready — add your first product",
     },
     "html_fn": welcome_html,
 }

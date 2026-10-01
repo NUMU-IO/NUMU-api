@@ -1,5 +1,6 @@
 """Tenant database model (public schema)."""
 
+import math
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -249,11 +250,12 @@ class TenantModel(Base, UUIDMixin, TimestampMixin):
 
     @property
     def days_remaining(self) -> int | None:
-        """Days until expiry, or None if no expiry set. Returns 0 if past expiry."""
+        """Days until expiry, rounded up (a 37-day trial reads 37 on day one),
+        or None if no expiry set. Returns 0 if past expiry."""
         if not self.expires_at:
             return None
-        delta = self.expires_at - datetime.now(UTC)
-        return max(0, delta.days)
+        seconds = (self.expires_at - datetime.now(UTC)).total_seconds()
+        return max(0, math.ceil(seconds / 86400))
 
     def __repr__(self) -> str:
         return (

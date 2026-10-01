@@ -61,6 +61,7 @@ class ForgotPasswordUseCase:
             await self.email_service.send_password_reset_email(
                 email=str(user.email),
                 token=token,
+                language=user.language or "ar",
             )
         except Exception:
             logger.exception("Failed to send password reset email to %s", user.email)

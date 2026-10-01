@@ -3,6 +3,9 @@
 Called once at application startup to register all event handlers.
 """
 
+from src.application.services.demo_seed_service import (
+    handle_product_created_remove_samples,
+)
 from src.core.events.base import EventBus
 from src.core.events.commerce_events import (
     CustomerCreatedEvent,
@@ -312,6 +315,8 @@ def create_event_bus() -> EventBus:
     # Stamp `first_product_at` on the merchant lead — the moment the
     # merchant put something real in their store.
     bus.subscribe(ProductCreatedEvent, handle_lead_first_product)
+    # The merchant's first real product retires the starter samples.
+    bus.subscribe(ProductCreatedEvent, handle_product_created_remove_samples)
     bus.subscribe(ProductUpdatedEvent, handle_webhook_product_updated)
     bus.subscribe(ProductDeletedEvent, handle_webhook_product_deleted)
 

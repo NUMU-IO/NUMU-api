@@ -4,11 +4,11 @@ import time
 from dataclasses import dataclass
 from uuid import UUID
 
+from src.application.services.password_policy import enforce_password_policy
 from src.application.services.token_revocation_service import TokenRevocationService
 from src.core.exceptions import AuthenticationError, EntityNotFoundError
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.password_service import IPasswordService
-from src.core.validators.password import validate_password
 
 
 @dataclass
@@ -49,7 +49,7 @@ class ChangePasswordUseCase:
             raise AuthenticationError("Current password is incorrect")
 
         # Enforce password policy
-        validate_password(dto.new_password)
+        await enforce_password_policy(dto.new_password)
 
         # Hash new password
         new_hashed_password = await self.password_service.hash_password(

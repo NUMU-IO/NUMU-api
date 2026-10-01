@@ -1,6 +1,7 @@
 """Reset password use case."""
 
 from src.application.dto.auth import PasswordResetDTO
+from src.application.services.password_policy import enforce_password_policy
 from src.core.exceptions import (
     AuthenticationError,
     EntityNotFoundError,
@@ -9,7 +10,6 @@ from src.core.exceptions import (
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
-from src.core.validators.password import validate_password
 
 
 class ResetPasswordUseCase:
@@ -45,7 +45,7 @@ class ResetPasswordUseCase:
             raise EntityNotFoundError("User", str(payload.user_id))
 
         # Enforce password policy
-        validate_password(dto.new_password)
+        await enforce_password_policy(dto.new_password)
 
         # Hash new password
         new_hashed_password = self.password_service.hash_password(dto.new_password)

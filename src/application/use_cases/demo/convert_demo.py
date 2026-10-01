@@ -22,6 +22,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services.password_policy import enforce_password_policy
 from src.application.use_cases.billing.start_trial import StartTrialUseCase
 from src.application.use_cases.stores.create_store import (
     validate_subdomain,
@@ -30,7 +31,6 @@ from src.core.entities.user import User, UserRole, UserStatus
 from src.core.exceptions import EntityAlreadyExistsError, ValidationError
 from src.core.interfaces.services.password_service import IPasswordService
 from src.core.interfaces.services.token_service import ITokenService
-from src.core.validators.password import validate_password
 from src.core.value_objects.email import Email
 from src.infrastructure.database.models import StoreModel, UserModel
 from src.infrastructure.database.models.public.tenant import TenantLifecycleState
@@ -113,7 +113,7 @@ class ConvertDemoUseCase:
             )
 
         # ─── 4. Validate password ─────────────────────────────────────
-        validate_password(password)
+        await enforce_password_policy(password)
 
         # ─── 5. Create new real user ──────────────────────────────────
         # The demo door requires a WhatsApp number, so this tenant already
