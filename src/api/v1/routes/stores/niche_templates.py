@@ -31,6 +31,16 @@ NICHE_TEMPLATES = {
         "suggested_categories": ["ساعات", "نظارات", "شنط", "مجوهرات"],
         "suggested_sections": ["hero", "products", "testimonials"],
     },
+    "books": {
+        "theme": "editorial",
+        "suggested_categories": ["روايات", "كتب أطفال", "كتب دينية", "تنمية بشرية"],
+        "suggested_sections": ["hero", "products"],
+    },
+    "handmade": {
+        "theme": "skeu",
+        "suggested_categories": ["شغل يدوي", "هدايا", "ديكور"],
+        "suggested_sections": ["hero", "products", "features"],
+    },
     "other": {
         "theme": "editorial",
         "suggested_categories": [],
@@ -48,6 +58,7 @@ NICHE_SCHEMA_TYPE = {
     "home": "HomeGoodsStore",
     "food": "GroceryStore",
     "accessories": "JewelryStore",
+    "books": "BookStore",
 }
 
 COUNTRY_DEFAULTS = {
