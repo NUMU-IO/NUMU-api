@@ -901,15 +901,27 @@ async def _read_free_shipping_threshold(session, *, store_id) -> int | None:
     Themes draw the bag's "free shipping from X" bar from this. It used to be
     a number typed into each theme, which drifted from the rates checkout
     charges (Vionne's bag said 500 while its zones say 1,500).
+
+    Every storefront page needs this payload, so a failure here must never
+    cost the store its pages: it degrades to "no free tier" (no bar), the
+    same as `_read_installed_apps` degrades to no apps.
     """
     from src.application.services.shipping_resolver import ShippingResolver
     from src.infrastructure.repositories.shipping_zone_repository import (
         ShippingZoneRepository,
     )
 
-    return await ShippingResolver(
-        ShippingZoneRepository(session)
-    ).free_shipping_threshold_cents(store_id)
+    try:
+        return await ShippingResolver(
+            ShippingZoneRepository(session)
+        ).free_shipping_threshold_cents(store_id)
+    except Exception:  # pragma: no cover - defensive; see docstring
+        from src.core.logging import get_logger
+
+        get_logger(__name__).warning(
+            "free-shipping threshold lookup failed", exc_info=True
+        )
+        return None
 
 
 def _serialize_public_store(

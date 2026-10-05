@@ -666,6 +666,20 @@ async def test_free_shipping_threshold_none_when_a_zone_has_no_free_tier():
         },
     )
     assert await ShippingResolver(repo).free_shipping_threshold_cents(STORE_ID) is None
+    # A free_over rate whose config does not parse is no free tier, not a crash.
+    broken = _zone(governorate_codes=["EG-GZ"])
+    bad = ShippingRate(
+        id=uuid4(),
+        tenant_id=TENANT_ID,
+        zone_id=broken.id,
+        rate_type=RateType.FREE_OVER,
+        label="Standard",
+        config={"amount_cents": 5000},  # threshold missing
+    )
+    repo_bad = _InMemoryShippingRepo([broken], {broken.id: [bad]})
+    assert (
+        await ShippingResolver(repo_bad).free_shipping_threshold_cents(STORE_ID) is None
+    )
     # No zones at all: nothing to promise either.
     empty = _InMemoryShippingRepo([], {})
     assert await ShippingResolver(empty).free_shipping_threshold_cents(STORE_ID) is None

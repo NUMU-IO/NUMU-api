@@ -271,7 +271,8 @@ class ShippingResolver:
         zone has no free_over rate, or no zone is priced: a bar there would
         promise what checkout does not give. Zones with no active rate are
         skipped, since they never charge (free default, or not shipped to).
-        A COD fee still applies on top, as it does at checkout.
+        A COD fee still applies on top, as it does at checkout. A free_over
+        rate whose config does not parse counts as no free tier.
         """
         thresholds: list[int] = []
         for _zone, rates in await self.repository.get_zones_with_rates_for_store(
@@ -279,11 +280,16 @@ class ShippingResolver:
         ):
             if not rates:
                 continue
-            free_over = [
-                parse_rate_config(r.rate_type, r.config).free_when_subtotal_gte_cents
-                for r in rates
-                if r.rate_type == RateType.FREE_OVER
-            ]
+            free_over: list[int] = []
+            for r in rates:
+                if r.rate_type != RateType.FREE_OVER:
+                    continue
+                try:
+                    cfg = parse_rate_config(r.rate_type, r.config)
+                except ValueError:  # pydantic's ValidationError is a ValueError
+                    logger.warning("free_over_rate_invalid_config", rate_id=str(r.id))
+                    continue
+                free_over.append(cfg.free_when_subtotal_gte_cents)
             if not free_over:
                 return None
             thresholds.append(min(free_over))
