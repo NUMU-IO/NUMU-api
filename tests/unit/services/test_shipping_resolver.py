@@ -630,3 +630,42 @@ async def test_no_reason_when_options_exist():
     )
     assert result.options
     assert result.unavailable_reason is None
+
+
+# ─── Store-wide free-shipping threshold (the bag's promise) ─────────
+
+
+async def test_free_shipping_threshold_is_the_highest_zone_threshold():
+    cairo = _zone(governorate_codes=["EG-C"])
+    aswan = _zone(governorate_codes=["EG-ASN"])
+    unpriced = _zone(governorate_codes=["EG-RS"])  # no rates: never charges
+    repo = _InMemoryShippingRepo(
+        [cairo, aswan, unpriced],
+        {
+            cairo.id: [
+                _flat_rate(cairo.id, amount=9000, label="Express"),
+                _free_over_rate(cairo.id, amount=9000, threshold=150_000),
+                _free_over_rate(cairo.id, amount=9000, threshold=200_000),
+            ],
+            aswan.id: [_free_over_rate(aswan.id, amount=12000, threshold=180_000)],
+        },
+    )
+    resolver = ShippingResolver(repo)
+    # Cairo is free from 1,500 (its lowest), Aswan only from 1,800.
+    assert await resolver.free_shipping_threshold_cents(STORE_ID) == 180_000
+
+
+async def test_free_shipping_threshold_none_when_a_zone_has_no_free_tier():
+    cairo = _zone(governorate_codes=["EG-C"])
+    aswan = _zone(governorate_codes=["EG-ASN"])
+    repo = _InMemoryShippingRepo(
+        [cairo, aswan],
+        {
+            cairo.id: [_free_over_rate(cairo.id, amount=5000, threshold=300_000)],
+            aswan.id: [_flat_rate(aswan.id, amount=7000)],
+        },
+    )
+    assert await ShippingResolver(repo).free_shipping_threshold_cents(STORE_ID) is None
+    # No zones at all: nothing to promise either.
+    empty = _InMemoryShippingRepo([], {})
+    assert await ShippingResolver(empty).free_shipping_threshold_cents(STORE_ID) is None
