@@ -183,12 +183,13 @@ def merge_order_notes(cart_note: str | None, request_note: str | None) -> str | 
 
     Themes write the cart note (empire puts the chosen size there), and only the
     checkout's field used to reach the order. A checkout that pre-filled its
-    field from the cart note already carries it, so it is not repeated. Capped at
+    field from the cart note already carries it as whole lines, so it is not
+    repeated; a short cart note inside a word ("L" in "Leave") is kept. Capped at
     the checkout field's 1,000 characters.
     """
     cart_note = (cart_note or "").strip()
     request_note = (request_note or "").strip()
-    if cart_note and cart_note in request_note:
+    if cart_note and f"\n{cart_note}\n" in f"\n{request_note}\n":
         merged = request_note
     else:
         merged = "\n".join(note for note in (cart_note, request_note) if note)

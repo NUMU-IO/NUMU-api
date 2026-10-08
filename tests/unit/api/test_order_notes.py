@@ -43,6 +43,13 @@ def test_zero_u_02_checkout_that_prefilled_the_cart_note_is_not_doubled():
     assert merge_order_notes(SIZE_NOTE, request_note) == request_note
 
 
+def test_zero_u_02b_short_cart_note_inside_a_word_is_kept():
+    # "L" is inside "Leave", but the checkout note does not carry the cart note.
+    assert merge_order_notes("L", "Leave at the door") == "L\nLeave at the door"
+    multi = f"{SIZE_NOTE}\n• Shirt — المقاس: M"
+    assert merge_order_notes(multi, f"{multi}\nCall first") == f"{multi}\nCall first"
+
+
 def test_zero_u_03_both_notes_cart_first():
     assert (
         merge_order_notes(SIZE_NOTE, "Call before delivery")
