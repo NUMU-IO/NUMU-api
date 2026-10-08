@@ -140,6 +140,10 @@ class CartResponse(BaseModel):
         default_factory=list,
         description="Named breakdown of the automatic promotions that fired.",
     )
+    note: str | None = Field(
+        default=None,
+        description="The shopper's cart note; it becomes the order's customer note.",
+    )
 
     class Config:
         from_attributes = True

@@ -425,6 +425,7 @@ async def _build_cart_response(
             discount_amount=discount_amount,
             total=max(0, subtotal - discount_amount),
             applied_promotions=applied_promotions,
+            note=cart.notes,
         ),
         message="Cart retrieved successfully",
     )

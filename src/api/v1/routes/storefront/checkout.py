@@ -178,6 +178,45 @@ def _risk_level_from_score(score: int | None) -> str:
     return "low"
 
 
+def merge_order_notes(cart_note: str | None, request_note: str | None) -> str | None:
+    """The order's customer note: the cart note first, then the checkout's note.
+
+    Themes write the cart note (empire puts the chosen size there), and only the
+    checkout's field used to reach the order. A checkout that pre-filled its
+    field from the cart note already carries it, so it is not repeated. Capped at
+    the checkout field's 1,000 characters.
+    """
+    cart_note = (cart_note or "").strip()
+    request_note = (request_note or "").strip()
+    if cart_note and cart_note in request_note:
+        merged = request_note
+    else:
+        merged = "\n".join(note for note in (cart_note, request_note) if note)
+    return merged[:1000] or None
+
+
+async def read_cart_note(
+    customer_id: UUID, session_id: str | None, store_id: UUID
+) -> str | None:
+    """The note on the shopper's cart, found with the keys the cart cleanup uses:
+    the customer id, then the guest `numu_cart_session` cookie.
+
+    None when there is no cart or Redis is unreachable: a cart note must never
+    block an order.
+    """
+    from src.infrastructure.repositories.cart_repository import RedisCartRepository
+
+    try:
+        repo = RedisCartRepository()
+        cart = await repo.get_by_customer_id(customer_id, store_id)
+        if cart is None and session_id:
+            cart = await repo.get_by_session_id(session_id, store_id)
+    except Exception:  # noqa: BLE001 — see docstring
+        logger.warning("checkout_cart_note_unavailable", exc_info=True)
+        return None
+    return cart.notes if cart else None
+
+
 async def _build_applied_promotions(
     promotion_repo: "PromotionRepository",
     store_id: UUID,
@@ -2000,6 +2039,10 @@ async def checkout(
     )
     _first_touch_at = _first.ts if _first is not None else None
 
+    _cart_note = await read_cart_note(
+        current_customer.id, http_request.cookies.get("numu_cart_session"), store_id
+    )
+
     order = Order(
         store_id=store_id,
         tenant_id=store.tenant_id,
@@ -2023,7 +2066,7 @@ async def checkout(
         shipping_method=resolved_label,
         shipping_zone_id=resolved_zone_id,
         shipping_rate_id=resolved_rate_id,
-        customer_notes=request.customer_notes,
+        customer_notes=merge_order_notes(_cart_note, request.customer_notes),
         metadata={
             # Exact record of what the debit loop above took, so a later
             # cancel/return restocks precisely this — and orders that never

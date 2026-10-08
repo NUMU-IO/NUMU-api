@@ -609,6 +609,21 @@ async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
         )
 
 
+def _token_is_for_another_store(
+    request: Request, payload: CustomerTokenPayload
+) -> bool:
+    """True when a store-scoped route gets a customer token minted for another store.
+
+    A customer token belongs to one store (its `store_id` claim), and store
+    ids are public. Without this check a shopper signed in on store A could act
+    as a customer on store B's `/storefront/store/{store_id}/…` routes, e.g.
+    post a review on B's product. Routes without a `store_id` in the path
+    (`/storefront/me/…`) are keyed by the token's own store and are unaffected.
+    """
+    path_store = request.path_params.get("store_id")
+    return path_store is not None and str(path_store).lower() != str(payload.store_id)
+
+
 async def get_current_customer_payload(request: Request) -> CustomerTokenPayload:
     """Get current customer payload from customer_access_token httpOnly cookie."""
     token = request.cookies.get("customer_access_token")
@@ -620,12 +635,19 @@ async def get_current_customer_payload(request: Request) -> CustomerTokenPayload
         )
 
     try:
-        return token_service.verify_customer_token(token)
+        payload = token_service.verify_customer_token(token)
     except (TokenExpiredError, InvalidTokenError) as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
         )
+    # Signed in elsewhere is not signed in here.
+    if _token_is_for_another_store(request, payload):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    return payload
 
 
 async def get_current_customer(
@@ -654,6 +676,9 @@ async def get_optional_customer(
     try:
         payload = token_service.verify_customer_token(token)
     except (TokenExpiredError, InvalidTokenError):
+        return None
+    # A shopper signed in on another store is a guest here.
+    if _token_is_for_another_store(request, payload):
         return None
     return await customer_repo.get_by_id(payload.customer_id)
 

@@ -42,6 +42,7 @@ from src.api.dependencies.repositories import (
     get_promotion_target_repository,
     get_store_repository,
 )
+from src.api.dependencies.sanitization import SanitizedStr
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.storefront._cart_owner import CartOwner, get_cart_owner
 from src.api.v1.routes.storefront.cart import (
@@ -116,7 +117,8 @@ class SdkRemoveItemRequest(BaseModel):
 class SdkUpdateItemRequest(BaseModel):
     item_id: str | None = None
     quantity: int | None = Field(default=None, ge=0)
-    note: str | None = None
+    # Same limit as the checkout's customer_notes, which it ends up in.
+    note: SanitizedStr | None = Field(default=None, max_length=1000)
 
 
 class SdkDiscountRequest(BaseModel):
@@ -449,11 +451,10 @@ async def sdk_update_cart_item(
         changed = True
 
     if request.note is not None:
-        # Cart entity should support a `note` attribute; assign through.
-        # Tolerate models that don't have it yet by ignoring silently.
-        if hasattr(cart, "note"):
-            cart.note = request.note
-            changed = True
+        # The entity's field is `notes`. This used to test `hasattr(cart,
+        # "note")`, which is always false, so every note was dropped.
+        cart.notes = request.note
+        changed = True
 
     if changed:
         await _cart_repo.save(cart)
