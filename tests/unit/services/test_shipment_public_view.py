@@ -60,7 +60,13 @@ class TestNothingInternalLeaks:
             _entry("in_transit", "Synced from bosta API: IN_WAREHOUSE"),
         ]
         blob = repr(public_events(_Shipment(leaky)))
-        for secret in ("sk_live_xyz", "rude on the phone", "IN_WAREHOUSE", "401"):
+        # "401 invalid", not "401": occurred_at's repr can contain the digits.
+        for secret in (
+            "sk_live_xyz",
+            "rude on the phone",
+            "IN_WAREHOUSE",
+            "401 invalid",
+        ):
             assert secret not in blob, secret
 
     def test_the_shipment_view_carries_no_pii_or_money(self):
