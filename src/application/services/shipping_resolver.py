@@ -261,6 +261,41 @@ class ShippingResolver:
             unavailable_reason=unavailable_reason,
         )
 
+    async def free_shipping_threshold_cents(self, store_id: UUID) -> int | None:
+        """The subtotal from which shipping is free to EVERY destination.
+
+        Themes show a "free shipping from X" bar in the bag, before the
+        shopper has picked a governorate, so the number must hold wherever
+        they ship to: the highest of the zones' own free_over thresholds
+        (each zone's lowest, as in `resolve_options`). None when any priced
+        zone has no free_over rate, or no zone is priced: a bar there would
+        promise what checkout does not give. Zones with no active rate are
+        skipped, since they never charge (free default, or not shipped to),
+        and so are zones with no governorate: no shopper can reach them.
+        A COD fee still applies on top, as it does at checkout. A free_over
+        rate whose config does not parse counts as no free tier.
+        """
+        thresholds: list[int] = []
+        for zone, rates in await self.repository.get_zones_with_rates_for_store(
+            store_id
+        ):
+            if not rates or not zone.governorate_codes:
+                continue
+            free_over: list[int] = []
+            for r in rates:
+                if r.rate_type != RateType.FREE_OVER:
+                    continue
+                try:
+                    cfg = parse_rate_config(r.rate_type, r.config)
+                except ValueError:  # pydantic's ValidationError is a ValueError
+                    logger.warning("free_over_rate_invalid_config", rate_id=str(r.id))
+                    continue
+                free_over.append(cfg.free_when_subtotal_gte_cents)
+            if not free_over:
+                return None
+            thresholds.append(min(free_over))
+        return max(thresholds) if thresholds else None
+
     def _default_ships_everywhere_option(self) -> ResolvedOption:
         """A free 'ships everywhere' option for a store with no zones yet.
 

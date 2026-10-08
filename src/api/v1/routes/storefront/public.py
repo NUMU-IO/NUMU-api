@@ -895,6 +895,35 @@ async def _read_installed_apps(session, *, store_id) -> list[dict]:
     ]
 
 
+async def _read_free_shipping_threshold(session, *, store_id) -> int | None:
+    """The store's real free-shipping threshold in cents, from its zone rates.
+
+    Themes draw the bag's "free shipping from X" bar from this. It used to be
+    a number typed into each theme, which drifted from the rates checkout
+    charges (Vionne's bag said 500 while its zones say 1,500).
+
+    Every storefront page needs this payload, so a failure here must never
+    cost the store its pages: it degrades to "no free tier" (no bar), the
+    same as `_read_installed_apps` degrades to no apps.
+    """
+    from src.application.services.shipping_resolver import ShippingResolver
+    from src.infrastructure.repositories.shipping_zone_repository import (
+        ShippingZoneRepository,
+    )
+
+    try:
+        return await ShippingResolver(
+            ShippingZoneRepository(session)
+        ).free_shipping_threshold_cents(store_id)
+    except Exception:  # pragma: no cover - defensive; see docstring
+        from src.core.logging import get_logger
+
+        get_logger(__name__).warning(
+            "free-shipping threshold lookup failed", exc_info=True
+        )
+        return None
+
+
 def _serialize_public_store(
     store,
     *,
@@ -902,6 +931,7 @@ def _serialize_public_store(
     indexing_block_reason: str | None = None,
     billing_lock_reason: str | None = None,
     installed_apps: list[dict] | None = None,
+    free_shipping_threshold_cents: int | None = None,
 ) -> dict:
     """Common payload returned by `/store-by-subdomain` and `/store-by-domain`.
 
@@ -994,6 +1024,10 @@ def _serialize_public_store(
         # mobile-first market. Shipping install state with the store makes the
         # first paint correct instead.
         "installed_apps": installed_apps or [],
+        # Subtotal (cents, before offers, as checkout counts it) from which
+        # every zone ships free; None = no free tier. See
+        # ShippingResolver.free_shipping_threshold_cents.
+        "free_shipping_threshold_cents": free_shipping_threshold_cents,
     }
 
 
@@ -1033,12 +1067,14 @@ async def get_store_by_subdomain(
     apps = await _read_installed_apps(session, store_id=store.id)
     block_reason = await platform_indexing_block_reason(session, store)
     lock_reason = await storefront_billing_lock_reason(session, store)
+    free_ship = await _read_free_shipping_threshold(session, store_id=store.id)
     payload = _serialize_public_store(
         store,
         tenant_feature_flags=flags,
         indexing_block_reason=block_reason,
         billing_lock_reason=lock_reason,
         installed_apps=apps,
+        free_shipping_threshold_cents=free_ship,
     )
     await cache.set_store(payload)
     return SuccessResponse(
@@ -1087,12 +1123,14 @@ async def get_store_by_domain(
     apps = await _read_installed_apps(session, store_id=store.id)
     block_reason = await platform_indexing_block_reason(session, store)
     lock_reason = await storefront_billing_lock_reason(session, store)
+    free_ship = await _read_free_shipping_threshold(session, store_id=store.id)
     payload = _serialize_public_store(
         store,
         tenant_feature_flags=flags,
         indexing_block_reason=block_reason,
         billing_lock_reason=lock_reason,
         installed_apps=apps,
+        free_shipping_threshold_cents=free_ship,
     )
     await cache.set_store(payload)
     return SuccessResponse(
