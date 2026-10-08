@@ -270,15 +270,16 @@ class ShippingResolver:
         (each zone's lowest, as in `resolve_options`). None when any priced
         zone has no free_over rate, or no zone is priced: a bar there would
         promise what checkout does not give. Zones with no active rate are
-        skipped, since they never charge (free default, or not shipped to).
+        skipped, since they never charge (free default, or not shipped to),
+        and so are zones with no governorate: no shopper can reach them.
         A COD fee still applies on top, as it does at checkout. A free_over
         rate whose config does not parse counts as no free tier.
         """
         thresholds: list[int] = []
-        for _zone, rates in await self.repository.get_zones_with_rates_for_store(
+        for zone, rates in await self.repository.get_zones_with_rates_for_store(
             store_id
         ):
-            if not rates:
+            if not rates or not zone.governorate_codes:
                 continue
             free_over: list[int] = []
             for r in rates:

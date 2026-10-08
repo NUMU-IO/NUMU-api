@@ -7,7 +7,7 @@ via WhatsApp and email without blocking the order flow.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -38,7 +38,7 @@ def run_async(coro):
 
 
 @asynccontextmanager
-async def _resend_service_with_session() -> AsyncIterator[ResendEmailService]:
+async def _resend_service_with_session() -> AsyncGenerator[ResendEmailService, None]:
     """Yield a fully-wired ``ResendEmailService`` for one Celery task.
 
     The FastAPI request path builds this same service via DI in

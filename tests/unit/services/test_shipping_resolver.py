@@ -666,6 +666,20 @@ async def test_free_shipping_threshold_none_when_a_zone_has_no_free_tier():
         },
     )
     assert await ShippingResolver(repo).free_shipping_threshold_cents(STORE_ID) is None
+    # A zone left with no governorates is unreachable: it neither blocks nor
+    # raises the threshold (Seer, PR #754).
+    orphan = _zone(governorate_codes=[])
+    repo_orphan = _InMemoryShippingRepo(
+        [cairo, orphan],
+        {
+            cairo.id: [_free_over_rate(cairo.id, amount=5000, threshold=150_000)],
+            orphan.id: [_flat_rate(orphan.id, amount=7000)],
+        },
+    )
+    assert (
+        await ShippingResolver(repo_orphan).free_shipping_threshold_cents(STORE_ID)
+        == 150_000
+    )
     # A free_over rate whose config does not parse is no free tier, not a crash.
     broken = _zone(governorate_codes=["EG-GZ"])
     bad = ShippingRate(
