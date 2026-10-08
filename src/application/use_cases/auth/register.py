@@ -1,6 +1,6 @@
 """Register user use case."""
 
-import random
+import secrets
 from datetime import UTC, datetime, timedelta
 
 from src.application.dto.auth import AuthResponseDTO, RegisterDTO, TokenDTO
@@ -26,7 +26,7 @@ VERIFY_CODE_TTL = 86400  # 24 hours
 
 def _generate_verification_code() -> str:
     """Generate a random 6-digit verification code."""
-    return f"{random.randint(0, 999999):06d}"
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 class RegisterUserUseCase:

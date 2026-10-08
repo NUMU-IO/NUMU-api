@@ -153,6 +153,10 @@ class UpdateStoreRequest(BaseModel):
     def _normalize_settings(cls, v: dict | None) -> dict | None:
         if v is None:
             return None
+        # The old Preferences page wrote the storefront password here in plain
+        # text, where nothing read it. The real gate is the hashed
+        # settings.password_protected, set via /settings/storefront-password.
+        v.pop("storefront_password", None)
         # Validate the store-default size chart if present; leaves other
         # keys (payment creds, feature flags, etc.) untouched.
         return _validate_size_chart(v)

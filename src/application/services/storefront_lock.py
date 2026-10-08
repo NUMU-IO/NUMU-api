@@ -38,6 +38,7 @@ from src.config import settings
 
 AWAITING_TOPUP = "awaiting_topup"
 AWAITING_SUBSCRIPTION = "awaiting_subscription"
+AWAITING_VERIFICATION = "awaiting_verification"
 
 # The PAYG wallet gate applies only to tenants created from here on.
 #
@@ -49,6 +50,17 @@ AWAITING_SUBSCRIPTION = "awaiting_subscription"
 # the wallet warnings and the checkout gate, which is where that
 # conversation belongs.
 PAYG_GATE_FROM = datetime(2026, 9, 8, tzinfo=UTC)
+
+# Merchants build their store before confirming their email; the storefront
+# opens to shoppers once they do ("verify at go-live"). Only stores whose
+# tenant was created from here on are held: every earlier merchant was made
+# to verify before they could create a store at all, and must not find their
+# shop closed by a rule that did not exist when they opened it.
+VERIFY_GATE_FROM = datetime(2026, 10, 1, tzinfo=UTC)
+
+# Throwaway demo stores and partners' development stores are not storefronts
+# a shopper reaches; holding them would only break the demo and dev flows.
+_VERIFY_GATE_EXEMPT_PLANS = {"demo", "developer"}
 
 # ponytail: derived, so it cannot be rotated — a merchant who leaks it
 # cannot pick a new one. Acceptable for a gate on a store that is not
@@ -103,14 +115,39 @@ async def resolve_lock_reason(session, tenant) -> str | None:
         return None
     if tenant.is_read_only:
         return lock_reason(tenant)
-    if (tenant.plan or "").lower() != "payg":
-        return None
 
     created = getattr(tenant, "created_at", None)
-    if created is None or created < PAYG_GATE_FROM:
+    plan = (tenant.plan or "").lower()
+    if (
+        created is not None
+        and created >= VERIFY_GATE_FROM
+        and plan not in _VERIFY_GATE_EXEMPT_PLANS
+        and not await owner_verified(session, getattr(tenant, "owner_id", None))
+    ):
+        return AWAITING_VERIFICATION
+
+    if plan != "payg" or created is None or created < PAYG_GATE_FROM:
         return None
 
     return None if await payg_ever_funded(session, tenant.id) else AWAITING_TOPUP
+
+
+async def owner_verified(session, owner_id) -> bool:
+    """Whether the tenant's owner has confirmed their email. A tenant with no
+    owner row reads as verified: that is a data bug, not a reason to close a
+    shop."""
+    if owner_id is None:
+        return True
+    from sqlalchemy import select
+
+    from src.infrastructure.database.models.public.user import UserModel
+
+    row = (
+        await session.execute(
+            select(UserModel.email_verified_at).where(UserModel.id == owner_id)
+        )
+    ).first()
+    return row is None or row[0] is not None
 
 
 async def payg_ever_funded(session, tenant_id: UUID) -> bool:

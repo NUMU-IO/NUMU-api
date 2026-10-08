@@ -602,13 +602,23 @@ class TestTrustedProxyIps:
             "client": (peer, 51234) if peer else None,
         })
 
-    def test_unconfigured_still_trusts_the_header(self, monkeypatch):
-        """The default MUST stay today's behaviour. The production edge
-        topology is unverified, and 'trust nobody' would bucket every request
-        under the load balancer's address — one bucket for the whole
-        platform, on every rate-limited endpoint."""
+    def test_unconfigured_ignores_the_header_from_a_public_peer(self, monkeypatch):
+        """Unset means "our own private network": a caller on the internet
+        can't pick its bucket by typing a header."""
         monkeypatch.setattr(settings, "trusted_proxy_ips", [])
         req = self._request(peer="203.0.113.9", headers={"X-Forwarded-For": "1.2.3.4"})
+        assert _get_client_ip(req) == "203.0.113.9"
+
+    def test_unconfigured_trusts_our_private_proxy(self, monkeypatch):
+        """Behind the edge nginx (a docker peer) the real client is the
+        rightmost hop that isn't ours; anything left of it was typed by the
+        caller. Trusting private peers never collapses everyone onto the
+        proxy's own address."""
+        monkeypatch.setattr(settings, "trusted_proxy_ips", [])
+        req = self._request(
+            peer="172.18.0.5",
+            headers={"X-Forwarded-For": "6.6.6.6, 1.2.3.4, 172.18.0.9"},
+        )
         assert _get_client_ip(req) == "1.2.3.4"
 
     def test_configured_ignores_the_header_from_an_untrusted_peer(self, monkeypatch):
@@ -631,12 +641,14 @@ class TestTrustedProxyIps:
         req = self._request(peer="10.4.1.7", headers={"X-Forwarded-For": "1.2.3.4"})
         assert _get_client_ip(req) == "1.2.3.4"
 
-    def test_a_wholly_unparseable_list_falls_back_to_trusting(self, monkeypatch):
-        """A typo in an ops env var must fail toward availability, not toward
-        collapsing the platform onto a single bucket."""
+    def test_a_wholly_unparseable_list_falls_back_to_private_peers(self, monkeypatch):
+        """A typo in an ops env var falls back to the default (our private
+        network), not to collapsing the platform onto a single bucket."""
         monkeypatch.setattr(settings, "trusted_proxy_ips", ["not-an-ip"])
-        req = self._request(peer="203.0.113.9", headers={"X-Forwarded-For": "1.2.3.4"})
+        req = self._request(peer="10.4.1.7", headers={"X-Forwarded-For": "1.2.3.4"})
         assert _get_client_ip(req) == "1.2.3.4"
+        req = self._request(peer="203.0.113.9", headers={"X-Forwarded-For": "1.2.3.4"})
+        assert _get_client_ip(req) == "203.0.113.9"
 
     def test_no_socket_peer_and_untrusted_headers_is_unknown(self, monkeypatch):
         monkeypatch.setattr(settings, "trusted_proxy_ips", ["10.0.0.0/8"])

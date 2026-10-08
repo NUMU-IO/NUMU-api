@@ -438,6 +438,7 @@ async def google_oauth(
     response: Response,
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     token_service: Annotated[TokenService, Depends(get_token_service)],
+    two_factor_repo: Annotated[TwoFactorRepository, Depends(get_two_factor_repository)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Authenticate or register a user via Google ID token.
@@ -467,6 +468,8 @@ async def google_oauth(
     use_case = GoogleOAuthUseCase(
         user_repository=user_repo,
         token_service=token_service,
+        revocation_service=TokenRevocationService(RedisCacheService()),
+        two_factor_repository=two_factor_repo,
     )
     from src.application.services.signup_settings import get_signup_settings
 
@@ -507,6 +510,13 @@ async def google_oauth(
 
     from src.infrastructure.database.models.public.user import UserModel
 
+    if use_case.reclaimed:
+        # The unproven registration's WhatsApp number isn't the owner's either.
+        await db.execute(
+            sa_update(UserModel)
+            .where(UserModel.id == result.user.id)
+            .values(whatsapp_phone=None)
+        )
     # First touch only: a returning user's earlier choices stand.
     if plan_intent:
         await db.execute(
@@ -545,6 +555,17 @@ async def google_oauth(
         else None,
     )
     await db.commit()
+
+    # Google proves the email, not the second factor: same challenge contract
+    # as the password login.
+    if await two_factor_repo.user_has_2fa_enabled(result.user.id):
+        return SuccessResponse(
+            data=AuthResponse(
+                requires_2fa=True,
+                challenge_token=token_service.create_challenge_token(result.user.id),
+            ),
+            message="2FA verification required",
+        )
 
     # Set auth cookies
     set_auth_cookies(
@@ -601,6 +622,7 @@ async def verify_email(
 
 
 MAX_VERIFY_CODE_ATTEMPTS = 5
+RESEND_VERIFICATION_COOLDOWN_SECONDS = 60
 
 
 @router.post(
@@ -694,10 +716,6 @@ async def resend_verification(
     email_service: Annotated[ResendEmailService, Depends(get_email_service)],
 ):
     """Resend the verification email with a new code and link."""
-    import random
-
-    from src.infrastructure.cache.redis_cache import RedisCacheService
-
     user = await user_repo.get_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -708,9 +726,25 @@ async def resend_verification(
             message="Email is already verified",
         )
 
-    # Generate new code and store in Redis
-    code = f"{random.randint(0, 999999):06d}"
     cache = RedisCacheService()
+    # One email a minute per account, enforced here and not only by the hub's
+    # countdown. A failed SET NX that left no key means Redis is down: send.
+    cooldown_key = f"email_verify_resend:{user_id}"
+    if not await cache.set_if_absent(
+        cooldown_key, 1, expire=RESEND_VERIFICATION_COOLDOWN_SECONDS
+    ) and await cache.exists(cooldown_key):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": "Wait a minute before requesting another email.",
+                "retry_after": RESEND_VERIFICATION_COOLDOWN_SECONDS,
+            },
+            headers={"Retry-After": str(RESEND_VERIFICATION_COOLDOWN_SECONDS)},
+        )
+
+    # Generate new code and store in Redis
+    code = f"{secrets.randbelow(1_000_000):06d}"
     await cache.set(
         f"email_verify_code:{user_id}",
         code,
@@ -958,6 +992,7 @@ async def reset_password(
         user_repository=user_repo,
         token_service=token_service,
         password_service=password_service,
+        revocation_service=TokenRevocationService(RedisCacheService()),
     )
 
     dto = PasswordResetDTO(
