@@ -4,6 +4,7 @@ Verifies a Google ID token, creates or finds the user, and returns
 an AuthResponseDTO with JWT tokens — same shape as normal login.
 """
 
+import time
 from datetime import UTC, datetime, timedelta
 
 from google.auth.transport import requests as google_requests
@@ -11,8 +12,12 @@ from google.oauth2 import id_token as google_id_token
 
 from src.application.dto.auth import AuthResponseDTO, TokenDTO
 from src.application.dto.user import UserDTO
+from src.application.services.token_revocation_service import TokenRevocationService
 from src.config import settings
 from src.core.entities.user import User, UserRole, UserStatus
+from src.core.interfaces.repositories.two_factor_repository import (
+    ITwoFactorRepository,
+)
 from src.core.interfaces.repositories.user_repository import IUserRepository
 from src.core.interfaces.services.token_service import ITokenService
 from src.core.logging import get_logger
@@ -30,9 +35,15 @@ class GoogleOAuthUseCase:
         self,
         user_repository: IUserRepository,
         token_service: ITokenService,
+        revocation_service: TokenRevocationService,
+        two_factor_repository: ITwoFactorRepository,
     ) -> None:
         self.user_repository = user_repository
         self.token_service = token_service
+        self.revocation_service = revocation_service
+        self.two_factor_repository = two_factor_repository
+        #: True when execute() reclaimed an unverified registration.
+        self.reclaimed = False
 
     async def execute(
         self,
@@ -100,6 +111,21 @@ class GoogleOAuthUseCase:
             # 4. Try finding by email (existing user linking Google)
             user = await self.user_repository.get_by_email_str(email_str)
 
+            if user and not user.is_verified:
+                # Pre-account-hijack guard: someone registered this address
+                # without ever proving they own it, and Google just proved who
+                # does. Nothing that unproven registration set may survive:
+                # its password stops working, its sessions are revoked, its
+                # second factor and contact details go, and the real owner
+                # starts from their Google identity.
+                user.hashed_password = ""
+                user.first_name = first_name or user.first_name
+                user.last_name = last_name or user.last_name
+                user.phone = parsed_phone
+                await self.two_factor_repository.delete_by_user_id(user.id)
+                await self.revocation_service.revoke_all(user.id, int(time.time()))
+                self.reclaimed = True
+                log.warning("google_oauth_reclaimed_unverified_account")
             if user:
                 # Link Google account to existing user
                 user.google_id = google_sub

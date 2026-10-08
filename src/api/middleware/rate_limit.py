@@ -223,11 +223,27 @@ _IpNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 _TRUSTED_PROXY_CACHE: tuple[tuple[str, ...], list[_IpNetwork] | None] | None = None
 
 
+# Who may set the client IP when TRUSTED_PROXY_IPS is unset: our own hops.
+# The edge nginx, any router and the app share a docker/VPC network, so the
+# socket peer of every real request is one of these; a caller on the public
+# internet never is, and its X-Forwarded-For is just a header it typed.
+_PRIVATE_PROXIES: list[_IpNetwork] = [
+    ipaddress.ip_network(n)
+    for n in (
+        "127.0.0.0/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "::1/128",
+        "fc00::/7",
+    )
+]
+
+
 def _trusted_proxy_networks() -> list[_IpNetwork] | None:
     """Parse ``settings.trusted_proxy_ips``; ``None`` means "unconfigured".
 
-    ``None`` is the signal to keep trusting ``X-Forwarded-For`` from anyone —
-    see ``_get_client_ip`` for why that stays the default.
+    ``None`` falls back to ``_PRIVATE_PROXIES`` — see ``_get_client_ip``.
 
     A malformed entry is dropped with an error rather than raised: a typo in
     an ops env var must not refuse to boot the API. If NOTHING in a non-empty
@@ -263,15 +279,11 @@ def _trusted_proxy_networks() -> list[_IpNetwork] | None:
     return parsed
 
 
-def _proxy_headers_trusted(peer_ip: str | None) -> bool:
-    """Whether the hop that sent us this request may set the client IP."""
-    networks = _trusted_proxy_networks()
-    if networks is None:
-        return True
-    if not peer_ip:
+def _in_networks(ip: str | None, networks: list[_IpNetwork]) -> bool:
+    if not ip:
         return False
     try:
-        addr = ipaddress.ip_address(peer_ip)
+        addr = ipaddress.ip_address(ip)
     except ValueError:
         return False
     return any(addr in net for net in networks)
@@ -312,27 +324,32 @@ def _get_client_ip(request: Request) -> str:
     """Extract the IP this request is rate-limited under, respecting proxies.
 
     ``X-Forwarded-For`` is caller-supplied, so it only means anything when the
-    hop that set it is one we control. With ``trusted_proxy_ips`` configured we
-    require the socket peer to be in it before believing the header; otherwise
-    a fresh ``X-Forwarded-For`` per request buys a fresh bucket every time and
-    the per-IP limits stop existing.
+    hop that set it is one we control: the socket peer must be a trusted proxy
+    (``trusted_proxy_ips``, or our own private network when that is unset)
+    before the header is read at all. Even then its LEFT end is whatever the
+    caller sent; each proxy appends, so we walk it from the right and take the
+    first hop that isn't ours. Taking the first entry let any caller pick a
+    fresh bucket per request and made the per-IP limits advisory.
 
-    While the setting is UNSET we keep believing the header unconditionally,
-    exactly as before. Flipping that default blind would collapse every
-    production request onto the load balancer's address — one bucket for the
-    whole platform — so switching it on is an ops decision that needs the real
-    edge topology. Nothing that must not be brute-forced should depend on this
-    alone: see ``enforce_track_lookup_budgets`` for the content-keyed buckets
-    that hold regardless of how the edge is wired.
+    Trusting private peers by default keeps production on real client IPs
+    (edge nginx → app over the docker network) without collapsing everyone
+    onto the proxy's address. Content-keyed budgets such as
+    ``enforce_track_lookup_budgets`` hold regardless of how the edge is wired.
     """
     peer = request.client.host if request.client else None
+    trusted = _trusted_proxy_networks() or _PRIVATE_PROXIES
 
-    if _proxy_headers_trusted(peer):
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            first = forwarded.split(",")[0].strip()
-            if first:
-                return first
+    if _in_networks(peer, trusted):
+        hops = [
+            hop.strip()
+            for hop in request.headers.get("X-Forwarded-For", "").split(",")
+            if hop.strip()
+        ]
+        for hop in reversed(hops):
+            if not _in_networks(hop, trusted):
+                return hop
+        if hops:
+            return hops[0]  # every hop is ours: internal traffic
 
         real_ip = request.headers.get("X-Real-IP")
         if real_ip:
@@ -626,16 +643,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Built once, when the app assembles its middleware stack — so this is
         # one line per process, not per request.
         if _trusted_proxy_networks() is None:
-            logger.warning(
-                "rate_limit_trusting_forwarded_header_from_anyone",
+            logger.info(
+                "rate_limit_trusting_private_proxies",
                 setting="TRUSTED_PROXY_IPS",
-                risk=(
-                    "X-Forwarded-For is believed from every caller, so any "
-                    "client can choose its own per-IP bucket by varying the "
-                    "header and the per-IP limits are advisory only. Set "
-                    "TRUSTED_PROXY_IPS to the edge in front of this process "
-                    "to enforce them — but confirm the real topology first: "
-                    "naming the wrong hop buckets the whole platform together."
+                note=(
+                    "Unset: X-Forwarded-For is believed only from private-"
+                    "network peers (our own nginx/router). Set it to name the "
+                    "edge explicitly."
                 ),
             )
 

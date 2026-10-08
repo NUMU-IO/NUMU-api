@@ -8,7 +8,9 @@ from types import SimpleNamespace
 from src.application.services.storefront_lock import (
     AWAITING_SUBSCRIPTION,
     AWAITING_TOPUP,
+    AWAITING_VERIFICATION,
     PAYG_GATE_FROM,
+    VERIFY_GATE_FROM,
     lock_password,
     lock_password_hash,
     lock_reason,
@@ -138,3 +140,54 @@ class TestLockPassword:
     def test_password_is_typeable(self):
         pwd = lock_password("9f1c8b2e-0000-4000-8000-000000000004")
         assert pwd.isalnum() and pwd.islower() and len(pwd) == 10
+
+
+class _Row:
+    def __init__(self, verified):
+        self._verified = verified
+
+    def first(self):
+        return (datetime(2026, 10, 2, tzinfo=UTC) if self._verified else None,)
+
+
+class OwnerSession(Session):
+    """Also answers the owner's email-verified lookup."""
+
+    def __init__(self, verified, funded=True):
+        super().__init__(funded=funded)
+        self._verified = verified
+
+    async def execute(self, _query):
+        return _Row(self._verified)
+
+
+class TestVerifyAtGoLive:
+    """New merchants build first and confirm their email to open the store."""
+
+    def _new(self, plan="trial"):
+        t = tenant("trial", plan=plan, created=VERIFY_GATE_FROM + timedelta(hours=1))
+        t.owner_id = "owner-1"
+        return t
+
+    def test_unverified_new_store_waits_for_verification(self):
+        got = run(resolve_lock_reason(OwnerSession(verified=False), self._new()))
+        assert got == AWAITING_VERIFICATION
+
+    def test_verified_new_store_is_open(self):
+        assert (
+            run(resolve_lock_reason(OwnerSession(verified=True), self._new())) is None
+        )
+
+    def test_demo_and_developer_stores_are_exempt(self):
+        for plan in ("demo", "developer"):
+            got = run(
+                resolve_lock_reason(OwnerSession(verified=False), self._new(plan))
+            )
+            assert got is None, plan
+
+    def test_stores_before_the_gate_are_untouched(self):
+        t = tenant(
+            "active", plan="starter", created=VERIFY_GATE_FROM - timedelta(days=1)
+        )
+        t.owner_id = "owner-1"
+        assert run(resolve_lock_reason(OwnerSession(verified=False), t)) is None
