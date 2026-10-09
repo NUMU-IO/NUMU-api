@@ -4329,14 +4329,21 @@ async def save_meta_tracking(
         # Wave 2 Phase 12 — COD-aware Purchase / Lead firing config.
         # None preserves legacy behavior (paymob/fawry webhooks remain
         # the sole Purchase source).
+        #
+        # "Did not supply" means the key is absent from the JSON, not that it
+        # is null. Keyed on `is not None`, an explicit `purchase_trigger: null`
+        # was treated as "keep", so no client could ever clear a trigger: the
+        # hub's COD-timing section posts `purchase_trigger: null` by design
+        # and the store MCP maps "none" to null, and both silently kept the
+        # stale value. `model_fields_set` separates the two cases.
         "purchase_trigger": (
             request.purchase_trigger
-            if request.purchase_trigger is not None
+            if "purchase_trigger" in request.model_fields_set
             else meta_cfg.get("purchase_trigger")
         ),
         "lead_trigger": (
             request.lead_trigger
-            if request.lead_trigger is not None
+            if "lead_trigger" in request.model_fields_set
             else meta_cfg.get("lead_trigger")
         ),
         # Wave 2 Phase 15 — fire Lead when COD customer confirms via
@@ -5298,7 +5305,15 @@ async def save_tiktok_tracking(
         "test_event_code": request.test_event_code,
         "consent_required": bool(request.consent_required),
         "debug_mode_expires_at": debug_expires_iso,
-        "purchase_trigger": request.purchase_trigger,
+        # Same contract as the Meta route: an absent key keeps the stored
+        # trigger, an explicit null clears it. This used to assign the request
+        # value unconditionally, and the hub's TikTok panel never sends the
+        # field, so every save from it wiped a configured trigger.
+        "purchase_trigger": (
+            request.purchase_trigger
+            if "purchase_trigger" in request.model_fields_set
+            else tiktok_cfg.get("purchase_trigger")
+        ),
         "pixels": new_pixels,
         # Only overwrite advertiser_id when supplied — don't wipe an
         # existing value on a partial panel save.
