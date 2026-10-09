@@ -5305,7 +5305,15 @@ async def save_tiktok_tracking(
         "test_event_code": request.test_event_code,
         "consent_required": bool(request.consent_required),
         "debug_mode_expires_at": debug_expires_iso,
-        "purchase_trigger": request.purchase_trigger,
+        # Same contract as the Meta route: an absent key keeps the stored
+        # trigger, an explicit null clears it. This used to assign the request
+        # value unconditionally, and the hub's TikTok panel never sends the
+        # field, so every save from it wiped a configured trigger.
+        "purchase_trigger": (
+            request.purchase_trigger
+            if "purchase_trigger" in request.model_fields_set
+            else tiktok_cfg.get("purchase_trigger")
+        ),
         "pixels": new_pixels,
         # Only overwrite advertiser_id when supplied — don't wipe an
         # existing value on a partial panel save.
