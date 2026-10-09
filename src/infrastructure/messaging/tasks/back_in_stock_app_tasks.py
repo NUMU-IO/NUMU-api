@@ -114,13 +114,16 @@ async def restock_check(store_id: UUID, product_id: UUID) -> dict:
             per_target[waiter.variant_id] = per_target.get(waiter.variant_id, 0) + 1
             room[waiter.channel] -= 1
             queued.append(waiter)
+        # ponytail: pacing counts the store's already-queued rows, not exact
+        # send times; exact per-store slots need a Redis counter if bursts overlap.
+        countdowns = bis.send_countdowns(pending + len(queued))[pending:]
+        for waiter, countdown in zip(queued, countdowns, strict=True):
+            # When it is due, so the sweep counts "stuck" from the send time:
+            # a big restock paces sends well past an hour.
+            waiter.queued_at = now + timedelta(seconds=countdown)
         await db.commit()
 
-    # ponytail: pacing counts the store's already-queued rows, not exact send
-    # times; exact per-store slots need a Redis counter if bursts overlap.
-    for waiter, countdown in zip(
-        queued, bis.send_countdowns(pending + len(queued))[pending:], strict=True
-    ):
+    for waiter, countdown in zip(queued, countdowns, strict=True):
         send_task.apply_async(args=[str(waiter.id)], countdown=countdown)
     return {"queued": len(queued)}
 
@@ -384,8 +387,8 @@ def retention_task() -> dict:
     return _run_async(retention())
 
 
-#: A queued row older than this lost its send task (a worker restart, or
-#: Redis evicting the message): it goes back in line.
+#: A queued row this long past its due time (``queued_at``) lost its send
+#: task (a worker restart, or Redis evicting the message): back in line.
 STUCK_AFTER = timedelta(hours=1)
 
 

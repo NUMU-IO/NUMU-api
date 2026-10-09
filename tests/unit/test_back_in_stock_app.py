@@ -372,6 +372,85 @@ async def test_restock_queues_up_to_the_cap_and_paces_the_sends(world):
 
 
 @pytest.mark.asyncio
+async def test_queued_at_is_the_due_time_so_the_sweep_never_cuts_a_paced_send(world):
+    """A big restock paces sends past an hour; the sweep must count "stuck"
+    from each row's due time, not from when the check ran."""
+    x = await world.build()
+    for i in range(3):
+        await _subscribe(world, x, phone=f"0101234{i:04d}")
+    before = datetime.now(UTC)
+    await _restock(world, x, 5)
+
+    countdowns = [c.kwargs["countdown"] for c in world.queued.call_args_list]
+    due = sorted(
+        w.queued_at.replace(tzinfo=UTC)  # SQLite hands back naive datetimes
+        for w in await _waiters(world.db, x.store.id)
+    )
+    for when, countdown in zip(due, countdowns, strict=True):
+        assert (
+            timedelta(seconds=countdown)
+            <= when - before
+            < timedelta(seconds=countdown + 60)
+        )
+
+    # Due in two hours (a long paced queue): the sweep leaves it alone.
+    late = (await _waiters(world.db, x.store.id))[0]
+    late.queued_at = datetime.now(UTC) + timedelta(hours=2)
+    await world.db.flush()
+    await tasks.sweep()
+    assert late.status == "queued"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("templates", "locale", "sent_in"),
+    [
+        ({"ar": "APPROVED", "en": "PENDING"}, "en", "ar"),
+        ({"ar": "PENDING", "en": "APPROVED"}, "ar", "en"),
+        ({"ar": "APPROVED", "en": "APPROVED"}, "en", "en"),
+    ],
+)
+async def test_the_alert_goes_out_in_an_approved_language(
+    world, monkeypatch, templates, locale, sent_in
+):
+    """can_send() needs one approved language; a shopper whose own language
+    is still pending gets the other one rather than failing for good."""
+    from src.infrastructure.events.handlers import whatsapp_notification_handler
+
+    x = await world.build()
+    await _subscribe(world, x, locale=locale)
+    waiter = (await _waiters(world.db, x.store.id))[0]
+    state = {
+        "access": True,
+        "credentials_ok": True,
+        "needs_approved_template": True,
+        "template": templates,
+        "template_category": dict.fromkeys(templates, "UTILITY"),
+    }
+    monkeypatch.setattr(wa, "whatsapp_state", AsyncMock(return_value=state))
+    monkeypatch.setattr(
+        wa,
+        "WhatsAppOptInRepository",
+        lambda db: SimpleNamespace(has_opt_out=AsyncMock(return_value=False)),
+    )
+    service = SimpleNamespace(
+        send_message=AsyncMock(
+            return_value=SimpleNamespace(
+                success=True, message_id="wamid.9", error_code=None
+            )
+        )
+    )
+    monkeypatch.setattr(wa, "get_whatsapp_service", AsyncMock(return_value=service))
+    monkeypatch.setattr(
+        whatsapp_notification_handler, "_persist_message_log", AsyncMock()
+    )
+
+    assert await wa.send_alert(world.db, x.store, waiter) == ("wamid.9", None)
+    sent = service.send_message.await_args.args[0]
+    assert sent.recipient.language == sent_in
+
+
+@pytest.mark.asyncio
 async def test_two_checks_at_once_queue_each_waiter_once(world):
     """BIS-I-13."""
     x = await world.build()

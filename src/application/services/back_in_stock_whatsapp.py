@@ -114,7 +114,12 @@ async def send_alert(
     state = await whatsapp_state(db, store)
     if not state["access"] or not state["credentials_ok"]:
         return None, "whatsapp_not_connected"
-    lang = "en" if waiter.locale == "en" else "ar"
+    # The shopper's language when its template is approved, else one that is:
+    # can_send() needs only one, and an alert in the other language beats a
+    # waiter failed for good.
+    wanted = "en" if waiter.locale == "en" else "ar"
+    approved = [k for k, v in state["template"].items() if v == "APPROVED"]
+    lang = wanted if wanted in approved or not approved else approved[0]
     template_status = state["template"].get(lang) or next(
         iter(state["template"].values()), None
     )
