@@ -212,6 +212,8 @@ async def send(waiter_id: UUID, *, final_try: bool = True) -> dict:
         if transient and not final_try:
             raise RuntimeError(f"back_in_stock_send_failed:{reason}")
 
+        # The bypass is transaction-local, and core's message log commits.
+        await enable_rls_bypass(db)
         waiter.updated_at = datetime.now(UTC)
         if message_id:
             waiter.status, waiter.message_id, waiter.notified_at = (
@@ -398,6 +400,7 @@ async def sweep(now: datetime | None = None) -> dict:
             .values(status=bis.WAITING, queued_at=None, updated_at=now)
         )
         await db.commit()
+        await enable_rls_bypass(db)  # transaction-local: gone with the commit
         pairs = (
             await db.execute(
                 select(Waiter.store_id, Waiter.product_id)

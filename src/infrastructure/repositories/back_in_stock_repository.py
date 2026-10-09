@@ -138,13 +138,14 @@ async def by_token(
 
 
 async def unsubscribe_contact(db: AsyncSession, store_id: UUID, contact: str) -> int:
-    """Every waiting row of this contact in this store; other stores keep theirs."""
+    """Every waiting or queued row of this contact in this store (a queued
+    alert not yet sent is stopped too); other stores keep theirs."""
     result = await db.execute(
         update(Waiter)
         .where(
             Waiter.store_id == store_id,
             Waiter.contact == contact,
-            Waiter.status == bis.WAITING,
+            Waiter.status.in_((bis.WAITING, bis.QUEUED)),
         )
         .values(status=bis.UNSUBSCRIBED, updated_at=datetime.now(UTC))
     )

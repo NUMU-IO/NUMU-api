@@ -481,6 +481,56 @@ async def test_a_provider_error_is_retried_before_it_fails(world, monkeypatch):
     assert waiter.status == "queued"
 
 
+def _record_bypass_and_commits(world, monkeypatch):
+    """The order of RLS-bypass calls and commits. The bypass is
+    transaction-local, so after a commit it must be set again before the
+    session reads or writes tenant rows."""
+    calls = []
+    tasks.enable_rls_bypass.side_effect = lambda db: calls.append("bypass")
+    commit = world.db.commit
+
+    async def recording_commit():
+        calls.append("commit")
+        await commit()
+
+    monkeypatch.setattr(world.db, "commit", recording_commit)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_send_sets_the_bypass_again_after_the_message_log_commit(
+    world, monkeypatch
+):
+    x = await world.build()
+    waiter = await _queued_waiter(world, x)
+    calls = _record_bypass_and_commits(world, monkeypatch)
+
+    async def send_alert(db, store, w):
+        await db.commit()  # core's _persist_message_log commits
+        return "wamid.1", None
+
+    monkeypatch.setattr(wa, "send_alert", send_alert)
+    await tasks.send(waiter.id)
+
+    assert calls == ["bypass", "commit", "bypass", "commit"]
+    assert waiter.status == "notified"
+
+
+@pytest.mark.asyncio
+async def test_an_unsubscribe_stops_an_alert_already_queued(world, monkeypatch):
+    x = await world.build()
+    waiter = await _queued_waiter(world, x)
+    assert waiter.status == "queued"
+    send_alert = AsyncMock(return_value=("wamid.1", None))
+    monkeypatch.setattr(wa, "send_alert", send_alert)
+
+    await shop.unsubscribe(x.store.id, waiter.unsub_token, world.db)
+
+    assert await tasks.send(waiter.id) == {"skipped": "not_queued"}
+    assert waiter.status == "unsubscribed"
+    send_alert.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_sold_out_again_goes_back_in_line(world):
     x = await world.build()
@@ -671,7 +721,7 @@ async def test_retention_task(world):
 
 
 @pytest.mark.asyncio
-async def test_sweep_requeues_lost_sends_and_checks_every_product(world):
+async def test_sweep_requeues_lost_sends_and_checks_every_product(world, monkeypatch):
     """BIS-I-06: stock raised with no event still gets a check."""
     x = await world.build()
     await _subscribe(world, x)
@@ -679,7 +729,9 @@ async def test_sweep_requeues_lost_sends_and_checks_every_product(world):
     lost.status, lost.queued_at = "queued", datetime.now(UTC) - timedelta(hours=2)
     await world.db.flush()
 
+    calls = _record_bypass_and_commits(world, monkeypatch)
     assert await tasks.sweep() == {"checked": 1}
+    assert calls == ["bypass", "commit", "bypass"]
     assert lost.status == "waiting"
     tasks.restock_check_task.apply_async.assert_called_once_with(
         args=[str(x.store.id), str(x.product.id)]
