@@ -4329,14 +4329,21 @@ async def save_meta_tracking(
         # Wave 2 Phase 12 — COD-aware Purchase / Lead firing config.
         # None preserves legacy behavior (paymob/fawry webhooks remain
         # the sole Purchase source).
+        #
+        # "Did not supply" means the key is absent from the JSON, not that it
+        # is null. Keyed on `is not None`, an explicit `purchase_trigger: null`
+        # was treated as "keep", so no client could ever clear a trigger: the
+        # hub's COD-timing section posts `purchase_trigger: null` by design
+        # and the store MCP maps "none" to null, and both silently kept the
+        # stale value. `model_fields_set` separates the two cases.
         "purchase_trigger": (
             request.purchase_trigger
-            if request.purchase_trigger is not None
+            if "purchase_trigger" in request.model_fields_set
             else meta_cfg.get("purchase_trigger")
         ),
         "lead_trigger": (
             request.lead_trigger
-            if request.lead_trigger is not None
+            if "lead_trigger" in request.model_fields_set
             else meta_cfg.get("lead_trigger")
         ),
         # Wave 2 Phase 15 — fire Lead when COD customer confirms via
