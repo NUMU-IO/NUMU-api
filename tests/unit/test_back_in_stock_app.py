@@ -830,11 +830,19 @@ async def test_retention_task(world):
 
     old_wait, fresh_wait = row("waiting", 181, 181), row("waiting", 5, 5)
     old_sent, new_sent = row("notified", 60, 31), row("notified", 20, 10)
+    # Alerted long ago, but the same shopper still waits for another product.
+    still_waiting = row("notified", 60, 31)
+    still_waiting.contact = fresh_wait.contact
     await world.db.flush()
 
     assert await tasks.retention(now) == {"closed": 1, "erased": 1}
     assert (old_wait.status, fresh_wait.status) == ("closed", "waiting")
     assert (old_sent.contact, new_sent.contact is not None) == (None, True)
+    assert still_waiting.contact == fresh_wait.contact
+
+    # So the old alert's unsubscribe link still stops the pending wait.
+    await shop.unsubscribe(x.store.id, still_waiting.unsub_token, world.db)
+    assert fresh_wait.status == "unsubscribed"
 
 
 @pytest.mark.asyncio

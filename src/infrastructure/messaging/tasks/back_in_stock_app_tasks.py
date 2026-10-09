@@ -376,6 +376,7 @@ async def retention(now: datetime | None = None) -> dict:
             .all()
         )
         closed = erased = 0
+        to_erase = []
         for row in rows:
             status, erase = bis.retention_actions(
                 status=row.status,
@@ -388,6 +389,26 @@ async def retention(now: datetime | None = None) -> dict:
                 row.status, row.updated_at = status, now
                 closed += 1
             if erase:
+                to_erase.append(row)
+        await db.flush()
+        # A contact still waiting in the store keeps it on its done rows too,
+        # so an old alert's unsubscribe link still stops what is pending.
+        pending = (
+            set(
+                (
+                    await db.execute(
+                        select(Waiter.store_id, Waiter.contact).where(
+                            Waiter.status.in_((bis.WAITING, bis.QUEUED)),
+                            Waiter.contact.in_({r.contact for r in to_erase}),
+                        )
+                    )
+                ).all()
+            )
+            if to_erase
+            else set()
+        )
+        for row in to_erase:
+            if (row.store_id, row.contact) not in pending:
                 row.contact = None
                 erased += 1
         await db.commit()
