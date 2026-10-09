@@ -232,6 +232,27 @@ def _sweep_attempt_for(attempt_count: int) -> int:
     return max(1, attempt_count - CELERY_ATTEMPT_BUDGET + 1)
 
 
+def _trigger_owns_cod_purchase(order: Any, meta_cfg: dict[str, Any]) -> bool:
+    """True when the orphan sweep must stand down for ``order``.
+
+    A cash-on-delivery order (``payment_method`` ``"cod"`` or unset, the same
+    rule checkout and ``_sweep_order_filter`` use) in a store whose
+    ``purchase_trigger`` the status handler can act on: that handler owns the
+    moment the sale counts. Gate on a trigger in ``_VALID_TRIGGER_STATUSES``,
+    not on truthiness — ``store.settings`` is JSONB and is also written by
+    SQLAdmin, the MCP and seed scripts, so a value outside that set would make
+    the sweep stand down for a handler that never fires, and the COD Purchase
+    would be lost entirely.
+    """
+    if (getattr(order, "payment_method", None) or "cod") != "cod":
+        return False
+    from src.infrastructure.events.handlers.meta_capi_status_event_handler import (
+        _VALID_TRIGGER_STATUSES,
+    )
+
+    return meta_cfg.get("purchase_trigger") in _VALID_TRIGGER_STATUSES
+
+
 def _build_request_payload(
     *,
     event_name: str,
@@ -2074,13 +2095,16 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             # MCP and seed scripts, none of which go through the hub's Literal
             # type — would make the sweep stand down for a handler that never
             # fires, and the COD Purchase would be lost entirely.
-            if getattr(order_full, "paid_at", None) is None:
-                from src.infrastructure.events.handlers.meta_capi_status_event_handler import (  # noqa: E501
-                    _VALID_TRIGGER_STATUSES,
-                )
-
-                if meta_cfg.get("purchase_trigger") in _VALID_TRIGGER_STATUSES:
-                    continue
+            #
+            # Keyed on the payment method, NOT on `paid_at`. A COD order gets
+            # `paid_at` when the cash is collected on delivery, days after
+            # placement, so the old `paid_at IS NULL` gate let it back in as if
+            # a gateway webhook had failed: on a live store the sweep sent a
+            # second Purchase 8-15 days after the confirmation page's browser
+            # Purchase, outside Meta's 48-hour dedup window, and Meta counted
+            # the sale twice, dated at delivery.
+            if _trigger_owns_cod_purchase(order_full, meta_cfg):
+                continue
 
             # Build the SAME rich payload the webhook path sends. The
             # sweep used to fire ``user_data={}`` as "best-effort" — but
