@@ -48,6 +48,7 @@ from src.api.v1.routes.app_oauth import router as app_oauth_router
 from src.api.v1.routes.app_reviews import partner_router as app_reviews_partner_router
 from src.api.v1.routes.app_support import partner_router as app_support_partner_router
 from src.api.v1.routes.app_usage import router as app_usage_router
+from src.api.v1.routes.apps import router as apps_router
 from src.api.v1.routes.auth import router as auth_router
 
 # Billing routes (subscribe, cancel, invoices)
@@ -213,6 +214,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront import (
     wishlist_router as storefront_wishlist_router,
 )
+from src.api.v1.routes.storefront.apps_back_in_stock import (
+    router as storefront_back_in_stock_router,
+)
 from src.api.v1.routes.storefront.cart_sdk_aliases import (
     router as storefront_cart_sdk_router,
 )
@@ -263,6 +267,8 @@ api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 # Partner portal (apps plan Phase 2); 404 while the program is closed.
 api_router.include_router(partners_router)
 api_router.include_router(partner_apps_router)
+# Apps whose backend lives here: /apps/<slug>/…, session tokens only.
+api_router.include_router(apps_router)
 api_router.include_router(partner_portal_router)
 api_router.include_router(app_reviews_partner_router)
 api_router.include_router(app_support_partner_router)
@@ -385,6 +391,13 @@ api_router.include_router(
     storefront_order_lookup_router,
     prefix="/storefront/store/{store_id}",
     tags=["Storefront - Tracking"],
+)
+
+# Storefront - Back in Stock app (shopper sign-up, unsubscribe); also
+# registers its numueg.app/a/back-in-stock/... link resolver.
+api_router.include_router(
+    storefront_back_in_stock_router,
+    prefix="/storefront/store/{store_id}",
 )
 
 # Storefront - public routes (catalog, customer auth)

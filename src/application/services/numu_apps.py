@@ -155,7 +155,20 @@ async def _purge_whatsapp(db: AsyncSession, store_id: UUID) -> None:
     )
 
 
-_PURGERS = {"inbox": _purge_inbox, "whatsapp": _purge_whatsapp}
+#: How to delete one store's data, per app slug. Uninstall schedules the
+#: 30-day purge for every slug here, NUMU App or Partner App; an app with its
+#: own tables adds its purger at import (APP-STANDARD § 8).
+async def _purge_back_in_stock(db: AsyncSession, store_id: UUID) -> None:
+    from src.infrastructure.repositories.back_in_stock_repository import purge_store
+
+    await purge_store(db, store_id)
+
+
+PURGERS = {
+    "inbox": _purge_inbox,
+    "whatsapp": _purge_whatsapp,
+    "back-in-stock": _purge_back_in_stock,
+}
 
 
 async def purge_due(db: AsyncSession, *, now: datetime | None = None) -> dict:
@@ -173,7 +186,7 @@ async def purge_due(db: AsyncSession, *, now: datetime | None = None) -> dict:
         )
     ).all()
     for row_id, store_id, slug in due:
-        purger = _PURGERS.get(slug)
+        purger = PURGERS.get(slug)
         if purger is not None:
             await purger(db, store_id)
         await db.execute(

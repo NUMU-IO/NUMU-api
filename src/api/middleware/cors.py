@@ -99,6 +99,73 @@ class PublicReadCORSMiddleware:
         await self.app(scope, receive, send_public)
 
 
+APP_ROUTES_PREFIX = "/api/v1/apps/"
+
+
+class AppCORSMiddleware:
+    """CORS for the app routes (``/api/v1/apps/*``), for app fronts only.
+
+    App fronts call these routes with a bearer session token and never with
+    cookies, so the answer never allows credentials, and their origins live in
+    ``APP_CORS_ORIGINS``, never in ``CORS_ORIGINS``: that list allows
+    credentials on every route, so script on an app's domain could read core
+    routes with the merchant's cookie. On this prefix this middleware owns
+    CORS and drops whatever the main policy would have added.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self.origins = frozenset(settings.app_cors_origins)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not scope["path"].startswith(APP_ROUTES_PREFIX):
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope["headers"])
+        origin = headers.get(b"origin", b"").decode("latin-1")
+        allowed = origin in self.origins
+
+        if scope["method"] == "OPTIONS" and b"access-control-request-method" in headers:
+            response_headers = [(b"vary", b"Origin")]
+            if allowed:
+                response_headers += [
+                    (b"access-control-allow-origin", origin.encode("latin-1")),
+                    (b"access-control-allow-methods", b"GET, POST, PUT, PATCH, DELETE"),
+                    (b"access-control-max-age", b"600"),
+                ]
+                requested = headers.get(b"access-control-request-headers")
+                if requested:
+                    response_headers.append((
+                        b"access-control-allow-headers",
+                        requested,
+                    ))
+            await send({
+                "type": "http.response.start",
+                "status": 204 if allowed else 400,
+                "headers": response_headers,
+            })
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        async def send_app(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                response_headers = [
+                    (key, value)
+                    for key, value in message.get("headers", [])
+                    if not key.lower().startswith(b"access-control-")
+                ]
+                if allowed:
+                    response_headers += [
+                        (b"access-control-allow-origin", origin.encode("latin-1")),
+                        (b"vary", b"Origin"),
+                    ]
+                message = {**message, "headers": response_headers}
+            await send(message)
+
+        await self.app(scope, receive, send_app)
+
+
 def _validate_origins(origins: list[str], environment: str) -> list[str]:
     """Validate and sanitize CORS origins.
 
@@ -259,8 +326,9 @@ def setup_cors(app: FastAPI) -> None:
         if environment == "production"
         else 0,  # Cache preflight for 10 min in prod
     )
-    # Added after CORSMiddleware so it is outermost and answers first.
+    # Added after CORSMiddleware so they are outermost and answer first.
     app.add_middleware(PublicReadCORSMiddleware)
+    app.add_middleware(AppCORSMiddleware)
 
     if settings.debug:
         logger.debug(

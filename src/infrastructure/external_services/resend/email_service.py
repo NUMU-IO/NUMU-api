@@ -220,6 +220,8 @@ class ResendEmailService(IEmailService):
                 params["reply_to"] = message.reply_to
             if message.attachments:
                 params["attachments"] = message.attachments
+            if message.headers:
+                params["headers"] = message.headers
 
             resend.Emails.send(params)
         except Exception as e:
