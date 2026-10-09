@@ -1215,14 +1215,15 @@ class MarketplaceService:
 
         # The id fragment keeps two activations of this theme in the same
         # second (two stores created back to back) off `uq_theme_version`.
+        # The marketplace version is trimmed so the whole fits String(50).
         runtime_version_id = _uuid4_v()
+        suffix = (
+            f"+mp.{int(datetime.now(UTC).timestamp())}.{runtime_version_id.hex[:8]}"
+        )
         runtime_version = _RuntimeThemeVersion(
             id=runtime_version_id,
             theme_id=runtime_theme.id,
-            version=(
-                f"{version.version_string}+mp."
-                f"{int(datetime.now(UTC).timestamp())}.{runtime_version_id.hex[:8]}"
-            ),
+            version=f"{version.version_string[: 50 - len(suffix)]}{suffix}",
             bundle_url=version.bundle_url,
             css_url=version.css_url,
             manifest={
