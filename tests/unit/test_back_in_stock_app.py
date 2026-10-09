@@ -451,6 +451,44 @@ async def test_the_alert_goes_out_in_an_approved_language(
 
 
 @pytest.mark.asyncio
+async def test_one_restock_alerts_at_most_its_cap_across_checks(world):
+    """Each sale fires a stock event and the sweep runs every 10 minutes:
+    later checks must not add waves beyond max(10 × units, 20)."""
+    x = await world.build()
+    for i in range(45):
+        await _subscribe(world, x, phone=f"0101234{i:04d}")
+
+    assert await _restock(world, x, 2) == {"queued": 20}
+    assert await tasks.restock_check(x.store.id, x.product.id) == {"queued": 0}
+
+    alerted = [w for w in await _waiters(world.db, x.store.id) if w.status != "waiting"]
+    for w in alerted:  # sent, then the restock is over a day old
+        w.status = "notified"
+        w.notified_at = w.queued_at = datetime.now(UTC) - timedelta(hours=25)
+    await world.db.flush()
+    assert await tasks.restock_check(x.store.id, x.product.id) == {"queued": 20}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["whatsapp_not_connected", "template_not_approved"])
+async def test_a_store_side_refusal_puts_the_waiter_back_in_line(
+    world, monkeypatch, reason
+):
+    """WhatsApp stopped working between the queue and the send: the waiter
+    waits for the fix instead of failing for good."""
+    x = await world.build()
+    waiter = await _queued_waiter(world, x)
+    monkeypatch.setattr(wa, "send_alert", AsyncMock(return_value=(None, reason)))
+
+    assert await tasks.send(waiter.id) == {"skipped": reason}
+    assert (waiter.status, waiter.queued_at, waiter.fail_reason) == (
+        "waiting",
+        None,
+        None,
+    )
+
+
+@pytest.mark.asyncio
 async def test_two_checks_at_once_queue_each_waiter_once(world):
     """BIS-I-13."""
     x = await world.build()

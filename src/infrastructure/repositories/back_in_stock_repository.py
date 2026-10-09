@@ -102,6 +102,23 @@ async def sent_today(
     )
 
 
+async def alerted_since(
+    db: AsyncSession, store_id: UUID, product_id: UUID, since: datetime
+) -> dict[UUID | None, int]:
+    """Alerts queued or sent per variant of this product since ``since``."""
+    rows = await db.execute(
+        select(Waiter.variant_id, func.count())
+        .where(
+            Waiter.store_id == store_id,
+            Waiter.product_id == product_id,
+            Waiter.status.in_((bis.QUEUED, bis.NOTIFIED)),
+            func.coalesce(Waiter.notified_at, Waiter.queued_at) >= since,
+        )
+        .group_by(Waiter.variant_id)
+    )
+    return dict(rows.all())
+
+
 async def existing_waiter(
     db: AsyncSession,
     store_id: UUID,

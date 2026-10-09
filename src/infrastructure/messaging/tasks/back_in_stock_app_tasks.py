@@ -99,7 +99,10 @@ async def restock_check(store_id: UUID, product_id: UUID) -> dict:
         )
 
         by_id = {v.id: v for v in variants}
-        per_target: dict[Any, int] = {}
+        # This restock's alerts so far count against its cap.
+        per_target = await repo.alerted_since(
+            db, store_id, product_id, now - bis.RESTOCK_WINDOW
+        )
         queued: list[Waiter] = []
         for waiter in waiting:
             if not bis.is_buyable(product, variants, waiter.variant_id):
@@ -218,6 +221,12 @@ async def send(waiter_id: UUID, *, final_try: bool = True) -> dict:
         # The bypass is transaction-local, and core's message log commits.
         await enable_rls_bypass(db)
         waiter.updated_at = datetime.now(UTC)
+        if reason in _STORE_REASONS:
+            # The store's WhatsApp stopped working after the queue: back in
+            # line, as restock_check keeps them until it works again.
+            waiter.status, waiter.queued_at = bis.WAITING, None
+            await db.commit()
+            return {"skipped": reason}
         if message_id:
             waiter.status, waiter.message_id, waiter.notified_at = (
                 bis.NOTIFIED,
@@ -232,6 +241,9 @@ async def send(waiter_id: UUID, *, final_try: bool = True) -> dict:
         await db.commit()
         return {"status": waiter.status}
 
+
+#: Refusals about the store, not the shopper: the waiter waits for a fix.
+_STORE_REASONS = {"whatsapp_not_connected", "template_not_approved"}
 
 #: Guard refusals: retrying cannot change them.
 _GUARD_REASONS = {

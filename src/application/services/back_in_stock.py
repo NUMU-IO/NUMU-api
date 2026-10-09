@@ -40,6 +40,11 @@ FIRST_SEND_SECONDS = 30
 SEND_GAP_SECONDS = 6
 
 ATTRIBUTION_WINDOW = timedelta(days=7)
+#: One restock, for its alert cap: alerts queued or sent for a variant in the
+#: last RESTOCK_WINDOW count against max(10 × units, 20), so later checks (each
+#: sale fires a stock event; the sweep runs every 10 minutes) add no waves.
+#: ponytail: a time window, not true restock events; those need stock history.
+RESTOCK_WINDOW = timedelta(hours=24)
 #: BIS-D6.
 WAITING_TTL = timedelta(days=180)
 ERASE_AFTER = timedelta(days=30)
