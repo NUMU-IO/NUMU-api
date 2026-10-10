@@ -721,17 +721,27 @@ async def get_current_store(
     # already-open request session directly, because that session's GUC was
     # set at creation time (before this dependency ran) when no tenant was
     # known. Best-effort — a failure here must not break a legitimate request.
-    if store.tenant_id:
-        try:
-            set_tenant_id(store.tenant_id)
-            await db.execute(
-                text("SELECT set_config('app.current_tenant', :v, true)"),
-                {"v": str(store.tenant_id)},
-            )
-        except Exception:  # noqa: BLE001 — RLS wiring must never 500 a request
-            logger.warning("rls_tenant_context_set_failed", store_id=str(store_id))
-
+    await apply_rls_tenant(db, store)
     return store
+
+
+async def apply_rls_tenant(db: AsyncSession, store: Store) -> None:
+    """Make ``store``'s tenant the RLS context of this request and its session.
+
+    Shared by every dependency that authorises a store (merchant routes, app
+    session routes). Best-effort: a failure must not break a legitimate
+    request.
+    """
+    if not store.tenant_id:
+        return
+    try:
+        set_tenant_id(store.tenant_id)
+        await db.execute(
+            text("SELECT set_config('app.current_tenant', :v, true)"),
+            {"v": str(store.tenant_id)},
+        )
+    except Exception:  # noqa: BLE001 — RLS wiring must never 500 a request
+        logger.warning("rls_tenant_context_set_failed", store_id=str(store.id))
 
 
 async def verify_store_ownership_streaming(

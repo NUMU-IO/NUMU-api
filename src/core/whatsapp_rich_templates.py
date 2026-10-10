@@ -26,6 +26,8 @@ _CART_URL = "https://numueg.app/cart/{{1}}"
 # COD-recovery pay deep-link (apex → tenant /pay redirect; see the recover-flow
 # spec). Suffix is "<subdomain>/<order_id>".
 _PAY_URL = "https://numueg.app/pay/{{1}}"
+# App message links (routes/app_links.py). Suffix "<app slug>/<subdomain>/<token>".
+_APP_URL = "https://numueg.app/a/{{1}}"
 
 
 # Each entry: name, language, category, body, footer, buttons (Meta format).
@@ -457,5 +459,66 @@ RICH_TEMPLATES: list[dict] = [
             "ORD-000032",
             "متجر القاهرة",
         ],
+    },
+    # Back in Stock app (docs/Plans/APPS/01-back-in-stock): a shopper asked to
+    # hear when one variant is back. 2 vars + 2 URL buttons (order, stop).
+    # UTILITY: one message the shopper requested, no offer (BIS-D8).
+    {
+        "name": "app_back_in_stock_v1",
+        "language": "en",
+        "category": "UTILITY",
+        "body": (
+            "Good news 🎉 *{{1}}*, the item you were waiting for, is back at "
+            "{{2}}.\n\nTap the button below to see it and order."
+        ),
+        "footer": "You're getting this because you asked for an alert.",
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "Order now",
+                "url": _APP_URL,
+                "example": [
+                    "https://numueg.app/a/back-in-stock/cairo-style/AbCdEfGhIjKlMnOpQrStUv"
+                ],
+            },
+            {
+                "type": "URL",
+                "text": "Stop alerts",
+                "url": _APP_URL,
+                "example": [
+                    "https://numueg.app/a/back-in-stock/cairo-style/u/AbCdEfGhIjKlMnOpQrStUv"
+                ],
+            },
+        ],
+        "body_examples": ["Cotton T-shirt — Black / L", "Cairo Style"],
+    },
+    {
+        "name": "app_back_in_stock_v1",
+        "language": "ar",
+        "category": "UTILITY",
+        "body": (
+            "خبر حلو 🎉 *{{1}}* اللي كنت مستنيه رجع تاني في {{2}}.\n\n"
+            "اضغط على الزرار تحت عشان تشوفه وتطلبه."
+        ),
+        "footer": "بعتنالك الرسالة دي عشان طلبت تنبيه.",
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "اطلبه دلوقتي",
+                "url": _APP_URL,
+                "example": [
+                    "https://numueg.app/a/back-in-stock/cairo-style/AbCdEfGhIjKlMnOpQrStUv"
+                ],
+            },
+            {
+                "type": "URL",
+                "text": "وقّف التنبيهات",
+                "url": _APP_URL,
+                "example": [
+                    "https://numueg.app/a/back-in-stock/cairo-style/u/AbCdEfGhIjKlMnOpQrStUv"
+                ],
+            },
+        ],
+        "body_examples": ["تيشيرت قطن — أسود / L", "متجر القاهرة"],
     },
 ]

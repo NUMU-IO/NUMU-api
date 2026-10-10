@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     allowed_hosts: list[str] = ["*"]
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5000"]
+    # Embedded app fronts (APP-STANDARD § 4.2): CORS on /api/v1/apps/* only,
+    # never with credentials. Never add these origins to CORS_ORIGINS.
+    app_cors_origins: list[str] = []
 
     # Beta launch
     beta_mode: bool = True  # Require invite code for store creation
