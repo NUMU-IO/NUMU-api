@@ -200,3 +200,70 @@ async def test_activation_moves_supports_from_presets_into_the_runtime_manifest(
     manifest = version_repo.create.await_args.args[0].manifest
     assert manifest["supports"] == OPT_IN
     assert manifest["presets"] == {"templates": {"home": {"sections": []}}}
+
+
+@pytest.mark.parametrize("version_string", ["1.1.0", "1.0.0-" + "a" * 44])
+async def test_two_activations_in_the_same_second_get_different_versions(
+    monkeypatch, version_string
+):
+    """Two stores activating one theme in the same second (two sign-ups, or
+    two dev stores in a row) minted the same ``<ver>+mp.<epoch seconds>`` and
+    the second hit ``uq_theme_version``: a 500 on store creation. A long
+    marketplace version (up to 50 characters) must still fit String(50)."""
+    from src.application.services import marketplace_service
+
+    class _OneSecond(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 9, 1, 17, 30, tzinfo=UTC)
+
+    monkeypatch.setattr(marketplace_service, "datetime", _OneSecond)
+    version = SimpleNamespace(
+        bundle_url="https://cdn.numueg.app/genova-v3/1.1.0/theme.js",
+        css_url=None,
+        settings_schema={},
+        section_schemas={},
+        presets={},
+        version_string=version_string,
+        checksum="abc123",
+    )
+    version_repo = SimpleNamespace(create=AsyncMock(side_effect=lambda v: v))
+    service = MarketplaceService(
+        SimpleNamespace(
+            get_installation=AsyncMock(
+                return_value=SimpleNamespace(
+                    uninstalled_at=None,
+                    preview_expires_at=None,
+                    marketplace_version_id=uuid4(),
+                )
+            ),
+            get_version_by_id=AsyncMock(return_value=version),
+            get_theme_by_id=AsyncMock(
+                return_value=SimpleNamespace(
+                    slug="genova-v3",
+                    name="Genova",
+                    description=None,
+                    supported_features=None,
+                )
+            ),
+        ),
+        store_theme_repo=SimpleNamespace(
+            get_active_for_store=AsyncMock(side_effect=_StopAfterManifest)
+        ),
+        store_repo=SimpleNamespace(),
+        theme_repo=SimpleNamespace(
+            get_by_slug=AsyncMock(return_value=SimpleNamespace(id=uuid4())),
+            update=AsyncMock(side_effect=lambda t: t),
+        ),
+        version_repo=version_repo,
+    )
+
+    for _ in range(2):
+        with pytest.raises(_StopAfterManifest):
+            await service.activate_theme(uuid4(), uuid4())
+
+    first, second = (c.args[0].version for c in version_repo.create.await_args_list)
+    assert first != second
+    # theme_versions.version is String(50).
+    assert len(first) <= 50 and len(second) <= 50
+    assert first.startswith(version_string[:20]) and "+mp.1791" in first
