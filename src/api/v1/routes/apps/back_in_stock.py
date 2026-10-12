@@ -271,7 +271,8 @@ async def put_settings(session: Session, db: Db, body: SettingsIn) -> dict:
 
 class TestSend(BaseModel):
     channel: Literal["whatsapp", "email"]
-    product_id: UUID
+    #: Left out on a store nobody waits on yet: its newest active product.
+    product_id: UUID | None = None
 
 
 @router.post("/test")
@@ -287,9 +288,12 @@ async def test_send(session: Session, db: Db, body: TestSend) -> dict:
         raise HTTPException(
             status_code=422, detail=f"Your account has no {body.channel} contact."
         )
-    product, _variants = await repo.product_with_variants(
-        db, session.store_id, body.product_id
-    )
+    if body.product_id is None:
+        product = await repo.newest_product(db, session.store_id)
+    else:
+        product, _variants = await repo.product_with_variants(
+            db, session.store_id, body.product_id
+        )
     if product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     store = await db.get(StoreModel, session.store_id)

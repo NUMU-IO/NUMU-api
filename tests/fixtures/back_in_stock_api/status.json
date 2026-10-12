@@ -1,0 +1,30 @@
+{
+  "whatsapp": {
+    "mode": "shared",
+    "transport": "meta",
+    "access": false,
+    "access_reason": "not_requested",
+    "credentials_ok": true,
+    "needs_approved_template": true,
+    "template": {
+      "ar": "PENDING",
+      "en": "PENDING"
+    },
+    "template_category": {
+      "ar": "UTILITY",
+      "en": "UTILITY"
+    },
+    "usable": false
+  },
+  "theme": {
+    "slug": "vionne-v3",
+    "version": "0.11.18",
+    "ready": true
+  },
+  "settings": {
+    "contact": "phone_or_email",
+    "signup_cap": 300,
+    "wa_cap": 200,
+    "email_cap": 1000
+  }
+}

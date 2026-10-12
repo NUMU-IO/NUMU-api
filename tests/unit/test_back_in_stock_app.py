@@ -1020,6 +1020,32 @@ async def test_the_test_send_goes_to_the_merchants_own_contact(world, monkeypatc
     assert sent.await_args.args[2].contact == "+201098765432"
 
 
+@pytest.mark.asyncio
+async def test_the_test_send_without_a_product_uses_the_newest_active_one(
+    world, monkeypatch
+):
+    """First run: nobody waits yet, so the front sends no product."""
+    x = await world.build()
+    x.owner.phone = "01098765432"
+    await world.db.flush()
+    sent = AsyncMock(return_value=("wamid.t", None))
+    monkeypatch.setattr(wa, "send_alert", sent)
+
+    out = await merchant.test_send(
+        x.session, world.db, merchant.TestSend(channel="whatsapp")
+    )
+    assert out["sent"] is True
+    assert sent.await_args.args[2].product_title == "تيشيرت قطن"
+
+    x.product.status = ProductStatus.DRAFT
+    await world.db.flush()
+    with pytest.raises(HTTPException) as e:
+        await merchant.test_send(
+            x.session, world.db, merchant.TestSend(channel="whatsapp")
+        )
+    assert e.value.status_code == 404
+
+
 # ─── Purge, data rights, messages ────────────────────────────────────
 
 

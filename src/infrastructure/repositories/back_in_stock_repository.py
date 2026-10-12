@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services import back_in_stock as bis
 from src.application.services.app_install_gate import live_installs
+from src.core.entities.product import ProductStatus
 from src.infrastructure.database.models.public.app import AppModel
 from src.infrastructure.database.models.tenant.back_in_stock import (
     BackInStockSettingsModel,
@@ -57,6 +58,19 @@ async def product_with_variants(
         .all()
     )
     return product, list(variants)
+
+
+async def newest_product(db: AsyncSession, store_id: UUID) -> ProductModel | None:
+    """A real product for the merchant's test message on a store nobody waits on yet."""
+    return await db.scalar(
+        select(ProductModel)
+        .where(
+            ProductModel.store_id == store_id,
+            ProductModel.status == ProductStatus.ACTIVE,
+        )
+        .order_by(ProductModel.created_at.desc())
+        .limit(1)
+    )
 
 
 def variant_title(variant: VariantModel | None) -> str | None:
