@@ -44,15 +44,40 @@ FIXTURES = (
 
 
 def _shape(value):
+    """JSON types, key by key. A list merges all of its items, so rows that tie
+    on a route's ORDER BY can come back in any order."""
     if isinstance(value, dict):
-        return {k: _shape(v) for k, v in sorted(value.items())}
+        return {k: _shape(v) for k, v in value.items()}
     if isinstance(value, list):
-        return [_shape(value[0])] if value else []
+        merged = None
+        for item in value:
+            merged = _merge(merged, _shape(item))
+        return ["list", merged]
     if isinstance(value, bool):
-        return "boolean"
+        return {"boolean"}
     if isinstance(value, int | float):
-        return "number"
-    return "null" if value is None else "string"
+        return {"number"}
+    return {"null"} if value is None else {"string"}
+
+
+def _merge(a, b):
+    """Two shapes as one: object keys united, scalar types united."""
+    if a is None or b is None:
+        return b if a is None else a
+    if isinstance(a, dict) and isinstance(b, dict):
+        return {k: _merge(a.get(k), b.get(k)) for k in a.keys() | b.keys()}
+    if isinstance(a, list) and isinstance(b, list):
+        return ["list", _merge(a[1], b[1])]
+    if isinstance(a, set) and isinstance(b, set):
+        return a | b
+    return {"mixed"}
+
+
+def test_shape_ignores_the_order_of_list_items():
+    """Seer on #764: the old check read only the first item."""
+    rows = [{"at": None, "why": "email_failed"}, {"at": "2026-10-10", "why": None}]
+    assert _shape(rows) == _shape(list(reversed(rows)))
+    assert _shape(rows) != _shape([{"at": None, "why": None}])
 
 
 def _check(name: str, out: dict) -> None:
