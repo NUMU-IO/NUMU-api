@@ -155,7 +155,11 @@ async def _unsubscribe_target(db: AsyncSession, store_id: UUID, token: str):
 @router.get("/unsubscribe/{token}")
 async def unsubscribe_info(store_id: StoreId, token: str, db: Db) -> dict:
     waiter, store = await _unsubscribe_target(db, store_id, token)
-    return {"store_name": store.name, "contact": bis.mask(waiter.contact)}
+    return {
+        "store_name": store.name,
+        "contact": bis.mask(waiter.contact),
+        "locale": waiter.locale,
+    }
 
 
 @router.post("/unsubscribe/{token}")
