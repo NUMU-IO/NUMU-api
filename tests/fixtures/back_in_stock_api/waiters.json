@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "id": "ad3304c8-9df0-4973-8213-92bb64b6da78",
+      "contact": "m•••@gmail.com",
+      "channel": "email",
+      "status": "failed",
+      "created_at": "2026-10-12T17:10:27",
+      "notified_at": null,
+      "fail_reason": "email_failed"
+    },
+    {
+      "id": "981efc21-7b54-41e0-be3e-37b93eede3f6",
+      "contact": "+20 11•• ••• 5678",
+      "channel": "whatsapp",
+      "status": "notified",
+      "created_at": "2026-10-12T17:10:27",
+      "notified_at": "2026-10-10T17:10:27.810571",
+      "fail_reason": null
+    },
+    {
+      "id": "f2f0aa87-5374-419e-9e34-6486a3f9f116",
+      "contact": "+20 10•• ••• 5678",
+      "channel": "whatsapp",
+      "status": "waiting",
+      "created_at": "2026-10-12T17:10:27",
+      "notified_at": null,
+      "fail_reason": null
+    }
+  ]
+}

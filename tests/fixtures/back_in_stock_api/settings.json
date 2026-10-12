@@ -1,0 +1,6 @@
+{
+  "contact": "phone_or_email",
+  "signup_cap": 300,
+  "wa_cap": 200,
+  "email_cap": 1000
+}
