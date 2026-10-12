@@ -72,6 +72,7 @@ from src.application.services.app_review import (
     subject_of,
 )
 from src.application.services.app_tokens import mint, store_client_secret
+from src.application.services.numu_apps import cancel_purge
 from src.application.services.partner_program import partner_for_user
 from src.core.entities.app import AppStatus
 from src.core.interfaces.services.storage_service import StorageBucket
@@ -935,6 +936,8 @@ async def dev_install(
             constraint="uq_app_installation_store_app", set_={"is_enabled": True}
         )
     )
+    # Reinstalled inside the retention window: the app's data stays.
+    await cancel_purge(db, store.id, app.id)
     return SuccessResponse(
         data={"store_id": str(store.id), "slug": app.slug},
         message="Installed on your dev store",

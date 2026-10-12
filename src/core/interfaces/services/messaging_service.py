@@ -46,6 +46,9 @@ class MessageType(StrEnum):
     # needs an approved AUTH template (special OTP component) and is not
     # wired yet — see application/services/checkout_identity.otp_available.
     OTP_VERIFICATION = "otp_verification"
+    # Back in Stock app: one variant a shopper asked about is buyable again.
+    # Shopper-requested, one message per request.
+    BACK_IN_STOCK_ALERT = "back_in_stock_alert"
 
 
 class MessageStatus(StrEnum):
@@ -606,6 +609,52 @@ EGYPTIAN_TEMPLATES = {
             language="ar",
             components=[
                 {"type": "body", "parameters": ["code", "store_name"]},
+            ],
+        ),
+    },
+    MessageType.BACK_IN_STOCK_ALERT: {
+        "en": MessageTemplate(
+            type=MessageType.BACK_IN_STOCK_ALERT,
+            name="app_back_in_stock_v1",
+            language="en",
+            components=[
+                # Body: {{1}} product and variant, {{2}} store name.
+                {"type": "body", "parameters": ["product", "store_name"]},
+                # URL buttons on https://numueg.app/a/{{1}}: order, then stop.
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["order_link"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "1",
+                    "parameters": ["stop_link"],
+                },
+            ],
+        ),
+        "ar": MessageTemplate(
+            type=MessageType.BACK_IN_STOCK_ALERT,
+            name="app_back_in_stock_v1",
+            language="ar",
+            components=[
+                # Body: {{1}} product and variant, {{2}} store name.
+                {"type": "body", "parameters": ["product", "store_name"]},
+                # URL buttons on https://numueg.app/a/{{1}}: order, then stop.
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["order_link"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "1",
+                    "parameters": ["stop_link"],
+                },
             ],
         ),
     },

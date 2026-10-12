@@ -100,6 +100,8 @@ DEFAULT_ALLOWED_TYPES: frozenset[str] = frozenset({
     # Lowest report risk of anything here: the recipient literally just
     # clicked "send me a code". Gets the reduced OTP jitter below.
     str(MessageType.OTP_VERIFICATION),
+    # Back in Stock app: the shopper asked for exactly this one message.
+    str(MessageType.BACK_IN_STOCK_ALERT),
     # Higher risk than the rest — see the note above.
     str(MessageType.ABANDONED_CART),
     str(MessageType.COD_RECOVERY_OFFER),

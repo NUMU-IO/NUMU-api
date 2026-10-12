@@ -47,6 +47,7 @@ from src.application.services.app_tokens import (
     verify_client_secret,
 )
 from src.application.services.entitlement_service import EntitlementService
+from src.application.services.numu_apps import cancel_purge
 from src.application.services.partner_program import partner_apps_enabled
 from src.core.entities.app import AppStatus
 from src.core.entitlements import UNLIMITED
@@ -430,6 +431,8 @@ async def token(body: TokenRequest, db: Annotated[AsyncSession, Depends(get_db)]
     )
     installation.status = "active"
     installation.granted_scopes = code.scopes
+    # Reinstalled inside the retention window: the app's data stays.
+    await cancel_purge(db, installation.store_id, installation.app_id)
 
     # The manifest's subscriptions, owned by this installation, limited to
     # the events whose read scope the merchant granted.

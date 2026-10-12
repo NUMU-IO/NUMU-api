@@ -146,6 +146,23 @@ def _review_to_dict(r: Any) -> dict[str, Any]:
     }
 
 
+async def _back_in_stock_export(
+    order_repo: OrderRepository, customer: Customer
+) -> list[dict[str, Any]]:
+    """The Back in Stock app's waiting rows for this shopper's phone or
+    email. Best-effort, like every optional category."""
+    try:
+        from src.infrastructure.repositories import back_in_stock_repository as bis_repo
+
+        return await bis_repo.export_for(
+            order_repo.session,
+            customer.store_id,
+            bis_repo.shopper_contacts(customer),
+        )
+    except Exception:
+        return []
+
+
 async def _delivery_checks_export(
     order_repo: OrderRepository, customer_id: UUID
 ) -> list[dict[str, Any]]:
@@ -238,6 +255,8 @@ async def data_export(
             "delivery_checks": await _delivery_checks_export(
                 order_repo, current_customer.id
             ),
+            # Back in Stock app: the products this shopper waits for.
+            "back_in_stock": await _back_in_stock_export(order_repo, current_customer),
         },
     )
 
@@ -294,6 +313,10 @@ async def delete_account(
     """
     deleted_id = current_customer.id
     placeholder_email = f"deleted-{deleted_id}@numu.local"
+    # Read before step 1 wipes them: the Back in Stock rows are keyed by them.
+    from src.infrastructure.repositories import back_in_stock_repository as bis_repo
+
+    bis_contacts = bis_repo.shopper_contacts(current_customer)
 
     # 1. Anonymize the customer row. We keep the row (rather than
     #    DELETE) so foreign keys on orders / reviews don't ON DELETE
@@ -333,6 +356,14 @@ async def delete_account(
         await WhatsAppDeliveryCheckRepository(
             customer_repo.session
         ).anonymize_for_customer(deleted_id)
+    except Exception:
+        pass
+
+    # 2c. Back in Stock app: the shopper's waiting rows go entirely.
+    try:
+        await bis_repo.delete_for(
+            customer_repo.session, current_customer.store_id, bis_contacts
+        )
     except Exception:
         pass
 

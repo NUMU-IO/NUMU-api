@@ -33,6 +33,7 @@ from src.api.middleware.storefront_response_cache import (
 )
 from src.api.short_link_redirect import router as short_link_redirect_router
 from src.api.v1.routes import api_router
+from src.api.v1.routes.app_links import router as app_links_router
 from src.api.v1.routes.order_redirect import router as order_redirect_router
 from src.config import settings
 from src.core.logging import configure_logging, get_logger
@@ -474,6 +475,8 @@ def create_app() -> FastAPI:
     # WhatsApp template CTA buttons point at numueg.app/o/{order_id}
     # and resolve to the tenant store's /track/<id> page (backend-030).
     app.include_router(order_redirect_router)
+    # App message links (numueg.app/a/<slug>/...), the same idea for apps.
+    app.include_router(app_links_router)
 
     # Serve local uploads in development (when object storage is not
     # configured). Gated on the same ``object_storage_configured`` signal as

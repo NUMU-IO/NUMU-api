@@ -66,6 +66,15 @@ from src.infrastructure.events.handlers.abandoned_recovery_handler import (
     handle_order_created_recovery,
 )
 from src.infrastructure.events.handlers.activity_log_handler import handle_activity_log
+from src.infrastructure.events.handlers.back_in_stock_handler import (
+    on_inventory_changed as back_in_stock_on_inventory_changed,
+)
+from src.infrastructure.events.handlers.back_in_stock_handler import (
+    on_order_created as back_in_stock_on_order_created,
+)
+from src.infrastructure.events.handlers.back_in_stock_handler import (
+    on_product_deleted as back_in_stock_on_product_deleted,
+)
 from src.infrastructure.events.handlers.email_notification_handler import (
     handle_email_notification,
 )
@@ -329,6 +338,10 @@ def create_event_bus() -> EventBus:
     bus.subscribe(ShipmentCreatedEvent, handle_webhook_shipment_created)
     bus.subscribe(ShipmentStatusChangedEvent, handle_webhook_shipment_status_changed)
     bus.subscribe(InventoryLevelChangedEvent, handle_webhook_inventory_level_changed)
+    # Back in Stock app: gated per store on each handler's first line.
+    bus.subscribe(InventoryLevelChangedEvent, back_in_stock_on_inventory_changed)
+    bus.subscribe(ProductDeletedEvent, back_in_stock_on_product_deleted)
+    bus.subscribe(OrderCreatedEvent, back_in_stock_on_order_created)
     install_commit_watch(bus)
 
     # Recovery flow (backend-021): risk-finalised → spawn flow; flow-started →

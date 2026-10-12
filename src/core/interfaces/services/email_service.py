@@ -18,6 +18,8 @@ class EmailMessage:
     attachments: list[dict] | None = None
     template_id: str | None = None
     context: dict | None = None
+    #: Extra headers, e.g. List-Unsubscribe and List-Unsubscribe-Post.
+    headers: dict[str, str] | None = None
 
 
 class IEmailService(ABC):

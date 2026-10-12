@@ -51,6 +51,16 @@ RESERVED_SUBDOMAINS = frozenset({
     "pay",
     "payment",
     "billing",
+    # App fronts (<slug>.numueg.app, docs/Plans/APPS/README.md)
+    "back-in-stock",
+    "order-tracking",
+    "reviews",
+    "ai-catalog",
+    "smart-search",
+    "product-options",
+    "flow",
+    "affiliate",
+    "product-quiz",
     # Brand
     "numu",
     "numo",

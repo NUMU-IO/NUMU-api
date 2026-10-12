@@ -44,6 +44,7 @@ from src.application.services.app_manifest import validate_settings
 from src.application.services.numu_apps import (
     FLAG,
     NUMU_APPS,
+    PURGERS,
     cancel_purge,
     schedule_purge,
 )
@@ -614,8 +615,8 @@ async def uninstall_app(
             except Exception:  # noqa: BLE001 — a broker outage must not block uninstall
                 logger.warning("app_store_redact_schedule_failed", app=app.slug)
         await session.delete(row)
-        if slug in NUMU_APPS:
-            # Their data lives outside the install row; keep it for the
+        if slug in PURGERS:
+            # The app's data lives outside the install row; keep it for the
             # retention window so a reinstall brings it back.
             await schedule_purge(session, store_id, row.app_id)
         await session.commit()
@@ -705,28 +706,27 @@ async def app_session_token(
 ):
     """A 60-second HS256 JWT signed with the app's client secret, and the URL
     the hub frames (``app_url`` + ``embedded_path`` + ``?session_token``). The
-    hub asks again whenever the framed app posts ``numu:session-token``."""
+    hub asks again whenever the framed app posts ``numu:session-token``.
+
+    Served for a live install (``live_installs``): a published app, or a draft
+    on its developer's own dev store, so an app can be tested embedded before
+    App Review."""
+    from src.application.services.app_install_gate import live_installs
     from src.application.services.app_tokens import read_client_secret, session_token
 
     async with AsyncSessionLocal() as session:
+        live = await live_installs(session, store_id)
         row = (
             await session.execute(
-                select(AppModel, AppOAuthClientModel.client_id)
-                .join(AppInstallationModel, AppModel.id == AppInstallationModel.app_id)
+                live.add_columns(AppOAuthClientModel.client_id)
                 .join(AppOAuthClientModel, AppOAuthClientModel.app_id == AppModel.id)
-                .where(
-                    AppInstallationModel.store_id == store_id,
-                    AppInstallationModel.is_enabled.is_(True),
-                    AppInstallationModel.status == "active",
-                    AppModel.slug == slug,
-                    AppModel.status == AppStatus.PUBLISHED,
-                )
+                .where(AppModel.slug == slug)
             )
         ).one_or_none()
         contract = ((row[0].manifest or {}).get("app") or {}) if row else {}
-        if not contract.get("embedded") or not await partner_apps_enabled(session):
+        if not contract.get("embedded"):
             raise HTTPException(status_code=404, detail="Embedded app not found")
-        app, client_id = row
+        app, _install, client_id = row
         secret = await read_client_secret(session, app.id)
     if not secret:
         raise HTTPException(

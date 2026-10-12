@@ -181,6 +181,14 @@ def _is_newsletter_subscribe(path: str) -> bool:
     )
 
 
+def _is_back_in_stock_subscribe(path: str) -> bool:
+    """Back in Stock app sign-up: anonymous, every hit can write a waiter
+    row and later cost a message. A shopper signs up once per variant."""
+    return path.startswith("/api/v1/storefront/store/") and path.endswith(
+        "/apps/back-in-stock/subscribe"
+    )
+
+
 def _is_whatsapp_byo_connect(path: str) -> bool:
     """backend-030 / TASK-SEC-003 — BYO connect hits Meta with 3 reads
     per attempt. A merchant (or attacker with a leaked admin token)
@@ -703,6 +711,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         elif _is_newsletter_subscribe(path):
             # 10/IP/min: a shopper signs up once, maybe fixes a typo.
             tier = "newsletter"
+            limit = 10
+        elif _is_back_in_stock_subscribe(path):
+            # 10/IP/min, the same reasoning as the newsletter.
+            tier = "back_in_stock"
             limit = 10
         elif _is_whatsapp_byo_connect(path):
             # backend-030 / TASK-SEC-003 — each BYO connect attempt hits
