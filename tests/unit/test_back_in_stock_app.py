@@ -299,13 +299,15 @@ async def test_without_the_app_every_shopper_route_says_not_installed(world):
 async def test_unsubscribe_one_contact_in_one_store(world):
     """BIS-I-10 / S-12."""
     x, y = await world.build(), await world.build()
-    await _subscribe(world, x)
-    await _subscribe(world, x, variant_id=None, product_id=x.product.id)
+    await _subscribe(world, x, locale="en")
+    await _subscribe(world, x, variant_id=None, product_id=x.product.id, locale="en")
     await _subscribe(world, y)
     token = (await _waiters(world.db, x.store.id))[0].unsub_token
 
     info = await shop.unsubscribe_info(x.store.id, token, world.db)
     assert info["contact"] == "+20 10•• ••• 5678"
+    # The page speaks the shopper's language, not the store default's.
+    assert info["locale"] == "en"
     with pytest.raises(HTTPException):
         await shop.unsubscribe_info(
             y.store.id, token, world.db
