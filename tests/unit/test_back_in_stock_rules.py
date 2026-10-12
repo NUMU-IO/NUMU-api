@@ -169,6 +169,16 @@ def test_theme_readiness(monkeypatch, slug, version, want):
     assert bis.theme_ready(slug, version) is want
 
 
+def test_every_v3_theme_has_a_slot_ready_version():
+    """BIS-V-04: all 19 themes from V3-themes #109, each ready from its own
+    first version and not before (vionne's live 0.11.17 still needs Update)."""
+    ready = bis.SLOT_READY_THEME_VERSIONS
+    assert len(ready) == 19 and all(s.endswith("-v3") for s in ready)
+    for slug, first in ready.items():
+        assert bis.theme_ready(slug, first)
+    assert not bis.theme_ready("vionne-v3", "0.11.17")
+
+
 # BIS-U-12
 def test_attribution_window_and_matching_line():
     p, v, other = uuid4(), uuid4(), uuid4()

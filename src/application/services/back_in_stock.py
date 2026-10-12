@@ -54,9 +54,29 @@ UNSUBSCRIBED, CLOSED = "unsubscribed", "closed"
 STATUSES = (WAITING, QUEUED, NOTIFIED, FAILED, UNSUBSCRIBED, CLOSED)
 
 #: Themes whose product page has the app slot, by marketplace slug: the first
-#: version that has it. Filled by Phase G (the slot in all 19 themes); until
-#: then every theme reports "needs an update".
-SLOT_READY_THEME_VERSIONS: dict[str, str] = {}
+#: version that has it (V3-themes #109, deployed 2026-10-12 by deploy run
+#: 38277889018). A store pinned below it is told to update its theme.
+SLOT_READY_THEME_VERSIONS: dict[str, str] = {
+    "bazar-v3": "0.4.25",
+    "bon-younes-v3": "0.2.19",
+    "boutique-v3": "0.4.9",
+    "editorial-v3": "0.4.10",
+    "elegant-v3": "0.4.9",
+    "empire-v3": "0.6.18",
+    "genova-v3": "1.0.8",
+    "gilded-glamour-boutique-v3": "0.5.18",
+    "kick-game-v3": "0.4.9",
+    "luxury-minimal-v3": "0.6.22",
+    "modern-v3": "0.4.8",
+    "neo-brutalism-v3": "0.4.9",
+    "powells-v3": "1.4.12",
+    "rabbitsocks-v3": "0.4.9",
+    "skeuomorphic-v3": "0.4.9",
+    "street-v3": "0.2.7",
+    "tech-wave-v3": "0.4.9",
+    "teen-v3": "1.0.8",
+    "vionne-v3": "0.11.18",
+}
 
 
 # ─── Contacts ──────────────────────────────────────────────────────────
