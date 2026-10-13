@@ -150,34 +150,43 @@ def restock_check_task(self, store_id: str, product_id: str) -> dict:
 async def send_email_alert(
     db: Any, store: Any, waiter: Any, product: Any
 ) -> tuple[str | None, str | None]:
+    """A provider error is a failed send, never an exception: the alert task
+    retries it and the merchant's test message reports it."""
     from src.core.interfaces.services.email_service import EmailMessage
     from src.infrastructure.external_services.resend.email_service import (
         ResendEmailService,
     )
 
-    variant = None
-    if waiter.variant_id:
-        from src.infrastructure.database.models.tenant.variant import VariantModel
+    try:
+        variant = None
+        if waiter.variant_id:
+            from src.infrastructure.database.models.tenant.variant import VariantModel
 
-        variant = await db.get(VariantModel, waiter.variant_id)
-    priced = variant or product
-    message = bis.email_message(
-        store=store,
-        waiter=waiter,
-        product_slug=product.slug,
-        image=getattr(variant, "image_url", None) or (product.images or [None])[0],
-        price=bis.price_text(priced.price_amount, priced.price_currency, waiter.locale),
-    )
-    sent = await ResendEmailService().send_email(
-        EmailMessage(
-            to=waiter.contact,
-            subject=message["subject"],
-            html_content=message["html"],
-            text_content=message["text"],
-            from_name=store.name,
-            headers=message["headers"],
+            variant = await db.get(VariantModel, waiter.variant_id)
+        priced = variant or product
+        message = bis.email_message(
+            store=store,
+            waiter=waiter,
+            product_slug=product.slug,
+            image=getattr(variant, "image_url", None) or (product.images or [None])[0],
+            price=bis.price_text(
+                priced.price_amount, priced.price_currency, waiter.locale
+            ),
         )
-    )
+        sent = await ResendEmailService().send_email(
+            EmailMessage(
+                to=waiter.contact,
+                subject=message["subject"],
+                html_content=message["html"],
+                text_content=message["text"],
+                from_name=store.name,
+                headers=message["headers"],
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — Resend refused or failed
+        # The type only: a provider message can carry the address.
+        logger.warning("bis_email_failed", error=type(exc).__name__)
+        return None, "email_failed"
     return ("email", None) if sent else (None, "email_failed")
 
 
@@ -210,10 +219,7 @@ async def send(waiter_id: UUID, *, final_try: bool = True) -> dict:
             message_id, reason = await send_alert(db, store, waiter)
             transient = reason is not None and reason not in _GUARD_REASONS
         else:
-            try:
-                message_id, reason = await send_email_alert(db, store, waiter, product)
-            except Exception:  # noqa: BLE001 — provider error: retried below
-                message_id, reason = None, "email_failed"
+            message_id, reason = await send_email_alert(db, store, waiter, product)
             transient = reason is not None
         if transient and not final_try:
             raise RuntimeError(f"back_in_stock_send_failed:{reason}")

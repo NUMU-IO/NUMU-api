@@ -1021,6 +1021,54 @@ async def test_the_test_send_goes_to_the_merchants_own_contact(world, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_a_provider_error_is_a_failed_send_not_a_crash(world, monkeypatch):
+    """Found in Phase J: Resend refused the merchant's test email and the
+    route answered 500; the alert task already treated it as email_failed."""
+    from src.core.exceptions.base import ExternalServiceError
+    from src.infrastructure.external_services.resend.email_service import (
+        ResendEmailService,
+    )
+
+    async def refuse(self, message):
+        raise ExternalServiceError("Resend", "The domain is not verified.")
+
+    monkeypatch.setattr(ResendEmailService, "send_email", refuse)
+    x = await world.build()
+
+    out = await merchant.test_send(
+        x.session,
+        world.db,
+        merchant.TestSend(channel="email", product_id=x.product.id),
+    )
+    assert out["sent"] is False
+    assert out["reason"] == "email_failed"
+
+
+@pytest.mark.asyncio
+async def test_a_sent_email_logs_no_address(monkeypatch):
+    """BIS-S-08: the core email log line masks the shopper's address."""
+    from unittest.mock import MagicMock
+
+    import resend
+
+    from src.core.interfaces.services.email_service import EmailMessage
+    from src.infrastructure.external_services.resend import email_service
+
+    log = MagicMock()
+    monkeypatch.setattr(email_service, "logger", log)
+    monkeypatch.setattr(resend, "api_key", resend.api_key)  # restored afterwards
+    monkeypatch.setattr(resend.Emails, "send", lambda params: {"id": "re_1"})
+
+    sent = await email_service.ResendEmailService(api_key="re_test").send_email(
+        EmailMessage(to="sara.waiting@gmail.com", subject="Back", html_content="x")
+    )
+
+    assert sent is True
+    assert "sara.waiting" not in str(log.method_calls)
+    assert "s***@gmail.com" in str(log.method_calls)
+
+
+@pytest.mark.asyncio
 async def test_the_test_send_without_a_product_uses_the_newest_active_one(
     world, monkeypatch
 ):
