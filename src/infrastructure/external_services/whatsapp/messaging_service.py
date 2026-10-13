@@ -175,12 +175,14 @@ class WhatsAppMessagingService(IMessagingService):
                 parsed = phonenumbers.parse(phone, "EG")
             except NumberParseException as exc:
                 raise ValueError(
-                    f"Could not parse phone '{phone}' for WhatsApp delivery."
+                    f"Could not parse phone ***{phone[-4:]} for WhatsApp delivery."
                 ) from exc
 
+        # The tail only: send_message returns this text as error_message,
+        # and callers log it.
         if not phonenumbers.is_valid_number(parsed):
             raise ValueError(
-                f"Phone '{phone}' is not a valid number; WhatsApp would reject it."
+                f"Phone ***{phone[-4:]} is not a valid number; WhatsApp would reject it."
             )
 
         e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)

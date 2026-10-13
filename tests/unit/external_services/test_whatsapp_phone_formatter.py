@@ -63,6 +63,16 @@ class TestFormatPhoneNumber:
         with pytest.raises(ValueError):
             service._format_phone_number("")
 
+    def test_error_text_carries_only_the_phone_tail(
+        self, service: WhatsAppMessagingService
+    ) -> None:
+        # send_message returns this text as error_message, which callers log.
+        for raw in ("+2010984339", "0109843391x"):
+            with pytest.raises(ValueError) as caught:
+                service._format_phone_number(raw)
+            assert raw not in str(caught.value)
+            assert f"***{raw[-4:]}" in str(caught.value)
+
     def test_result_has_no_plus(self, service: WhatsAppMessagingService) -> None:
         # The contract: WA Cloud rejects payloads with ``+``.
         for raw in ("+201001234567", "+966501234567", "+12025551234"):

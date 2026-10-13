@@ -543,7 +543,7 @@ def send_whatsapp_order_confirmation_task(
         )
         logger.info(
             "whatsapp_order_confirmation_sent",
-            phone=phone,
+            phone_tail=str(phone)[-4:],
             order_number=order_number,
             success=result.success,
         )
@@ -555,7 +555,7 @@ def send_whatsapp_order_confirmation_task(
     except Exception as e:
         logger.error(
             "whatsapp_order_confirmation_failed",
-            phone=phone,
+            phone_tail=str(phone)[-4:],
             order_number=order_number,
             error=str(e),
         )
@@ -602,7 +602,7 @@ def send_whatsapp_shipping_update_task(
         )
         logger.info(
             "whatsapp_shipping_update_sent",
-            phone=phone,
+            phone_tail=str(phone)[-4:],
             order_number=order_number,
             success=result.success,
         )
@@ -614,7 +614,7 @@ def send_whatsapp_shipping_update_task(
     except Exception as e:
         logger.error(
             "whatsapp_shipping_update_failed",
-            phone=phone,
+            phone_tail=str(phone)[-4:],
             order_number=order_number,
             error=str(e),
         )
@@ -657,7 +657,7 @@ def send_whatsapp_delivery_confirmation_task(
         )
         logger.info(
             "whatsapp_delivery_confirmation_sent",
-            phone=phone,
+            phone_tail=str(phone)[-4:],
             order_number=order_number,
             success=result.success,
         )
@@ -669,7 +669,7 @@ def send_whatsapp_delivery_confirmation_task(
     except Exception as e:
         logger.error(
             "whatsapp_delivery_confirmation_failed",
-            phone=phone,
+            phone_tail=str(phone)[-4:],
             order_number=order_number,
             error=str(e),
         )

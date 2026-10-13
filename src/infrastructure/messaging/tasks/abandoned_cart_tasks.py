@@ -578,7 +578,9 @@ async def _send_notification(
                 if result.success:
                     sent = True
                     channel = "whatsapp"
-                    logger.info(f"Abandoned cart WhatsApp sent to {customer_phone}")
+                    logger.info(
+                        f"Abandoned cart WhatsApp sent to ***{str(customer_phone)[-4:]}"
+                    )
                 else:
                     logger.warning(
                         f"WhatsApp abandoned cart failed: {result.error_message}"
