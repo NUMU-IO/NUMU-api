@@ -175,12 +175,14 @@ class WhatsAppMessagingService(IMessagingService):
                 parsed = phonenumbers.parse(phone, "EG")
             except NumberParseException as exc:
                 raise ValueError(
-                    f"Could not parse phone '{phone}' for WhatsApp delivery."
+                    f"Could not parse phone ***{phone[-4:]} for WhatsApp delivery."
                 ) from exc
 
+        # The tail only: send_message returns this text as error_message,
+        # and callers log it.
         if not phonenumbers.is_valid_number(parsed):
             raise ValueError(
-                f"Phone '{phone}' is not a valid number; WhatsApp would reject it."
+                f"Phone ***{phone[-4:]} is not a valid number; WhatsApp would reject it."
             )
 
         e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
@@ -337,7 +339,10 @@ class WhatsAppMessagingService(IMessagingService):
         try:
             phone = self._format_phone_number(content.recipient.phone)
         except ValueError as exc:
-            logger.warning("whatsapp_invalid_recipient_phone: %s", exc)
+            logger.warning(
+                "whatsapp_invalid_recipient_phone: ***%s",
+                str(content.recipient.phone or "")[-4:],
+            )
             return MessageResult(
                 success=False,
                 channel=MessageChannel.WHATSAPP,
@@ -1151,7 +1156,7 @@ class WhatsAppMessagingService(IMessagingService):
 
                     logger.info(
                         f"WhatsApp status update: {wa_message_id} -> {status_value} "
-                        f"for {recipient_id}"
+                        f"for ***{str(recipient_id or '')[-4:]}"
                     )
 
                     if message_log_repo and wa_message_id:
@@ -1226,7 +1231,7 @@ class WhatsAppMessagingService(IMessagingService):
                         )
 
                     logger.info(
-                        f"WhatsApp incoming message from {from_number}: "
+                        f"WhatsApp incoming message from ***{str(from_number or '')[-4:]}: "
                         f"type={msg_type}, id={msg_id}"
                     )
 
@@ -1248,7 +1253,7 @@ class WhatsAppMessagingService(IMessagingService):
                             else:
                                 logger.warning(
                                     f"Cannot resolve store for inbound "
-                                    f"from {from_number} — no prior messages"
+                                    f"from ***{str(from_number or '')[-4:]} — no prior messages"
                                 )
                                 continue
                         except Exception as e:

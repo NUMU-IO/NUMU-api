@@ -45,6 +45,12 @@ def _is_test_recipient(address: str) -> bool:
     return domain in _UNDELIVERABLE_TEST_DOMAINS
 
 
+def _masked(addresses: list[str]) -> list[str]:
+    """Recipients for a log line: the first letter and the domain, never the
+    address (shoppers' and customers' emails stay out of the logs)."""
+    return [f"{a[:1]}***@{a.partition('@')[2]}" for a in addresses]
+
+
 class EmailConfigurationError(ExternalServiceError):
     """Raised for permanent email configuration problems (non-retryable)."""
 
@@ -190,7 +196,7 @@ class ResendEmailService(IEmailService):
         if not self.api_key:
             logger.warning(
                 "email_skipped_no_api_key",
-                to=to_list,
+                to=_masked(to_list),
                 subject=message.subject,
                 hint="Set RESEND_API_KEY in .env to enable email sending.",
             )
@@ -238,9 +244,11 @@ class ResendEmailService(IEmailService):
         # non-ASCII subjects (Arabic) when the Windows console uses cp1252.
         # That encoding error must NOT be mis-reported as an email failure.
         try:
-            logger.info("email_sent", to=to_list, subject=message.subject)
+            logger.info("email_sent", to=_masked(to_list), subject=message.subject)
         except UnicodeEncodeError:
-            logger.info("email_sent", to=to_list, subject="(non-ascii subject)")
+            logger.info(
+                "email_sent", to=_masked(to_list), subject="(non-ascii subject)"
+            )
         return True
 
     async def send_verification_email(

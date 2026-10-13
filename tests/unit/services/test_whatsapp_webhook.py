@@ -607,3 +607,25 @@ class TestMixedWebhookPayload:
         entity: MessageLog = repo.create.call_args[0][0]
         assert entity.direction == MessageDirection.INBOUND
         assert entity.message_id == "wamid.msg_in_mix"
+
+
+@pytest.mark.asyncio
+async def test_status_and_inbound_logs_carry_only_the_phone_tail(monkeypatch):
+    """BIS-S-08: a shopper's number never reaches the logs, only its tail."""
+    from src.infrastructure.external_services.whatsapp import messaging_service
+
+    log = MagicMock()
+    monkeypatch.setattr(messaging_service, "logger", log)
+    service = _make_service()
+    repo = _make_repo()
+
+    await service.handle_webhook_event(
+        data=_status_webhook("wamid.s08", "delivered"), message_log_repo=repo
+    )
+    await service.handle_webhook_event(
+        data=_inbound_webhook("wamid.in_s08", PHONE), message_log_repo=repo
+    )
+
+    lines = str(log.method_calls)
+    assert PHONE not in lines
+    assert "***3918" in lines
