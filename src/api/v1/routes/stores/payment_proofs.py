@@ -938,10 +938,22 @@ async def record_order_payment(
 
         paid, balance = await _payment_totals(proof_repo, order)
 
+        # A COD order waiting on its deposit: the merchant has the deposit in
+        # hand, so confirm it the way a gateway or an approved customer proof
+        # does. Left in PENDING_DEPOSIT, the deposit-expiry sweep cancels and
+        # restocks an order that has real money on it.
+        deposit_confirmed = order.status == OrderStatus.PENDING_DEPOSIT
+        if deposit_confirmed:
+            order.mark_as_paid(payment_id=transaction_ref, payment_method=method)
+            order.deposit_amount_cents = paid
+            order = await order_repo.update(order)
+
         if balance == 0:
             from src.api.v1.routes.stores.orders import apply_manual_payment
 
             order = await apply_manual_payment(order, order_repo)
+
+        if deposit_confirmed or balance == 0:
             # A storefront order can still have a live manual-payment intent
             # sitting in the merchant's review queue. The money is in, so close
             # it rather than leaving it to expire.
