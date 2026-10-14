@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1.routes.webhooks._replay import ReplayKeys, replay_keys
 from src.config import settings
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -67,6 +68,7 @@ async def _resolve_order(
 async def fawaterak_callback(
     request: Request,
     db: AsyncSession = Depends(get_admin_db_session),
+    replay: ReplayKeys = Depends(replay_keys),
 ):
     """Handle Fawaterak payment webhook (POST).
 
@@ -161,9 +163,7 @@ async def fawaterak_callback(
     nonce_id = transaction_id or invoice_id or reference_number
     if nonce_id and _cache_service:
         nonce_key = f"fawaterak:processed:{nonce_id}"
-        was_set = await _cache_service.set_if_absent(
-            nonce_key, "1", expire=NONCE_TTL_SECONDS
-        )
+        was_set = await replay.take(_cache_service, nonce_key, NONCE_TTL_SECONDS)
         if not was_set:
             log.warning("webhook_duplicate_rejected")
             return {"status": "duplicate", "id": nonce_id}

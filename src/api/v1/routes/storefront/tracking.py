@@ -459,7 +459,7 @@ def is_store_insider(viewer_token: str | None, store: Store) -> bool:
     if not viewer_token:
         return False
     try:
-        payload = token_service.verify_token(viewer_token)
+        payload = token_service.verify_access_token(viewer_token)
     except Exception:  # noqa: BLE001 — expired/garbage token = a shopper
         return False
     return payload.user_id == store.owner_id or (

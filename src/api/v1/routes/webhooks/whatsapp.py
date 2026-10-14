@@ -106,29 +106,16 @@ async def whatsapp_callback(
     payload = await request.body()
     meta = await get_meta_platform_credentials(db)
 
-    # Verify signature
-    if meta.app_secret or settings.whatsapp_app_secret:
-        verifier = WhatsAppMessagingService(
-            app_secret=meta.app_secret or settings.whatsapp_app_secret
-        )
-        verified_data = verifier.verify_webhook_signature(
-            payload,
-            x_hub_signature_256 or "",
-        )
-        if not verified_data:
-            logger.warning("WhatsApp webhook signature verification failed")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid webhook signature",
-            )
-        data = verified_data
-    else:
-        # In development, accept without verification
-        import json
-
-        data = json.loads(payload)
-        logger.warning(
-            "WhatsApp webhook received without signature verification (dev mode)"
+    # Verify signature; with no app secret configured nothing verifies.
+    verifier = WhatsAppMessagingService(
+        app_secret=meta.app_secret or settings.whatsapp_app_secret
+    )
+    data = verifier.verify_webhook_signature(payload, x_hub_signature_256 or "")
+    if not data:
+        logger.warning("WhatsApp webhook signature verification failed")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature",
         )
 
     # Process the webhook event

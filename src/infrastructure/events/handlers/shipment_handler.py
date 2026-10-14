@@ -88,6 +88,9 @@ async def _auto_create(order_id: UUID, store_id: UUID, trigger: str) -> None:
         )
         from src.infrastructure.database.connection import AsyncSessionLocal
         from src.infrastructure.repositories.order_repository import OrderRepository
+        from src.infrastructure.repositories.payment_proof_repository import (
+            PaymentProofRepository,
+        )
         from src.infrastructure.repositories.shipment_repository import (
             ShipmentRepository,
         )
@@ -151,7 +154,9 @@ async def _auto_create(order_id: UUID, store_id: UUID, trigger: str) -> None:
 
             cod_amount = 0
             if (order.payment_method or "").lower() in COD_METHODS:
-                cod_amount = order.total
+                cod_amount = order.amount_due_cents(
+                    await PaymentProofRepository(session).amount_paid_cents(order.id)
+                )
 
             shipping_service = await service_for_carrier(carrier, store.settings or {})
 

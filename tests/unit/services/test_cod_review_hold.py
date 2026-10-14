@@ -5,6 +5,7 @@ the review routes."""
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -71,6 +72,8 @@ def test_a_held_order_is_not_booked_on_creation():
 
 
 class _Order(SimpleNamespace):
+    is_paid = False
+
     def confirm(self):
         assert self.status == OrderStatus.PENDING
         self.status = OrderStatus.CONFIRMED
@@ -218,17 +221,23 @@ async def test_a_prepaid_order_takes_no_deposit(world):
     assert exc.value.status_code == 409
 
 
-def test_the_pay_page_charges_the_deposit_while_one_is_due():
-    from src.api.v1.routes.storefront.pay import _amount_due
+async def test_the_pay_page_charges_the_deposit_while_one_is_due(monkeypatch):
+    from src.api.v1.routes.storefront import pay
 
+    proofs = SimpleNamespace(amount_paid_cents=AsyncMock(return_value=0))
+    monkeypatch.setattr(pay, "PaymentProofRepository", lambda _session: proofs)
+    repo = SimpleNamespace(session=None)
     waiting = SimpleNamespace(
         status=OrderStatus.PENDING_DEPOSIT, deposit_required_cents=15_000, total=150_000
     )
     open_order = SimpleNamespace(
-        status=OrderStatus.PENDING, deposit_required_cents=None, total=150_000
+        id=uuid4(),
+        status=OrderStatus.PENDING,
+        deposit_required_cents=None,
+        amount_due_cents=lambda proofs_paid_cents=0: 150_000 - proofs_paid_cents,
     )
-    assert _amount_due(waiting) == 15_000
-    assert _amount_due(open_order) == 150_000
+    assert await pay._amount_due(waiting, repo) == 15_000
+    assert await pay._amount_due(open_order, repo) == 150_000
 
 
 # ─── COD Shield gate ──────────────────────────────────────────────

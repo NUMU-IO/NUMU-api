@@ -13,9 +13,6 @@ Setup required:
 4. Set RESEND_FORWARD_TO in .env (email address to forward received emails to)
 """
 
-import hashlib
-import hmac
-
 import resend
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -28,30 +25,35 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-def _verify_signature(payload: bytes, signature: str | None) -> bool:
-    """Verify the Resend webhook signature using the signing secret."""
+def _verify_signature(payload: bytes, headers) -> bool:
+    """Verify Resend's Svix signature (svix-id/-timestamp/-signature headers).
+
+    With no signing secret configured nothing verifies, so the call is refused.
+    """
     if not settings.resend_webhook_secret:
-        logger.warning("resend_webhook_no_secret: skipping signature verification")
-        return True
-    if not signature:
+        logger.warning("resend_webhook_no_secret: refusing unverifiable webhook")
         return False
-    expected = hmac.new(
-        settings.resend_webhook_secret.encode(),
-        payload,
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    try:
+        resend.Webhooks.verify({
+            "payload": payload.decode(),
+            "headers": {
+                "id": headers.get("svix-id"),
+                "timestamp": headers.get("svix-timestamp"),
+                "signature": headers.get("svix-signature"),
+            },
+            "webhook_secret": settings.resend_webhook_secret,
+        })
+    except ValueError:
+        return False
+    return True
 
 
 @router.post("", operation_id="resend_webhook")
 async def resend_webhook(request: Request):
     """Handle Resend webhook events (email.received)."""
     body = await request.body()
-    signature = request.headers.get("resend-signature") or request.headers.get(
-        "svix-signature"
-    )
 
-    if not _verify_signature(body, signature):
+    if not _verify_signature(body, request.headers):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid webhook signature",

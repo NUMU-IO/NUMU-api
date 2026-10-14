@@ -135,7 +135,9 @@ async def _sweep(
                         "instapay_expiry_order_missing",
                         intent_id=str(intent.id),
                     )
-                elif await proof_repo.has_recorded_payments(intent.order_id):
+                elif order.is_paid or await proof_repo.has_recorded_payments(
+                    intent.order_id
+                ):
                     # The merchant already collected money against this order
                     # out of band and recorded it from the order page. The
                     # intent is expired above either way — the customer can no

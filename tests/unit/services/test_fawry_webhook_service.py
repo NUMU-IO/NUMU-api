@@ -65,58 +65,9 @@ def _make_db_session(order=None):
     return session
 
 
-def _make_cache(is_duplicate=False):
-    """Build a mock RedisCacheService."""
-    cache = AsyncMock()
-    cache.set_if_absent = AsyncMock(return_value=not is_duplicate)
-    return cache
-
-
 # ===========================================================================
 # Security Agent tests
 # ===========================================================================
-
-
-class TestReplayProtection:
-    """Security Agent: Redis nonce-based replay protection."""
-
-    @pytest.mark.asyncio
-    async def test_first_webhook_is_not_replay(self):
-        service = FawryWebhookService(
-            db=_make_db_session(), cache=_make_cache(is_duplicate=False)
-        )
-        assert await service.check_replay("REF-001") is False
-
-    @pytest.mark.asyncio
-    async def test_duplicate_webhook_is_replay(self):
-        service = FawryWebhookService(
-            db=_make_db_session(), cache=_make_cache(is_duplicate=True)
-        )
-        assert await service.check_replay("REF-001") is True
-
-    @pytest.mark.asyncio
-    async def test_no_cache_skips_replay_check(self):
-        service = FawryWebhookService(db=_make_db_session(), cache=None)
-        assert await service.check_replay("REF-001") is False
-
-    @pytest.mark.asyncio
-    async def test_replay_check_uses_correct_key(self):
-        cache = _make_cache(is_duplicate=False)
-        service = FawryWebhookService(db=_make_db_session(), cache=cache)
-        await service.check_replay("REF-XYZ")
-        cache.set_if_absent.assert_called_once()
-        key = cache.set_if_absent.call_args[0][0]
-        assert key == "fawry:processed:REF-XYZ"
-
-    @pytest.mark.asyncio
-    async def test_replay_check_uses_correct_ttl(self):
-        """Redis key TTL should be 86400 seconds (24 hours)."""
-        cache = _make_cache(is_duplicate=False)
-        service = FawryWebhookService(db=_make_db_session(), cache=cache)
-        await service.check_replay("REF-TTL")
-        cache.set_if_absent.assert_called_once_with(
-            "fawry:processed:REF-TTL", "1", expire=86400
-        )
 
 
 class TestTimestampCheck:

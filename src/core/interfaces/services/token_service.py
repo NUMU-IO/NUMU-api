@@ -22,6 +22,7 @@ class TokenPayload:
         membership_id: UUID | None = None,
         perm_version: int = 0,
         family_id: str | None = None,
+        impersonated_by: str | None = None,
     ) -> None:
         self.user_id = user_id
         self.email = email
@@ -35,6 +36,8 @@ class TokenPayload:
         self.perm_version = perm_version
         # Refresh-token lineage (see RefreshTokenBlacklistService families).
         self.family_id = family_id
+        # Admin who minted this token by impersonating the user, if any.
+        self.impersonated_by = impersonated_by
 
 
 class CustomerTokenPayload:

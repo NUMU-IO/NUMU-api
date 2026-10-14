@@ -54,6 +54,7 @@ class TestPaymobPaymentService:
             {
                 "client_secret": "client_secret_456",
                 "intention_detail": {"id": "intention_123"},
+                "intention_order_id": 987654,
             },
         )
         patcher, _ = _mock_client(response=response)
@@ -73,6 +74,8 @@ class TestPaymobPaymentService:
         assert intent.status == "pending"
         assert intent.provider == PaymentProvider.PAYMOB
         assert intent.client_secret == "client_secret_456"
+        # The id Paymob's transaction callbacks sign as obj.order.id.
+        assert intent.gateway_order_id == "987654"
 
     @pytest.mark.asyncio
     async def test_create_payment_intent_posts_expected_payload(self):

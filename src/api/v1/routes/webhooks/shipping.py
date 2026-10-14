@@ -24,9 +24,10 @@ merchant-visible migration, not a refactor. Point new integrations here.
 See ``docs/Plans/Shipping/SHIPPING-UNIFIED-LAYER.md`` § P1.5.
 """
 
+import hmac
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.dependencies.database import get_admin_db_session
@@ -40,27 +41,36 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-async def _verify(
+async def verify_carrier_webhook(
     *,
     spec: CarrierSpec,
     session: AsyncSession,
     tenant_id: Any,
+    request: Request,
     raw_body: bytes,
-    signature: str | None,
     log: Any,
 ) -> bool:
-    """Verify a webhook signature: per-store secret, then global.
+    """Verify a carrier callback: per-store secret, then global.
 
-    Mirrors the precedence the per-carrier handlers used — each merchant
-    has their own carrier account, so the store's own secret is tried
-    first and the platform secret is the fallback.
+    Each merchant has their own carrier account, so the store's own secret
+    is tried first and the platform secret is the fallback. A callback
+    passes with the carrier's signature header or, for a carrier that
+    cannot sign, the secret itself as the ``Authorization`` header or a
+    ``?token=`` on the webhook URL. Anything else is refused: these
+    callbacks mark orders delivered, returned and COD-paid.
     """
-    if not signature:
+    signature = (
+        request.headers.get(spec.webhook_signature_header)
+        if spec.webhook_signature_header
+        else None
+    )
+    token = request.headers.get("authorization") or request.query_params.get("token")
+    if not (signature or token):
         return False
 
     provider_cls = spec.provider_class()
+    secrets = []
 
-    # Per-store secret.
     if tenant_id is not None:
         try:
             from src.infrastructure.repositories.store_repository import (
@@ -70,21 +80,21 @@ async def _verify(
             store = await StoreRepository(session).get_by_id(tenant_id)
             if store:
                 creds = await load_credentials(store.settings or {}, spec.slug)
-                secret = (creds or {}).get(spec.webhook_secret_key)
-                if secret:
-                    service = provider_cls(**{spec.webhook_secret_key: secret})
-                    if service.verify_webhook_signature(raw_body, signature):
-                        return True
+                secrets.append((creds or {}).get(spec.webhook_secret_key))
         except Exception as e:
             log.warning("webhook_store_secret_verify_failed", error=str(e))
 
-    # Platform-level secret.
     try:
-        if provider_cls().verify_webhook_signature(raw_body, signature):
-            return True
+        secrets.append(getattr(provider_cls(), spec.webhook_secret_key, None))
     except Exception as e:
         log.warning("webhook_global_secret_verify_failed", error=str(e))
 
+    for secret in filter(None, secrets):
+        if token and hmac.compare_digest(token.encode(), secret.encode()):
+            return True
+        service = provider_cls(**{spec.webhook_secret_key: secret})
+        if signature and service.verify_webhook_signature(raw_body, signature):
+            return True
     return False
 
 
@@ -96,7 +106,8 @@ async def carrier_webhook(
 ):
     """Receive a delivery status update from any registered carrier.
 
-    Always answers 200 with a body describing what happened. Carriers
+    Answers 401 to a callback that fails ``verify_carrier_webhook``,
+    otherwise always 200 with a body describing what happened. Carriers
     retry on non-2xx, and retrying a payload we cannot parse or a
     tracking number we do not have will never succeed — so those are
     reported, not failed. Genuine problems are surfaced in the logs and
@@ -156,25 +167,20 @@ async def carrier_webhook(
         order, "tenant_id", None
     )
 
-    signature = (
-        request.headers.get(spec.webhook_signature_header)
-        if spec.webhook_signature_header
-        else None
-    )
-    verified = await _verify(
+    verified = await verify_carrier_webhook(
         spec=spec,
         session=session,
         tenant_id=tenant_id,
+        request=request,
         raw_body=raw_body,
-        signature=signature,
         log=log,
     )
     if not verified:
-        # Matches the per-carrier handlers: unverified traffic is recorded
-        # and still processed, because most stores have no webhook secret
-        # configured and rejecting them would silently stop all status
-        # updates. Tightening this is a deliberate change, not a cleanup.
-        log.warning("webhook_signature_unverified", has_signature=bool(signature))
+        log.warning("webhook_signature_invalid_rejected")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not verify webhook signature",
+        )
 
     # 🔴 A carrier we don't have a mapping for must not be guessed at.
     if not event.is_mapped:

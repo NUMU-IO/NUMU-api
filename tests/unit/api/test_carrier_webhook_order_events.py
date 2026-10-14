@@ -4,14 +4,17 @@ nothing on a replay, no downgrade, unknown statuses ignored."""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from types import SimpleNamespace
 from urllib.parse import urlencode
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
-from src.api.v1.routes.webhooks import bosta, jt
+from src.api.v1.routes.webhooks import bosta, jt, shipping
 from src.application.services import shipment_status_sync
 from src.application.use_cases.orders.update_order_status import (
     UpdateOrderStatusUseCase,
@@ -25,6 +28,7 @@ STORE = uuid4()
 TENANT = uuid4()
 TRACKING = "TRK-1"
 PRIVATE_KEY = "pk-test"
+BOSTA_SECRET = "bosta-secret"
 
 
 class _Session:
@@ -135,6 +139,14 @@ def world(monkeypatch):
         return {"private_key": PRIVATE_KEY}
 
     monkeypatch.setattr(jt, "load_credentials", creds)
+
+    async def bosta_creds(*args, **kwargs):
+        return {"webhook_secret": BOSTA_SECRET}
+
+    monkeypatch.setattr(shipping, "load_credentials", bosta_creds)
+    monkeypatch.setattr(
+        "src.infrastructure.repositories.store_repository.StoreRepository", _Stores
+    )
     monkeypatch.setattr(
         "src.application.services.stock_service.try_restock_order", noop
     )
@@ -142,18 +154,23 @@ def world(monkeypatch):
     return state
 
 
-def _request(raw: bytes, headers: dict | None = None):
+def _request(raw: bytes, headers: dict | None = None, query: dict | None = None):
     async def body():
         return raw
 
-    return SimpleNamespace(body=body, headers=headers or {})
+    return SimpleNamespace(body=body, headers=headers or {}, query_params=query or {})
+
+
+def _bosta_body(state: str) -> bytes:
+    return json.dumps({
+        "delivery": {"trackingNumber": TRACKING, "state": {"value": state}}
+    }).encode()
 
 
 async def _bosta(state: str):
-    raw = json.dumps({
-        "delivery": {"trackingNumber": TRACKING, "state": {"value": state}}
-    }).encode()
-    await bosta.bosta_callback(_request(raw), _Session(), None)
+    raw = _bosta_body(state)
+    sig = hmac.new(BOSTA_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    await bosta.bosta_callback(_request(raw, {"x-bosta-signature": sig}), _Session())
 
 
 async def _jt(scan: str):
@@ -205,6 +222,64 @@ async def test_bosta_unknown_state_is_ignored(world):
     await _bosta("SOMETHING_NEW")
     assert world.order.status == OrderStatus.SHIPPED
     assert world.bus.events == []
+
+
+@pytest.mark.parametrize(
+    ("headers", "query"),
+    [
+        ({}, {}),
+        ({"x-bosta-signature": "forged"}, {}),
+        ({"authorization": "wrong"}, {}),
+        ({}, {"token": "wrong"}),
+    ],
+)
+async def test_bosta_refuses_an_unverified_delivery(world, headers, query):
+    world.order = _order(OrderStatus.SHIPPED)
+    world.shipment = _shipment()
+    request = _request(_bosta_body("DELIVERED"), headers, query)
+
+    with pytest.raises(HTTPException) as exc:
+        await bosta.bosta_callback(request, _Session())
+
+    assert exc.value.status_code == 401
+    assert world.order.status == OrderStatus.SHIPPED
+    assert not world.order.is_paid
+    assert world.bus.events == []
+
+
+async def test_bosta_accepts_the_store_secret_as_a_url_token(world):
+    world.order = _order(OrderStatus.SHIPPED)
+    world.shipment = _shipment()
+    request = _request(_bosta_body("DELIVERED"), {}, {"token": BOSTA_SECRET})
+
+    await bosta.bosta_callback(request, _Session())
+
+    assert _statuses(world) == [("shipped", "delivered")]
+
+
+async def test_generic_route_refuses_a_jt_push_with_a_bad_digest(world, monkeypatch):
+    world.shipment = _shipment()
+    repos = "src.infrastructure.repositories"
+    monkeypatch.setattr(
+        f"{repos}.shipment_repository.ShipmentRepository",
+        lambda _s: _Repo(world.shipment),
+    )
+    monkeypatch.setattr(
+        f"{repos}.order_repository.OrderRepository", lambda _s: _Repo(None)
+    )
+    content = json.dumps({
+        "billCode": TRACKING,
+        "details": [{"scanTime": "2026-09-24 10:00:00", "scanType": "Signing scan"}],
+    })
+    raw = urlencode({"bizContent": content}).encode()
+
+    with pytest.raises(HTTPException) as exc:
+        await shipping.carrier_webhook(
+            _request(raw, {"digest": "forged"}), _Session(), "jt"
+        )
+
+    assert exc.value.status_code == 401
+    assert world.shipment.status == ShipmentStatus.IN_TRANSIT
 
 
 # ─── J&T ───────────────────────────────────────────────────────────

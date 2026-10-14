@@ -15,7 +15,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from hashlib import sha256
+from typing import Any
 from uuid import UUID
+
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # Constants (spec 015 FR-005)
@@ -105,12 +109,14 @@ def evaluate_verify(
     """
     now_dt = now or datetime.now(UTC)
 
+    # Expiry first: a verified otp_id + phone otherwise re-verified forever,
+    # with any code.
+    if expires_at <= now_dt:
+        return OtpVerifyResult(verdict=OtpVerdict.EXPIRED, attempts_left=0)
+
     # Re-verify of an already-verified row → idempotent success.
     if verified_at is not None:
         return OtpVerifyResult(verdict=OtpVerdict.VERIFIED, attempts_left=attempts_left)
-
-    if expires_at <= now_dt:
-        return OtpVerifyResult(verdict=OtpVerdict.EXPIRED, attempts_left=0)
 
     if attempts_left <= 0:
         return OtpVerifyResult(verdict=OtpVerdict.LOCKED, attempts_left=0)
@@ -121,6 +127,43 @@ def evaluate_verify(
     return OtpVerifyResult(
         verdict=OtpVerdict.WRONG_CODE,
         attempts_left=attempts_left - 1,
+    )
+
+
+async def verify_otp_row(
+    session: AsyncSession, otp: Any, submitted_code: str, salt: str
+) -> OtpVerifyResult:
+    """``evaluate_verify`` for an ``otp_codes`` row, persisting the attempt.
+
+    The attempt is spent in one ``UPDATE ... WHERE attempts_left > 0`` before
+    the code is compared. Read-then-write let parallel guesses all see the
+    same count, so a burst got far more than OTP_MAX_ATTEMPTS tries.
+    """
+    from src.infrastructure.database.models.tenant.otp_code import OtpCodeModel
+
+    attempts_left = otp.attempts_left
+    if otp.verified_at is None:
+        spent = (
+            await session.execute(
+                update(OtpCodeModel)
+                .where(OtpCodeModel.id == otp.id, OtpCodeModel.attempts_left > 0)
+                .values(attempts_left=OtpCodeModel.attempts_left - 1)
+                .returning(OtpCodeModel.attempts_left)
+            )
+        ).scalar_one_or_none()
+        await session.commit()
+        # The count before this attempt: a wrong code then reports ``spent``.
+        attempts_left = 0 if spent is None else spent + 1
+
+    return evaluate_verify(
+        submitted_code=submitted_code,
+        stored_hash=otp.code_hash,
+        salt=salt,
+        expires_at=otp.expires_at
+        if otp.expires_at.tzinfo
+        else otp.expires_at.replace(tzinfo=UTC),
+        attempts_left=attempts_left,
+        verified_at=otp.verified_at,
     )
 
 

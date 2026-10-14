@@ -224,9 +224,14 @@ async def token_handoff(
     then set fresh httpOnly cookies so the dashboard can operate normally.
     """
     payload = token_service.verify_token(request.access_token)
-    if payload.token_type != "access" or await TokenRevocationService(
-        RedisCacheService()
-    ).is_revoked(payload.user_id, payload.iat):
+    # An impersonation token must not become the owner's own 30-day session.
+    if (
+        payload.token_type != "access"
+        or payload.impersonated_by
+        or await TokenRevocationService(RedisCacheService()).is_revoked(
+            payload.user_id, payload.iat
+        )
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",

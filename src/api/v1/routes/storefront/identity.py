@@ -55,10 +55,10 @@ from src.application.services.otp_service import (
     OTP_MAX_ATTEMPTS,
     OTP_MAX_ISSUES_PER_HOUR,
     OtpVerdict,
-    evaluate_verify,
     expires_at_for_now,
     generate_code,
     hash_code,
+    verify_otp_row,
 )
 from src.config import get_settings
 from src.core.checkout_fields import resolve_config
@@ -423,20 +423,7 @@ async def identity_otp_verify(
             )
         )
 
-    result = evaluate_verify(
-        submitted_code=body.code,
-        stored_hash=otp.code_hash,
-        salt=salt,
-        expires_at=otp.expires_at
-        if otp.expires_at.tzinfo
-        else otp.expires_at.replace(tzinfo=UTC),
-        attempts_left=otp.attempts_left,
-        verified_at=otp.verified_at,
-    )
-
-    if result.verdict == OtpVerdict.WRONG_CODE:
-        otp.attempts_left = result.attempts_left
-        await session.commit()
+    result = await verify_otp_row(session, otp, body.code, salt)
 
     if result.verdict != OtpVerdict.VERIFIED:
         return SuccessResponse(

@@ -53,7 +53,6 @@ _EXPIRED_VALID_PRIOR = {OrderStatus.PENDING}
 _CANCELED_VALID_PRIOR = {
     OrderStatus.PENDING,
     OrderStatus.CONFIRMED,
-    OrderStatus.PROCESSING,
 }
 
 
@@ -77,20 +76,6 @@ class FawryWebhookService:
     # ------------------------------------------------------------------ #
     # Security Agent: replay protection
     # ------------------------------------------------------------------ #
-
-    async def check_replay(self, reference_number: str) -> bool:
-        """Return True if this webhook is a duplicate (replay).
-
-        Uses Redis SETNX to atomically check-and-set a processed key.
-        """
-        if not self.cache:
-            return False
-
-        nonce_key = f"fawry:processed:{reference_number}"
-        was_set = await self.cache.set_if_absent(
-            nonce_key, "1", expire=NONCE_TTL_SECONDS
-        )
-        return not was_set  # True = duplicate
 
     def check_timestamp(self, data: dict) -> bool:
         """Return True if the webhook timestamp is within the allowed window.
@@ -499,8 +484,12 @@ class FawryWebhookService:
 
         await narrow_to_tenant(self.db, order.tenant_id)
 
-        # Guard: shipped/delivered/refunded orders cannot be cancelled
-        if order.status not in _CANCELED_VALID_PRIOR:
+        # Guard: only an unpaid order that has not started fulfilment is
+        # cancelled; a paid one is the merchant's call (refund), not Fawry's.
+        if (
+            order.status not in _CANCELED_VALID_PRIOR
+            or order.payment_status == PaymentStatus.PAID
+        ):
             logger.info(
                 "webhook_ignored_invalid_transition",
                 status="CANCELED",
@@ -515,6 +504,7 @@ class FawryWebhookService:
         order.status = OrderStatus.CANCELLED
         order.payment_status = PaymentStatus.FAILED
         order.cancelled_at = datetime.now(UTC)
+        await self._release_inventory(order)
         order.extra_data = {
             **(order.extra_data or {}),
             "cancellation_source": "fawry_webhook",
