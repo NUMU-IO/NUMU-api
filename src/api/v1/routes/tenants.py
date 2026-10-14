@@ -17,6 +17,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from src.api.dependencies.auth import (
     get_current_user_id,
     require_admin,
+    require_admin_2fa,
 )
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
@@ -134,6 +135,7 @@ async def check_subdomain_availability(
 
 # Admin routes (require super admin role)
 admin_router = APIRouter()
+_STEP_UP = [Depends(require_admin_2fa(max_age_seconds=300))]
 
 
 @admin_router.get(
@@ -296,6 +298,7 @@ async def get_tenant_api_access(
     "/{tenant_id}/api-access",
     summary="Grant, block or reset public API access for a tenant",
     operation_id="patch_tenant_api_access",
+    dependencies=_STEP_UP,
     response_model=SuccessResponse[dict],
 )
 async def patch_tenant_api_access(
@@ -404,6 +407,7 @@ class RevokeAllTokensIn(BaseModel):
     "/{tenant_id}/api-tokens/revoke-all",
     summary="Revoke every live API token a tenant holds",
     operation_id="revoke_all_tenant_api_tokens",
+    dependencies=_STEP_UP,
     response_model=SuccessResponse[dict],
 )
 async def revoke_all_tenant_api_tokens(
@@ -442,6 +446,7 @@ async def revoke_all_tenant_api_tokens(
     summary="Update tenant",
     description="Update tenant settings (admin only).",
     operation_id="update_tenant",
+    dependencies=_STEP_UP,
 )
 async def update_tenant(
     tenant_id: UUID,
@@ -484,10 +489,28 @@ async def update_tenant(
             new_value={"plan": request.plan},
         )
         tenant.plan = request.plan
-    if request.is_active is not None:
-        tenant.is_active = request.is_active
-    if request.is_internal is not None:
-        tenant.is_internal = request.is_internal
+    flags = {
+        k: v
+        for k, v in (
+            ("is_active", request.is_active),
+            ("is_internal", request.is_internal),
+        )
+        if v is not None and v != getattr(tenant, k)
+    }
+    if flags:
+        await AuditService(db).log(
+            event_type="admin.tenant.update",
+            action="update",
+            resource_type="tenant",
+            resource_id=str(tenant_id),
+            tenant_id=tenant_id,
+            user_id=admin_id,
+            old_value={k: getattr(tenant, k) for k in flags},
+            new_value=flags,
+            details={"actor_type": "staff"},
+        )
+    for k, v in flags.items():
+        setattr(tenant, k, v)
     if request.settings is not None:
         tenant.settings = request.settings
 
@@ -505,11 +528,12 @@ async def update_tenant(
     summary="Deactivate tenant",
     description="Deactivate a tenant (soft delete, admin only).",
     operation_id="deactivate_tenant",
+    dependencies=_STEP_UP,
 )
 async def deactivate_tenant(
     tenant_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[UUID, Depends(require_admin)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
 ) -> None:
     """Deactivate a tenant (admin only)."""
     await db.execute(text("SET search_path TO public"))
@@ -522,3 +546,13 @@ async def deactivate_tenant(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tenant not found",
         )
+    await AuditService(db).log(
+        event_type="admin.tenant.deactivate",
+        action="delete",
+        resource_type="tenant",
+        resource_id=str(tenant_id),
+        tenant_id=tenant_id,
+        user_id=admin_id,
+        new_value={"is_active": False},
+        details={"actor_type": "staff"},
+    )

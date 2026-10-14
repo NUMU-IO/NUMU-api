@@ -51,6 +51,10 @@ _LATEST_RISK = """
 # enum's labels are not all one case on every database.
 _CLOSED = "('CANCELLED', 'REFUNDED', 'DELIVERED', 'RETURNED', 'SHIPPED', 'DRAFT')"
 
+# Work queues hold the last 30 days. An order still pending after that is
+# abandoned, not work: it stays in the Orders list, just not in the queues.
+_FRESH = "o.created_at >= now() - interval '30 days'"
+
 # A COD order still waiting on the merchant's decision: open, not shipped.
 _COD_AWAITING = f"""
     FROM ({_LATEST_RISK}) r
@@ -58,6 +62,7 @@ _COD_AWAITING = f"""
     WHERE r.action_taken IS NULL
       AND lower(coalesce(r.payment_method, o.payment_method, '')) IN ('cod', 'cash_on_delivery')
       AND upper(o.status::text) NOT IN {_CLOSED}
+      AND {_FRESH}
       AND {LIVE_SQL.format(col="o.tenant_id")}
 """  # nosec B608 - module literals only
 
@@ -231,7 +236,8 @@ async def get_overview(
                     FROM generate_series(0, 6) AS g(d)
                     LEFT JOIN public.tenants t
                       ON date_trunc('day', t.created_at) = date_trunc('day', CAST(:now AS timestamptz) - (g.d || ' days')::interval)
-                     AND t.is_internal IS FALSE AND t.lifecycle_state <> 'demo'
+                     AND t.is_active IS TRUE AND t.is_internal IS FALSE
+                     AND t.lifecycle_state <> 'demo'
                     GROUP BY g.d ORDER BY g.d DESC
                     """
                 ),
@@ -477,6 +483,7 @@ async def get_overview(
                 LEFT JOIN ({_LATEST_RISK}) r ON r.order_id = o.id
                 WHERE {orders_live}
                   AND upper(o.status::text) NOT IN {_CLOSED}
+                  AND {_FRESH}
                   AND (
                         upper(o.status::text) IN ('PENDING', 'CONFIRMED', 'PAYMENT_FAILED')
                      OR o.payment_status = 'FAILED'

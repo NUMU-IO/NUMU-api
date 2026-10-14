@@ -77,6 +77,9 @@ async def _sweep() -> dict:
         ManualPaymentIntentRepository,
     )
     from src.infrastructure.repositories.order_repository import OrderRepository
+    from src.infrastructure.repositories.payment_proof_repository import (
+        PaymentProofRepository,
+    )
     from src.infrastructure.tenancy.rls import enable_rls_bypass, narrow_to_tenant
 
     stats = {"scanned": 0, "cancelled": 0, "errors": 0}
@@ -143,6 +146,19 @@ async def _sweep() -> dict:
                 ):
                     # The customer uploaded a transfer proof that is waiting
                     # for review; cancelling would drop real money.
+                    continue
+                if order.status == OrderStatus.PENDING_DEPOSIT and (
+                    await PaymentProofRepository(session).has_recorded_payments(
+                        order.id
+                    )
+                ):
+                    # Money is on the order (ORD-251727): the deposit was
+                    # recorded by hand but never confirmed. Leave it for the
+                    # merchant rather than cancel and restock a paid order.
+                    logger.warning(
+                        "pending_deposit_expiry_skipped_recorded_payment",
+                        extra={"order_id": str(order.id)},
+                    )
                     continue
                 order.cancel(
                     reason="COD deposit payment window expired"

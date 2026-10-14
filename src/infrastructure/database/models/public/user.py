@@ -79,6 +79,9 @@ class UserModel(Base, UUIDMixin, TimestampMixin):
     # 'ar' | 'en', picked on the signup page and changed from the hub. NULL
     # means never chosen; readers fall back to Arabic.
     language: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    # Platform staff only: NULL or 'all' is a full super admin; 'support',
+    # 'finance' or 'ops' limits which /admin sections they can open.
+    admin_scope: Mapped[str | None] = mapped_column(String(20), nullable=True)
     auth_provider: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
     )

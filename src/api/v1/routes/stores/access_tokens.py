@@ -21,7 +21,10 @@ from src.api.dependencies import verify_store_ownership
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.application.services import api_limits
-from src.application.services.api_access import api_access_for_store
+from src.application.services.api_access import (
+    api_access_for_store,
+    refusal_message,
+)
 from src.application.services.audit_service import AuditService
 from src.application.services.entitlement_service import aware
 from src.application.services.personal_access_token_service import (
@@ -152,10 +155,7 @@ async def create_access_token(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "api_access_not_enabled",
-                "message": (
-                    "API access is not enabled for this store. It is included "
-                    "in the Pro plan, or NUMU can enable it for your account."
-                ),
+                "message": await refusal_message(db, store.tenant_id),
                 "plan": access.plan,
             },
         )

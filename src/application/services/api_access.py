@@ -84,3 +84,18 @@ async def decide(session: AsyncSession, tenant: TenantModel) -> ApiAccess:
         granted=granted,
         blocked=overridden and state["value"] is False,
     )
+
+
+async def refusal_message(session: AsyncSession, tenant_id: UUID) -> str:
+    """Why a token was refused, in words the merchant can act on."""
+    tenant = await session.get(TenantModel, tenant_id)
+    if tenant is not None and not tenant.is_active:
+        return (
+            "This store is suspended, so its API access is off. Contact NUMU support."
+        )
+    if tenant is not None and (await decide(session, tenant)).blocked:
+        return "NUMU has turned off API access for this store. Contact NUMU support."
+    return (
+        "API access is not enabled for this store. It is included "
+        "in the Pro plan, or NUMU can enable it for your account."
+    )
