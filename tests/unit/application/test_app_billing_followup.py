@@ -172,6 +172,10 @@ async def test_a_refund_reverses_the_vat_with_a_credit_note(test_session):
         )
     )
     assert adjustment.vat_cents == -277 and adjustment.share_bps == 8_000
+    # The sale is booked at NOW; the refund at the real clock. Pin it into
+    # the sale's month or the assertion depends on today's date.
+    adjustment.created_at = NOW
+    await test_session.flush()
     st = await billing.partner_statement(
         test_session, partner.id, NOW.strftime("%Y-%m")
     )
