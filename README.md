@@ -313,7 +313,7 @@ flowchart LR
 
 | Area | Tasks (selection) |
 |------|-------------------|
-| Commerce | abandoned-cart recovery · back-in-stock · shipments · order webhooks |
+| Commerce | abandoned-cart recovery · Back in Stock app · shipments · order webhooks |
 | WhatsApp | campaign sends · scheduled dispatcher (60s) · template poll (15m) · dead-letter purge (daily) |
 | Payments / risk | InstaPay expiry · COD deposit expiry · auto-RTO · risk scoring · fraud detection |
 | Marketing | campaigns · promotions · Meta CAPI dispatch · social |

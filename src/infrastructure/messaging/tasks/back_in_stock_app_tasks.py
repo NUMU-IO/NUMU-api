@@ -1,8 +1,8 @@
 """Back in Stock app: restock checks, paced sends, attribution and retention.
 
 Every task checks the install gate first, so a store that uninstalled (or
-was never installed) does nothing. Core's own ``back_in_stock_tasks.py`` stays
-until the app replaces it (plan Phase M).
+was never installed) does nothing. Core's own back-in-stock code was retired in
+plan Phase M (its empty ``product_subscriptions`` table is dropped later).
 
 The beat sweep (every 10 minutes) re-finds what an event missed: raw-SQL
 stock writes publish no event, and prod Redis can evict queued messages.
