@@ -176,7 +176,7 @@ async def list_stores(
     search: Annotated[str | None, Query()] = None,
     internal: Annotated[Literal["only"] | None, Query()] = None,
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=200),
 ):
     """List stores across the platform (paginated).
 
