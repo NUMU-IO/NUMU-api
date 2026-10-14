@@ -37,6 +37,7 @@ def mock_super_admin_user():
         "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5L7BW/z9QyxKm"  # "password123"
     )
     user.role = UserRole.SUPER_ADMIN
+    user.admin_scope = None
     return user
 
 

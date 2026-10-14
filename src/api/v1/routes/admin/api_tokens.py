@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies.auth import require_admin
+from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.middleware.token_activity import KEEP, recent_requests
 from src.api.responses import SuccessResponse
@@ -38,6 +38,7 @@ router = APIRouter(
 )
 
 REFUSED = {401, 402, 403}
+_STEP_UP = [Depends(require_admin_2fa(max_age_seconds=300))]
 
 
 class RevokeTokensIn(BaseModel):
@@ -129,7 +130,11 @@ async def _revoke(db: AsyncSession, tokens: list, admin_id: UUID, reason: str) -
         await api_limits.forget_key(token.token_hash)
 
 
-@router.post("/{token_id}/revoke", response_model=SuccessResponse[dict])
+@router.post(
+    "/{token_id}/revoke",
+    response_model=SuccessResponse[dict],
+    dependencies=_STEP_UP,
+)
 async def revoke_api_token(
     token_id: UUID,
     body: RevokeTokensIn,

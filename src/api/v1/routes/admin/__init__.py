@@ -11,6 +11,7 @@ URL: /api/v1/admin/
 - /landing-config  — Landing page section visibility
 - /reconciliation  — Payment reconciliation runs and mismatches
 - /tracking        — Platform-wide Meta pixel/CAPI health + match quality
+- /audit           — Staff audit view over audit_logs
 """
 
 from fastapi import APIRouter
@@ -20,6 +21,7 @@ from src.api.v1.routes.admin.analytics_rollups import (
 )
 from src.api.v1.routes.admin.api_tokens import router as api_tokens_router
 from src.api.v1.routes.admin.apps import router as admin_apps_router
+from src.api.v1.routes.admin.audit import router as audit_router
 from src.api.v1.routes.admin.auth import router as admin_auth_router
 from src.api.v1.routes.admin.campaigns import router as campaigns_router
 from src.api.v1.routes.admin.customers import router as customers_router
@@ -122,6 +124,7 @@ router.include_router(
     reconciliation_router, prefix="/reconciliation", tags=["Admin - Reconciliation"]
 )
 router.include_router(tracking_router, prefix="/tracking", tags=["Admin - Tracking"])
+router.include_router(audit_router, prefix="/audit", tags=["Admin - Audit"])
 router.include_router(
     platform_config_router,
     prefix="/platform-config",
