@@ -3,8 +3,9 @@
 Pay-as-you-go tenants fund NUMU through a per-PAID-order commission debited
 from their prepaid wallet (``merchant_wallets``). This handler subscribes to
 ``OrderPaidEvent`` — the single point every payment path converges on
-(gateway webhooks, InstaPay proof approval, COD delivery confirmation) —
-and to ``OrderStatusChangedEvent`` for full-refund reversals.
+(gateway webhooks, InstaPay proof approval, COD delivery confirmation).
+Charges are final: cancellations, returns, refunds and un-mark-paid never
+reverse them (support can still post an admin ``adjustment``).
 
 Idempotency: duplicate event delivery is absorbed by the partial unique
 index on (order_id) per kind in ``wallet_transactions`` — a second charge
@@ -24,7 +25,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from src.core.entities.wallet import WalletTransactionKind
-from src.core.events.order_events import OrderPaidEvent, OrderStatusChangedEvent
+from src.core.events.order_events import OrderPaidEvent
 from src.core.logging import get_logger
 from src.infrastructure.database.connection import AsyncSessionLocal
 
@@ -165,85 +166,6 @@ async def handle_commission_charge_on_order_paid(event: OrderPaidEvent) -> None:
                 _enqueue_warning_notification(tenant_id, notify_level, balance_after)
         except Exception:
             log.exception("wallet_commission_handler_failed")
-
-
-async def handle_commission_reversal_on_refund(
-    event: OrderStatusChangedEvent,
-) -> None:
-    """Reverse the order's commission on a FULL refund. Never raises.
-
-    v1 policy: only ``new_status == "refunded"`` (full refund) auto-reverses.
-    Partial refunds keep the full commission; support can issue a pro-rata
-    ``adjustment`` entry from the admin panel.
-    """
-    if event.new_status != "refunded":
-        return
-    await reverse_commission_for_order(
-        order_id=event.order_id,
-        order_number=event.order_number,
-        store_id=event.store_id,
-        note=f"Commission reversal for refunded order {event.order_number}",
-    )
-
-
-async def reverse_commission_for_order(
-    *, order_id, order_number: str, store_id, note: str
-) -> None:
-    """Reverse the commission charged for ``order_id`` (idempotent).
-
-    Shared by the full-refund path and the un-mark-paid path.
-    """
-    log = logger.bind(
-        order_id=str(order_id),
-        order_number=order_number,
-        store_id=str(store_id),
-    )
-
-    from src.application.services.wallet_service import WalletService
-    from src.infrastructure.database.models.public.wallet import (
-        WalletTransactionModel,
-    )
-
-    async with AsyncSessionLocal() as session:
-        try:
-            tenant_id = None
-            async with session.begin():
-                commission = (
-                    await session.execute(
-                        select(WalletTransactionModel).where(
-                            WalletTransactionModel.order_id == order_id,
-                            WalletTransactionModel.kind
-                            == WalletTransactionKind.COMMISSION.value,
-                        )
-                    )
-                ).scalar_one_or_none()
-                if commission is None:
-                    return  # never charged (not payg, FX skip, ...)
-
-                tenant_id = commission.tenant_id
-                service = WalletService(session)
-                tx = await service.apply_entry(
-                    tenant_id=tenant_id,
-                    kind=WalletTransactionKind.COMMISSION_REVERSAL,
-                    amount_cents=abs(commission.amount_cents),
-                    order_id=order_id,
-                    note=note,
-                    meta={"reversed_transaction_id": str(commission.id)},
-                )
-                if tx is None:
-                    return  # already reversed
-                # A reversal only raises the balance; sync the ladder down.
-                wallet = await service.get_or_create_wallet(tenant_id)
-                service.bump_warning_level(wallet)
-                log.info(
-                    "wallet_commission_reversed",
-                    amount_cents=abs(commission.amount_cents),
-                    balance_after_cents=tx.balance_after_cents,
-                )
-
-            await WalletService(session).invalidate_cache(tenant_id)
-        except Exception:
-            log.exception("wallet_commission_reversal_failed")
 
 
 async def _to_egp_cents(

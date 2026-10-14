@@ -11,6 +11,12 @@ wallet eventually consistent:
    (order_id, kind) also protects against racing a late live handler).
    Orders whose commission was already reversed are naturally skipped
    because the commission row still exists.
+   **Presumed sold** — a COD order still open ``PRESUMED_SOLD_DAYS`` after
+   it was placed is charged as if delivered, so a merchant who never
+   updates order statuses cannot dodge the fee. "Open" means not
+   cancelled / returned by the merchant or a courier; an auto-RTO return
+   (``extra_data.auto_rto_at``) is a guess, not an outcome, so it is still
+   charged. Charges are final — no reversal on cancel, return or refund.
 2. **Integrity** — recompute each wallet's balance from the ledger; on
    drift, log loudly and self-heal ``balance_cents`` to the ledger sum
    (the ledger is authoritative by design).
@@ -29,6 +35,7 @@ from src.infrastructure.messaging.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 LOOKBACK_DAYS = 7
+PRESUMED_SOLD_DAYS = 14
 
 
 @celery_app.task(name="tasks.wallet_commission_reconciliation")
@@ -46,7 +53,7 @@ async def _async_run() -> dict:  # noqa: PLR0915 — linear sweep
         WalletService,
         WalletSuspendedError,
     )
-    from src.core.entities.order import PaymentStatus
+    from src.core.entities.order import OrderStatus, PaymentStatus
     from src.core.entities.wallet import WalletTransactionKind
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.public.tenant import TenantModel
@@ -65,6 +72,8 @@ async def _async_run() -> dict:  # noqa: PLR0915 — linear sweep
     skipped = 0
     healed = 0
     since = datetime.now(UTC) - timedelta(days=LOOKBACK_DAYS)
+    presumed_before = datetime.now(UTC) - timedelta(days=PRESUMED_SOLD_DAYS)
+    presumed_since = presumed_before - timedelta(days=LOOKBACK_DAYS)
 
     async with AsyncSessionLocal() as session:
         # ── Pass 1: missed commissions ────────────────────────────────
@@ -128,6 +137,42 @@ async def _async_run() -> dict:  # noqa: PLR0915 — linear sweep
                     )
                 )
             ).all()
+            presumed = [
+                row
+                for row in (
+                    await session.execute(
+                        select(
+                            OrderModel.id,
+                            OrderModel.order_number,
+                            OrderModel.total,
+                            OrderModel.currency,
+                            OrderModel.status,
+                            OrderModel.extra_data,
+                        )
+                        .join(StoreModel, StoreModel.id == OrderModel.store_id)
+                        .where(
+                            StoreModel.tenant_id == tenant.id,
+                            OrderModel.payment_method == "cod",
+                            OrderModel.status.in_([
+                                OrderStatus.PENDING,
+                                OrderStatus.CONFIRMED,
+                                OrderStatus.PROCESSING,
+                                OrderStatus.SHIPPED,
+                                OrderStatus.DELIVERED,
+                                OrderStatus.RETURNED,
+                            ]),
+                            OrderModel.created_at <= presumed_before,
+                            OrderModel.created_at >= presumed_since,
+                            ~commission_exists,
+                        )
+                    )
+                ).all()
+                if row.status != OrderStatus.RETURNED
+                or (row.extra_data or {}).get("auto_rto_at")
+            ]
+            missed_ids = {row.id for row in missed}
+            presumed_ids = {row.id for row in presumed} - missed_ids
+            missed = [*missed, *(row for row in presumed if row.id in presumed_ids)]
 
             for order in missed:
                 try:
@@ -149,6 +194,7 @@ async def _async_run() -> dict:  # noqa: PLR0915 — linear sweep
                         commission_cents = (egp_cents * bps) // COMMISSION_BPS_DIVISOR
                         if commission_cents <= 0:
                             continue
+                        is_presumed = order.id in presumed_ids
                         tx = await service.apply_entry(
                             tenant_id=tenant.id,
                             kind=WalletTransactionKind.COMMISSION,
@@ -156,10 +202,17 @@ async def _async_run() -> dict:  # noqa: PLR0915 — linear sweep
                             order_id=order.id,
                             idempotency_key=f"recon:{order.id}",
                             note=(
-                                "Commission (reconciliation) for order "
+                                f"Commission for order {order.order_number} "
+                                f"(no outcome after {PRESUMED_SOLD_DAYS} days)"
+                                if is_presumed
+                                else "Commission (reconciliation) for order "
                                 f"{order.order_number}"
                             ),
-                            meta={"bps": bps, "source": "recon", **fx_meta},
+                            meta={
+                                "bps": bps,
+                                "source": "presumed_sold" if is_presumed else "recon",
+                                **fx_meta,
+                            },
                         )
                         if tx is not None:
                             charged += 1
