@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services.numu_apps import app_enabled
 from src.application.services.wallet_settings import get_wallet_settings
+from src.core.entities.message_log import MessageStatus
 from src.core.entities.subscription_payment import (
     SubscriptionPaymentIntentStatus,
     SubscriptionPaymentPurpose,
@@ -101,7 +102,10 @@ async def count_messages(db: AsyncSession, store_id: UUID, since: datetime) -> i
 
     Counts template sends only: free-form replies inside the 24-hour service
     window cost nothing, so charging a merchant's allowance for them would be
-    charging for something NUMU never paid for.
+    charging for something NUMU never paid for. Failed sends are left out for
+    the same reason: the send guard logs its own refusals as ``failed``
+    (``whatsapp_access_not_active``), and Meta does not bill a message it
+    never delivered.
     """
     return int(
         await db.scalar(
@@ -110,6 +114,7 @@ async def count_messages(db: AsyncSession, store_id: UUID, since: datetime) -> i
             .where(
                 MessageLogModel.store_id == store_id,
                 MessageLogModel.template_name.isnot(None),
+                MessageLogModel.status != MessageStatus.FAILED,
                 MessageLogModel.created_at >= since,
             )
         )
