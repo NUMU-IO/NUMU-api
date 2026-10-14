@@ -426,12 +426,11 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
         tenant_id = UUID(meta["tenant_id"])
         policy = await api_limits.policy_for_tenant(session, tenant_id)
         if not policy.allowed:
+            from src.application.services.api_access import refusal_message
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "API access is not enabled for this store. It is included "
-                    "in the Pro plan, or NUMU can enable it for your account."
-                ),
+                detail=await refusal_message(session, tenant_id),
             )
 
         decision = await api_limits.check_and_count(

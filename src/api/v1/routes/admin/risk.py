@@ -90,7 +90,7 @@ LATEST_ONLY = """NOT EXISTS (
 )"""
 
 # Still waiting on a decision: no action recorded, the order is not closed,
-# and the merchant is live. One definition for the queue, its counts and the
+# scored in the last 30 days, and the merchant is live. One definition for the queue, its counts and the
 # sidebar badge.
 OPEN_RISK = f"""r.action_taken IS NULL
     AND {LATEST_ONLY}
@@ -100,6 +100,7 @@ OPEN_RISK = f"""r.action_taken IS NULL
           AND upper(closed.status::text) IN
               ('CANCELLED', 'REFUNDED', 'DELIVERED', 'RETURNED', 'SHIPPED', 'DRAFT')
     )
+    AND r.created_at >= now() - interval '30 days'
     AND {LIVE_SQL.format(col="r.tenant_id")}"""  # nosec B608 - module literals only
 
 

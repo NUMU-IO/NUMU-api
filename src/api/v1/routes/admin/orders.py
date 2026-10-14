@@ -18,6 +18,7 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
+from src.application.services.audit_service import AuditService
 from src.core.entities.order import VALID_STATUS_TRANSITIONS, OrderStatus, PaymentStatus
 from src.infrastructure.database.models.public.tenant import (
     TenantLifecycleState,
@@ -540,6 +541,13 @@ async def delete_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found",
         )
+    if order.payment_status == PaymentStatus.PAID:
+        # Deleting would leave the money, the invoice and the commission
+        # behind with no order. Un-mark or refund it first.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This order is paid. Refund or un-mark it before deleting.",
+        )
 
     logger.warning(
         "admin_hard_delete_order order_id=%s order_number=%s admin_id=%s",
@@ -548,5 +556,22 @@ async def delete_order(
         admin_id,
     )
 
+    # Give back the stock it debited (a no-op if a cancel already did).
+    from src.application.services.stock_service import restock_order
+    from src.infrastructure.repositories.order_repository import OrderRepository
+
+    entity = await OrderRepository(db).get_by_id(order_id)
+    if entity is not None:
+        await restock_order(db, entity, reason="admin_deleted")
+    await AuditService(db).log(
+        event_type="order.deleted_by_staff",
+        action="delete",
+        resource_type="order",
+        resource_id=str(order.id),
+        user_id=admin_id,
+        tenant_id=order.tenant_id,
+        store_id=order.store_id,
+        details={"order_number": order.order_number, "actor_type": "staff"},
+    )
     await db.execute(delete(OrderModel).where(OrderModel.id == order_id))
     await db.commit()
