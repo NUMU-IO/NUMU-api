@@ -31,8 +31,7 @@ PRIVATE = _key.private_bytes(
     serialization.NoEncryption(),
 ).decode()
 PUBLIC = (
-    _key
-    .public_key()
+    _key.public_key()
     .public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
     )
