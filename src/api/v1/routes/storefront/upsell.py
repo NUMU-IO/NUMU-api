@@ -26,6 +26,13 @@ from src.api.v1.schemas.tenant.upsell import (
     UpsellOfferResponse,
 )
 from src.core.entities.customer import Customer
+from src.core.entities.order import (
+    FulfillmentStatus,
+    OrderLineItem,
+    OrderStatus,
+    PaymentStatus,
+)
+from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.saved_payment_method import (
     SavedPaymentMethodModel,
 )
@@ -210,6 +217,10 @@ async def accept_upsell_offer(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid order ID")
 
+    # Serialise accepts per order: a double-click must not charge twice.
+    await db.execute(
+        select(OrderModel.id).where(OrderModel.id == order_uuid).with_for_update()
+    )
     order = await order_repo.get_by_id(order_uuid)
     if not order or order.store_id != store_id:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -217,6 +228,15 @@ async def accept_upsell_offer(
     # Verify this customer owns the order
     if order.customer_id != customer.id:
         raise HTTPException(status_code=403, detail="Not your order")
+
+    # Only a paid order that hasn't started fulfilment can take a new item.
+    if (
+        order.status
+        not in (OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING)
+        or order.payment_status != PaymentStatus.PAID
+        or order.fulfillment_status != FulfillmentStatus.UNFULFILLED
+    ):
+        raise HTTPException(status_code=409, detail="Upsell is not available")
 
     # Validate rule
     try:
@@ -227,6 +247,12 @@ async def accept_upsell_offer(
     rule = await upsell_repo.get_by_id(rule_uuid)
     if not rule or not rule.is_active or rule.store_id != store_id:
         raise HTTPException(status_code=404, detail="Upsell offer not found or expired")
+
+    if any(
+        (li.properties or {}).get("upsell_rule_id") == str(rule.id)
+        for li in order.line_items
+    ):
+        raise HTTPException(status_code=409, detail="Offer already added")
 
     # Check max uses
     if rule.max_uses is not None and rule.uses_count >= rule.max_uses:
@@ -247,28 +273,8 @@ async def accept_upsell_offer(
     else:
         discounted_price = original_price
 
-    # Add line item to the order
-    new_line_item = {
-        "product_id": str(product.id),
-        "product_name": product.name,
-        "quantity": 1,
-        "unit_price": discounted_price,
-        "total": discounted_price,
-        "image_url": product.images[0] if product.images else None,
-        "upsell_rule_id": str(rule.id),
-    }
-
-    current_items = list(order.line_items or [])
-    current_items.append(new_line_item)
-    order.line_items = current_items
-
-    # Update order totals
-    order.subtotal = (order.subtotal or 0) + discounted_price
-    order.total = (order.total or 0) + discounted_price
-
-    await order_repo.update(order)
-
-    # ── Charge saved payment method if available ──
+    # Charge FIRST; nothing on the order moves unless the money did. The
+    # request transaction rolls back everything below on any raise.
     saved_method_result = await db.execute(
         select(SavedPaymentMethodModel)
         .where(
@@ -281,66 +287,107 @@ async def accept_upsell_offer(
         .limit(1)
     )
     saved_method = saved_method_result.scalar_one_or_none()
+    if saved_method is None:
+        raise HTTPException(status_code=409, detail="Upsell is not available")
 
     payment_charged = False
-    if saved_method:
-        store = await store_repo.get_by_id(store_id)
-        if saved_method.gateway == "kashier" and store:
-            api_key = await _get_kashier_api_key(store.settings)
-            if api_key:
-                from src.infrastructure.external_services.kashier import (
-                    KashierPaymentService,
+    store = await store_repo.get_by_id(store_id)
+    if saved_method.gateway == "kashier" and store:
+        api_key = await _get_kashier_api_key(store.settings)
+        if api_key:
+            from src.infrastructure.external_services.kashier import (
+                KashierPaymentService,
+            )
+
+            kashier = KashierPaymentService(
+                api_key=api_key,
+                mode=(store.settings or {})
+                .get("payment", {})
+                .get("kashier", {})
+                .get("mode"),
+            )
+            result = await kashier.charge_saved_token(
+                card_token=saved_method.card_token,
+                amount=discounted_price,
+                currency=order.currency,
+                order_id=str(order.id),
+            )
+            payment_charged = result.success
+            if not result.success:
+                logger.warning(
+                    "upsell_token_charge_failed gateway=kashier error=%s",
+                    result.error_message,
                 )
 
-                kashier = KashierPaymentService(
-                    api_key=api_key,
-                    mode=(store.settings or {})
-                    .get("payment", {})
-                    .get("kashier", {})
-                    .get("mode"),
-                )
-                result = await kashier.charge_saved_token(
-                    card_token=saved_method.card_token,
-                    amount=discounted_price,
-                    currency=order.currency,
-                    order_id=str(order.id),
-                )
-                payment_charged = result.success
-                if not result.success:
-                    logger.warning(
-                        "upsell_token_charge_failed gateway=kashier error=%s",
-                        result.error_message,
-                    )
+    elif saved_method.gateway == "paymob" and store:
+        try:
+            from src.infrastructure.external_services.paymob.payment_service import (
+                PaymobPaymentService,
+                get_merchant_paymob_credentials,
+            )
 
-        elif saved_method.gateway == "paymob" and store:
-            try:
-                from src.infrastructure.external_services.paymob.payment_service import (
-                    PaymobPaymentService,
-                    get_merchant_paymob_credentials,
+            creds = await get_merchant_paymob_credentials(store.settings)
+            paymob = PaymobPaymentService(
+                secret_key=creds["secret_key"],
+                card_integration_id=creds.get("card_integration_id"),
+            )
+            result = await paymob.charge_saved_token(
+                card_token=saved_method.card_token,
+                amount=discounted_price,
+                currency=order.currency,
+                order_id=str(order.id),
+            )
+            payment_charged = result.success
+            if not result.success:
+                logger.warning(
+                    "upsell_token_charge_failed gateway=paymob error=%s",
+                    result.error_message,
                 )
+        except Exception as e:
+            logger.warning("upsell_paymob_charge_error error=%s", str(e))
 
-                creds = await get_merchant_paymob_credentials(store.settings)
-                paymob = PaymobPaymentService(
-                    secret_key=creds["secret_key"],
-                    card_integration_id=creds.get("card_integration_id"),
-                )
-                result = await paymob.charge_saved_token(
-                    card_token=saved_method.card_token,
-                    amount=discounted_price,
-                    currency=order.currency,
-                    order_id=str(order.id),
-                )
-                payment_charged = result.success
-                if not result.success:
-                    logger.warning(
-                        "upsell_token_charge_failed gateway=paymob error=%s",
-                        result.error_message,
-                    )
-            except Exception as e:
-                logger.warning("upsell_paymob_charge_error error=%s", str(e))
+    if not payment_charged:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Payment for the offer could not be completed",
+        )
 
-    # Decrement product stock
-    product.quantity = max(0, product.quantity - 1)
+    # Paid: debit through the shared stock path (oversell rather than fail —
+    # the money is already taken) and record it on the restock manifest.
+    from src.application.services.stock_service import (
+        build_debit_manifest,
+        debit_order_line,
+    )
+
+    _, _, replay = await debit_order_line(
+        db,
+        tenant_id=order.tenant_id,
+        product_id=product.id,
+        variant_id=None,
+        selections=None,
+        quantity=1,
+        allow_negative=True,
+    )
+    metadata = dict(order.metadata or {})
+    if replay:
+        debited = list((metadata.get("stock_debited") or {}).get("lines") or [])
+        metadata["stock_debited"] = build_debit_manifest([*debited, replay])
+    order.metadata = metadata
+
+    order.line_items = [
+        *order.line_items,
+        OrderLineItem(
+            product_id=product.id,
+            product_name=product.name,
+            quantity=1,
+            unit_price=discounted_price,
+            total_price=discounted_price,
+            properties={"upsell_rule_id": str(rule.id)},
+        ),
+    ]
+    order.subtotal = (order.subtotal or 0) + discounted_price
+    order.total = (order.total or 0) + discounted_price
+    await order_repo.update(order)
 
     # Increment rule usage count
     await upsell_repo.increment_uses(rule.id)
