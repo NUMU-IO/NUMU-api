@@ -1,9 +1,10 @@
 """Handlers for un-mark-paid and partial acceptance.
 
 ``OrderPaymentReversedEvent`` mirrors ``OrderPaidEvent`` for the side
-effects that can be undone: wallet commission, the ETA invoice, the
-order timeline and the merchant feed. ``OrderPartiallyAcceptedEvent``
-records the door-step outcome on the timeline and the feed. All
+effects that can be undone: the ETA invoice, the order timeline and the
+merchant feed. The wallet commission is final and is not reversed.
+``OrderPartiallyAcceptedEvent`` records the door-step outcome on the
+timeline and the feed. All
 best-effort — never raise into the publisher.
 """
 
@@ -24,20 +25,8 @@ from src.infrastructure.database.models.tenant.order_activity import (
 from src.infrastructure.events.handlers.order_activity_handler import (
     _resolve_tenant_id,
 )
-from src.infrastructure.events.handlers.wallet_commission_handler import (
-    reverse_commission_for_order,
-)
 
 logger = get_logger(__name__)
-
-
-async def handle_payment_reversed_commission(event: OrderPaymentReversedEvent) -> None:
-    await reverse_commission_for_order(
-        order_id=event.order_id,
-        order_number=event.order_number,
-        store_id=event.store_id,
-        note=f"Commission reversal — payment un-marked on order {event.order_number}",
-    )
 
 
 async def handle_payment_reversed_invoice(event: OrderPaymentReversedEvent) -> None:

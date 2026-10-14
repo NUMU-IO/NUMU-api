@@ -130,7 +130,6 @@ from src.infrastructure.events.handlers.payment_reversal_handler import (
     handle_partial_acceptance_activity,
     handle_partial_acceptance_notification,
     handle_payment_reversed_activity,
-    handle_payment_reversed_commission,
     handle_payment_reversed_invoice,
     handle_payment_reversed_notification,
 )
@@ -178,7 +177,6 @@ from src.infrastructure.events.handlers.trust_signal_handler import (
 )
 from src.infrastructure.events.handlers.wallet_commission_handler import (
     handle_commission_charge_on_order_paid,
-    handle_commission_reversal_on_refund,
 )
 from src.infrastructure.events.handlers.webhook_handler import (
     handle_webhook_customer_created,
@@ -291,17 +289,15 @@ def create_event_bus() -> EventBus:
     # order paid (or a future payment-gateway webhook fires OrderPaidEvent).
     bus.subscribe(OrderPaidEvent, handle_invoice_on_order_paid)
     # Pay-as-you-go: debit the platform commission from the merchant wallet
-    # when an order is paid; reverse it on a full refund. Missed events are
-    # healed by the daily wallet_reconciliation_task.
+    # when an order is paid. Charges are final (no reversal). Missed events
+    # and COD orders left open are charged by wallet_reconciliation_task.
     bus.subscribe(OrderPaidEvent, handle_commission_charge_on_order_paid)
     # Stamp the activation milestone on the merchant lead. This is the
     # only writer of `first_order_at` / status `activated` — the admin
     # funnel's last column was always zero without it.
     bus.subscribe(OrderPaidEvent, handle_lead_activation_on_order_paid)
-    bus.subscribe(OrderStatusChangedEvent, handle_commission_reversal_on_refund)
-    # Un-mark-paid: reverse what mark-paid did (commission, invoice,
-    # timeline, feed). Customer messages already sent are not recalled.
-    bus.subscribe(OrderPaymentReversedEvent, handle_payment_reversed_commission)
+    # Un-mark-paid: reverse what mark-paid did (invoice, timeline, feed;
+    # the wallet commission stays). Customer messages already sent are not recalled.
     bus.subscribe(OrderPaymentReversedEvent, handle_payment_reversed_invoice)
     bus.subscribe(OrderPaymentReversedEvent, handle_payment_reversed_activity)
     bus.subscribe(OrderPaymentReversedEvent, handle_payment_reversed_notification)

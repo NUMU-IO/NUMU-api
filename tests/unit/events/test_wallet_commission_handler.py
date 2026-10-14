@@ -1,4 +1,4 @@
-"""Unit tests — commission charge / reversal handlers on the event bus.
+"""Unit tests — commission charge handler + presumed-sold reconciliation.
 
 The handlers open their own ``AsyncSessionLocal``; we patch that symbol
 to the test engine's factory so they run against the same in-memory DB
@@ -7,7 +7,7 @@ the fixtures write to.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -18,7 +18,8 @@ import src.infrastructure.events.handlers.wallet_commission_handler as handler_m
 from src.application.services.wallet_settings import (
     invalidate_wallet_settings_cache,
 )
-from src.core.events.order_events import OrderPaidEvent, OrderStatusChangedEvent
+from src.core.entities.order import OrderStatus, PaymentStatus
+from src.core.events.order_events import OrderPaidEvent
 from src.infrastructure.database.models.public.tenant import TenantModel
 from src.infrastructure.database.models.public.wallet import (
     MerchantWalletModel,
@@ -155,76 +156,64 @@ async def test_subscription_tenant_is_never_charged(test_session, patched_sessio
 
 
 @pytest.mark.asyncio
-async def test_full_refund_reverses_commission_once(test_session, patched_sessions):
-    tenant, store, order = await _seed(test_session, total=20_000)
+async def test_presumed_sold_charges_open_cod_orders(
+    test_session, patched_sessions, monkeypatch
+):
+    """Recon charges COD orders left open 14+ days; real outcomes are spared."""
+    import src.infrastructure.database.connection as connection
+    from src.infrastructure.messaging.tasks import wallet_reconciliation_task
 
-    await handler_mod.handle_commission_charge_on_order_paid(_paid_event(order, store))
+    monkeypatch.setattr(connection, "AsyncSessionLocal", patched_sessions)
+    tenant, store, _ = await _seed(test_session, plan="payg")
+    stale = datetime.now(UTC) - timedelta(days=15)
 
-    refund_event = OrderStatusChangedEvent(
-        order_id=order.id,
-        order_number=order.order_number,
-        store_id=store.id,
-        store_name=store.name,
-        customer_id=order.customer_id,
-        previous_status="processing",
-        new_status="refunded",
-    )
-    await handler_mod.handle_commission_reversal_on_refund(refund_event)
-    # Double delivery — second reversal must be a no-op.
-    await handler_mod.handle_commission_reversal_on_refund(refund_event)
-
-    wallet = (
-        await test_session.execute(
-            select(MerchantWalletModel).where(
-                MerchantWalletModel.tenant_id == tenant.id
-            )
+    def cod(status, *, created_at=stale, method="cod", extra=None):
+        return OrderModel(
+            id=uuid4(),
+            tenant_id=tenant.id,
+            store_id=store.id,
+            customer_id=uuid4(),
+            order_number=f"ORD-{uuid4().hex[:6]}",
+            status=status,
+            payment_status=PaymentStatus.PENDING,
+            fulfillment_status="UNFULFILLED",
+            payment_method=method,
+            subtotal=10_000,
+            total=10_000,
+            currency="EGP",
+            shipping_address={},
+            extra_data=extra or {},
+            created_at=created_at,
         )
-    ).scalar_one()
-    assert wallet.balance_cents == 0
 
-    kinds = sorted(
-        t.kind
-        for t in (
-            await test_session.execute(
-                select(WalletTransactionModel).where(
-                    WalletTransactionModel.tenant_id == tenant.id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert kinds == ["commission", "commission_reversal"]
+    left_open = cod(OrderStatus.SHIPPED)
+    auto_rto = cod(OrderStatus.RETURNED, extra={"auto_rto_at": stale.isoformat()})
+    spared = [
+        cod(OrderStatus.RETURNED),
+        cod(OrderStatus.CANCELLED),
+        cod(OrderStatus.PENDING, created_at=datetime.now(UTC) - timedelta(days=3)),
+        cod(OrderStatus.PENDING, method="paymob"),
+    ]
+    test_session.add_all([left_open, auto_rto, *spared])
+    await test_session.commit()
 
-
-@pytest.mark.asyncio
-async def test_non_refund_status_changes_are_ignored(test_session, patched_sessions):
-    tenant, store, order = await _seed(test_session)
-    await handler_mod.handle_commission_charge_on_order_paid(_paid_event(order, store))
-
-    event = OrderStatusChangedEvent(
-        order_id=order.id,
-        order_number=order.order_number,
-        store_id=store.id,
-        store_name=store.name,
-        customer_id=order.customer_id,
-        previous_status="processing",
-        new_status="shipped",
-    )
-    await handler_mod.handle_commission_reversal_on_refund(event)
+    await wallet_reconciliation_task._async_run()
 
     txs = (
         (
             await test_session.execute(
                 select(WalletTransactionModel).where(
-                    WalletTransactionModel.tenant_id == tenant.id
+                    WalletTransactionModel.tenant_id == tenant.id,
+                    WalletTransactionModel.meta["source"].as_string()
+                    == "presumed_sold",
                 )
             )
         )
         .scalars()
         .all()
     )
-    assert [t.kind for t in txs] == ["commission"]
+    assert {t.order_id for t in txs} == {left_open.id, auto_rto.id}
+    assert all(t.amount_cents == -300 for t in txs)
 
 
 @pytest.mark.asyncio
