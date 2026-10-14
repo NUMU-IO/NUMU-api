@@ -3,7 +3,8 @@
 URL: /api/v1/admin/users
 Requires SUPER_ADMIN role.
 
-"Invite" creates a SUPER_ADMIN user with a random temporary password and
+"Invite" creates a SUPER_ADMIN user (optionally limited to one staff scope,
+see ``ADMIN_SCOPES`` in ``src/api/dependencies/auth.py``) with a random temporary password and
 emails it to them (best-effort; if Resend isn't configured the password
 comes back in the response so the inviting admin can relay it manually).
 """
@@ -14,19 +15,20 @@ import logging
 import secrets
 import string
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies.auth import require_admin
+from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import get_user_repository
 from src.api.dependencies.services import get_email_service, get_password_service
 from src.api.responses import SuccessResponse
+from src.application.services.audit_service import AuditService, EventType
 from src.config import settings
 from src.core.entities.user import User, UserRole, UserStatus
 from src.core.interfaces.services.email_service import (
@@ -42,6 +44,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+AdminScope = Literal["all", "support", "finance", "ops"]
+
 
 class AdminUserItem(BaseModel):
     id: str
@@ -51,12 +55,18 @@ class AdminUserItem(BaseModel):
     status: str
     created_at: str | None
     last_login_at: str | None
+    admin_scope: str | None = None
 
 
 class InviteAdminRequest(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str = ""
+    admin_scope: AdminScope = "all"
+
+
+class UpdateAdminRequest(BaseModel):
+    admin_scope: AdminScope
 
 
 class InviteAdminResponse(BaseModel):
@@ -82,6 +92,7 @@ def _to_item(u: UserModel) -> AdminUserItem:
         status=u.status.value if hasattr(u.status, "value") else str(u.status),
         created_at=u.created_at.isoformat() if u.created_at else None,
         last_login_at=u.last_login_at.isoformat() if u.last_login_at else None,
+        admin_scope=u.admin_scope,
     )
 
 
@@ -114,9 +125,11 @@ async def invite_admin(
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     password_service: Annotated[IPasswordService, Depends(get_password_service)],
     email_service: Annotated[IEmailService, Depends(get_email_service)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     admin_id: Annotated[UUID, Depends(require_admin)],
 ) -> SuccessResponse[InviteAdminResponse]:
     email_vo = EmailVO(value=payload.email)
+    scope = None if payload.admin_scope == "all" else payload.admin_scope
 
     # If the email already belongs to a user, two cases:
     #   1. They're already a SUPER_ADMIN → nothing to do, 409.
@@ -136,6 +149,11 @@ async def invite_admin(
         if existing.email_verified_at is None:
             existing.email_verified_at = datetime.now(UTC)
         created = await user_repo.update(existing)
+        await db.execute(
+            update(UserModel)
+            .where(UserModel.id == created.id)
+            .values(admin_scope=scope)
+        )
 
         logger.warning(
             "admin_user_promoted by=%s target=%s email=%s prev_role=%s",
@@ -184,6 +202,7 @@ async def invite_admin(
             last_login_at=created.last_login_at.isoformat()
             if getattr(created, "last_login_at", None)
             else None,
+            admin_scope=scope,
         )
         return SuccessResponse(
             data=InviteAdminResponse(
@@ -210,6 +229,9 @@ async def invite_admin(
         email_verified_at=datetime.now(UTC),
     )
     created = await user_repo.create(new_admin)
+    await db.execute(
+        update(UserModel).where(UserModel.id == created.id).values(admin_scope=scope)
+    )
 
     logger.warning(
         "admin_user_invited by=%s new_admin=%s email=%s",
@@ -258,6 +280,7 @@ async def invite_admin(
         if getattr(created, "created_at", None)
         else None,
         last_login_at=None,
+        admin_scope=scope,
     )
     return SuccessResponse(
         data=InviteAdminResponse(
@@ -302,3 +325,43 @@ async def revoke_admin(
 
     logger.warning("admin_user_revoked by=%s target=%s", admin_id, user_id)
     return SuccessResponse(data=None, message="Admin access revoked")
+
+
+@router.patch(
+    "/{user_id}",
+    response_model=SuccessResponse[AdminUserItem],
+    summary="Change a platform admin's staff scope",
+    dependencies=[Depends(require_admin_2fa(max_age_seconds=300))],
+)
+async def update_admin(
+    user_id: Annotated[UUID, Path()],
+    payload: UpdateAdminRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+) -> SuccessResponse[AdminUserItem]:
+    if user_id == admin_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You can't change your own admin scope.",
+        )
+    target = await db.scalar(select(UserModel).where(UserModel.id == user_id))
+    if not target or target.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Admin not found"
+        )
+    scope = None if payload.admin_scope == "all" else payload.admin_scope
+    await AuditService(db).log(
+        event_type=EventType.ADMIN_PERMISSION_CHANGE,
+        action="update",
+        resource_type="user",
+        resource_id=str(user_id),
+        user_id=admin_id,
+        severity="warning",
+        old_value={"admin_scope": target.admin_scope},
+        new_value={"admin_scope": scope},
+        details={"actor_type": "staff"},
+    )
+    target.admin_scope = scope
+    await db.commit()
+    await db.refresh(target)
+    return SuccessResponse(data=_to_item(target), message="Admin scope updated")

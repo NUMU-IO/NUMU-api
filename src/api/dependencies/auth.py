@@ -15,7 +15,8 @@ from src.core.entities.user import UserRole
 from src.core.exceptions import InvalidTokenError, TokenExpiredError
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
-from src.infrastructure.database.connection import set_tenant_id
+from src.infrastructure.database.connection import AsyncSessionLocal, set_tenant_id
+from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.external_services.token_service import token_service
 
 _revocation_service = TokenRevocationService(RedisCacheService())
@@ -128,11 +129,76 @@ async def _get_admin_user_role(request: Request) -> tuple[UUID, str]:
     return payload.user_id, payload.role
 
 
+#: Staff roles. What each limited scope may open, as paths under /api/v1/.
+#: NULL or 'all' is a full super admin; any other scope, and every path not
+#: listed, is denied. A rule may be pinned to one method ("GET admin/audit")
+#: and "*" stands for one path segment. /admin/auth is open to every admin.
+# ponytail: path-section allow-list; move to per-endpoint permissions if scopes multiply.
+ADMIN_SCOPES: dict[str, tuple[str, ...]] = {
+    "support": (
+        "admin/orders",
+        "admin/customers",
+        "admin/support-cases",
+        "admin/risk",
+        "GET admin/dashboard",
+        "GET admin/audit",
+    ),
+    "finance": (
+        "admin/wallets",
+        "admin/subscription-payments",
+        "admin/reconciliation",
+        "admin/merchants/*/invoices",
+        "admin/merchants/*/extend-trial",
+        "admin/merchants/*/pause-billing",
+        "GET admin/dashboard",
+        "GET admin/audit",
+    ),
+    "ops": (
+        "admin/stores",
+        "admin/tenants",
+        "admin/merchants",
+        "admin/api-tokens",
+        "admin/whatsapp",
+        "admin/entitlements",
+        "admin/apps",
+        "admin/partners",
+        "admin/themes",
+        "marketplace/admin",
+        "GET admin/dashboard",
+        "GET admin/audit",
+    ),
+}
+
+
+def admin_scope_allows(scope: str | None, method: str, path: str) -> bool:
+    """Whether an admin with ``scope`` may call ``method path``."""
+    if scope in (None, "all"):
+        return True
+    segments = path.split("/api/v1/", 1)[-1].strip("/").split("/")
+    if segments[:2] == ["admin", "auth"]:
+        return True
+    for rule in ADMIN_SCOPES.get(scope, ()):
+        verb, _, prefix = rule.rpartition(" ")
+        want = prefix.split("/")
+        if (
+            verb in ("", method)
+            and len(segments) >= len(want)
+            and all(w in ("*", s) for w, s in zip(want, segments, strict=False))
+        ):
+            return True
+    return False
+
+
 async def require_admin(
+    request: Request,
     user_data: Annotated[tuple[UUID, str], Depends(_get_admin_user_role)],
 ) -> UUID:
     """Require the caller to be a platform admin, reading the admin cookie
-    first so impersonation can't evict the admin session from this tab."""
+    first so impersonation can't evict the admin session from this tab.
+
+    Every admin route depends on this, so it is also where the staff role is
+    enforced. Role and scope are read from the database, not the token, so a
+    revoked admin or a narrowed scope applies on the next request."""
     user_id, role = user_data
     try:
         user_role = UserRole(role)
@@ -148,6 +214,25 @@ async def require_admin(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions",
         )
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                select(UserModel.role, UserModel.admin_scope).where(
+                    UserModel.id == user_id
+                )
+            )
+        ).first()
+    if row is None or row.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions",
+        )
+    if not admin_scope_allows(row.admin_scope, request.method, request.url.path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your admin role doesn't cover this section.",
+        )
+    request.state.admin_scope = row.admin_scope
     return user_id
 
 

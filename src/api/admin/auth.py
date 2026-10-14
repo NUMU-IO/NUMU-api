@@ -58,8 +58,12 @@ class AdminAuth(AuthenticationBackend):
                     logger.warning(f"Invalid password for: {email}")
                     return False
 
-                # Check if user is a super admin
-                if user.role != UserRole.SUPER_ADMIN:
+                # Full super admins only: SQLAdmin is raw table access, so a
+                # staff scope (support/finance/ops) would mean nothing here.
+                if user.role != UserRole.SUPER_ADMIN or user.admin_scope not in (
+                    None,
+                    "all",
+                ):
                     logger.warning(
                         f"User {email} is not a SUPER_ADMIN, role: {user.role}"
                     )

@@ -23,10 +23,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies.auth import require_admin
+from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
+from src.application.services.audit_service import AuditService
 from src.application.services.merchant_visibility import visible
 from src.application.services.wallet_service import (
     WalletService,
@@ -48,6 +49,7 @@ from src.infrastructure.database.models.public.wallet import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_STEP_UP = [Depends(require_admin_2fa(max_age_seconds=300))]
 
 
 class AdjustRequest(BaseModel):
@@ -378,7 +380,11 @@ async def get_wallet_admin(
     )
 
 
-@router.post("/{tenant_id}/adjust", response_model=SuccessResponse[dict])
+@router.post(
+    "/{tenant_id}/adjust",
+    response_model=SuccessResponse[dict],
+    dependencies=_STEP_UP,
+)
 async def adjust_wallet(
     tenant_id: UUID,
     request: AdjustRequest,
@@ -405,6 +411,21 @@ async def adjust_wallet(
         )
     wallet = await service.get_or_create_wallet(tenant_id)
     service.bump_warning_level(wallet)
+    await AuditService(db).log(
+        event_type="admin.wallet.adjust",
+        action="update",
+        resource_type="wallet",
+        resource_id=str(wallet.id),
+        tenant_id=tenant_id,
+        user_id=admin_user_id,
+        severity="warning",
+        new_value={"amount_cents": request.amount_cents},
+        details={
+            "note": request.note,
+            "transaction_id": str(tx.id) if tx else None,
+            "actor_type": "staff",
+        },
+    )
     await db.commit()
     await service.invalidate_cache(tenant_id)
 

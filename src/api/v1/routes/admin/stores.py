@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.dependencies.auth import require_admin
+from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.dependencies.repositories import (
     get_store_repository,
@@ -25,6 +25,7 @@ from src.api.dependencies.services import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
+from src.application.services.audit_service import AuditService
 from src.application.services.merchant_visibility import visible
 from src.config import settings
 from src.core.entities.store import StoreStatus
@@ -47,6 +48,7 @@ from src.infrastructure.external_services.manual_transfer import (
 )
 
 router = APIRouter()
+_STEP_UP = [Depends(require_admin_2fa(max_age_seconds=300))]
 
 
 # ---------------------------------------------------------------------------
@@ -487,11 +489,12 @@ async def get_store_detail(
     response_model=SuccessResponse[dict],
     summary="Update store status (admin)",
     operation_id="admin_update_store_status",
+    dependencies=_STEP_UP,
 )
 async def update_store_status(
     store_id: Annotated[UUID, Path(description="Store ID")],
     request: UpdateStoreStatusRequest,
-    _admin_id: Annotated[UUID, Depends(require_admin)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
     cache: Annotated[StorefrontCache, Depends(get_storefront_cache_service)],
 ):
@@ -516,7 +519,8 @@ async def update_store_status(
             f"Valid: {[s.value for s in StoreStatus]}",
         )
 
-    was_pending = store.status == StoreStatus.PENDING_APPROVAL
+    old_status = store.status
+    was_pending = old_status == StoreStatus.PENDING_APPROVAL
 
     # Apply domain method based on target status
     if new_status == StoreStatus.ACTIVE:
@@ -585,6 +589,18 @@ async def update_store_status(
             owner.status = UserStatus.ACTIVE
             await db.flush()
 
+    await AuditService(db).log(
+        event_type="admin.store.status_change",
+        action="update",
+        resource_type="store",
+        resource_id=str(store.id),
+        store_id=store.id,
+        tenant_id=store.tenant_id,
+        user_id=admin_id,
+        old_value={"status": str(old_status)},
+        new_value={"status": new_status.value},
+        details={"reason": request.reason, "actor_type": "staff"},
+    )
     await db.commit()
     if store.tenant_id:
         # Suspending stops the merchant's API tokens; drop the cached policy
@@ -700,11 +716,12 @@ class SetFounderCohortRequest(BaseModel):
     response_model=SuccessResponse[dict],
     summary="Toggle internal flag on a store's tenant (admin)",
     operation_id="admin_toggle_internal",
+    dependencies=_STEP_UP,
 )
 async def toggle_internal(
     store_id: Annotated[UUID, Path(description="Store ID")],
     request: ToggleInternalRequest,
-    _admin_id: Annotated[UUID, Depends(require_admin)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Mark or unmark a store's tenant as internal (test/sandbox).
@@ -727,6 +744,18 @@ async def toggle_internal(
             detail="Tenant not found",
         )
 
+    await AuditService(db).log(
+        event_type="admin.tenant.update",
+        action="update",
+        resource_type="tenant",
+        resource_id=str(tenant.id),
+        store_id=store.id,
+        tenant_id=tenant.id,
+        user_id=admin_id,
+        old_value={"is_internal": tenant.is_internal},
+        new_value={"is_internal": request.is_internal},
+        details={"actor_type": "staff"},
+    )
     tenant.is_internal = request.is_internal
     await tenant_repo.update(tenant)
 
@@ -823,6 +852,7 @@ class ImpersonateResponse(BaseModel):
     response_model=SuccessResponse[ImpersonateResponse],
     summary="Issue merchant-hub tokens for a store's owner and return the hub URL",
     operation_id="admin_impersonate_store",
+    dependencies=_STEP_UP,
 )
 async def impersonate_store(
     store_id: Annotated[UUID, Path()],
@@ -875,6 +905,19 @@ async def impersonate_store(
         expires_minutes=settings.impersonation_token_expire_minutes,
     )
     refresh = token_service.create_refresh_token(owner, tenant_id=store.tenant_id)
+
+    await AuditService(db).log(
+        event_type="admin.store.impersonate",
+        action="impersonate",
+        resource_type="store",
+        resource_id=str(store.id),
+        store_id=store.id,
+        tenant_id=store.tenant_id,
+        user_id=admin_id,
+        severity="warning",
+        details={"owner_id": str(owner.id), "actor_type": "staff"},
+    )
+    await db.commit()
 
     hub_base = settings.merchant_hub_url.rstrip("/")
     # The token is in the URL *fragment*, not the query string: fragments

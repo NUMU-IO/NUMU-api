@@ -39,6 +39,7 @@ from src.api.utils.cookies import (
 from src.api.v1.schemas.public.auth import (
     AuthResponse,
     LoginRequest,
+    TenantInfoResponse,
     TokenResponse,
     UserResponse,
 )
@@ -62,6 +63,15 @@ from src.infrastructure.repositories.two_factor_repository import TwoFactorRepos
 from src.infrastructure.repositories.user_repository import UserRepository
 
 router = APIRouter()
+
+
+class AdminUserResponse(UserResponse):
+    admin_scope: str | None = None
+
+
+AdminUserResponse.model_rebuild(
+    _types_namespace={"TenantInfoResponse": TenantInfoResponse}
+)
 
 
 def _user_response(user) -> UserResponse:
@@ -134,11 +144,12 @@ async def admin_login(
 
 @router.get(
     "/me",
-    response_model=SuccessResponse[UserResponse],
+    response_model=SuccessResponse[AdminUserResponse],
     summary="Get current admin from admin cookie",
     operation_id="admin_me",
 )
 async def admin_me(
+    request: Request,
     admin_id: Annotated[UUID, Depends(require_admin)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
 ):
@@ -147,7 +158,12 @@ async def admin_me(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin not found"
         )
-    return SuccessResponse(data=_user_response(user))
+    return SuccessResponse(
+        data=AdminUserResponse(
+            **_user_response(user).model_dump(),
+            admin_scope=request.state.admin_scope,
+        )
+    )
 
 
 @router.post(
