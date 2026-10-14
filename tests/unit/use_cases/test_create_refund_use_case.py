@@ -138,3 +138,78 @@ class TestOrderRefundableProperty:
             PaymentStatus.REFUNDED,
         ):
             assert not _order(status, store_id).is_refundable, status
+
+
+class TestOpenRefundsReserveTheBalance:
+    @pytest.mark.asyncio
+    async def test_pending_full_refund_blocks_a_second_one(self, test_session):
+        from src.infrastructure.repositories.refund_repository import RefundRepository
+
+        owner_id, store_id = uuid4(), uuid4()
+        order = _order(PaymentStatus.PAID, store_id)
+        order.tenant_id = uuid4()
+        use_case = _use_case(order, owner_id, already_refunded=0)
+        use_case.refund_repository = RefundRepository(test_session)
+        full = CreateRefundDTO(
+            order_id=order.id, refund_type="full", reason="customer_request"
+        )
+
+        first = await use_case.execute(full, store_id, owner_id)
+        assert first.amount == ORDER_TOTAL  # still "requested", not completed
+
+        with pytest.raises(ValidationError, match="already been fully refunded"):
+            await use_case.execute(full, store_id, owner_id)
+
+
+class TestGatewayRefundUsesMerchantCredentials:
+    @pytest.mark.asyncio
+    async def test_paymob_refund_gets_the_stores_credentials(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from src.api.v1.routes.stores import refunds as route
+
+        store_id = uuid4()
+        merchant_service = object()
+        seen: dict = {}
+
+        async def fake_paymob_for_store(settings):
+            seen["settings"] = settings
+            return merchant_service
+
+        class _Stop(Exception):
+            pass
+
+        class FakeUseCase:
+            def __init__(self, *_):
+                pass
+
+            async def execute(self, refund_id, store_id, user_id, payment_service):
+                seen["service"] = payment_service
+                raise _Stop
+
+        monkeypatch.setattr(
+            route, "get_paymob_service_for_store", fake_paymob_for_store
+        )
+        monkeypatch.setattr(route, "ProcessRefundUseCase", FakeUseCase)
+        refund_repo = AsyncMock()
+        refund_repo.get_by_id.return_value = SimpleNamespace(
+            payment_provider="paymob_card"
+        )
+        store_repo = AsyncMock()
+        store_repo.get_by_id.return_value = SimpleNamespace(settings={"payment": 1})
+
+        with pytest.raises(_Stop):
+            await route.process_refund(
+                store_id=store_id,
+                order_id=uuid4(),
+                refund_id=uuid4(),
+                user_id=uuid4(),
+                refund_repo=refund_repo,
+                order_repo=AsyncMock(),
+                store_repo=store_repo,
+                network_repo=AsyncMock(),
+                restock_items=False,
+            )
+
+        assert seen["service"] is merchant_service
+        assert seen["settings"] == {"payment": 1}

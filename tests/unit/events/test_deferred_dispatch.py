@@ -84,6 +84,30 @@ async def test_rollback_discards_events(test_session):
 
 
 @pytest.mark.asyncio
+async def test_savepoint_rollback_keeps_events_buffered_outside_it(test_session):
+    # An idempotent insert losing a race rolls back its SAVEPOINT; that must
+    # not silently drop the request's other events (e.g. OrderPaid).
+    calls: list = []
+    bus = _bus_with_handler(calls)
+    outer, inner = _Ping(), _Ping()
+
+    token = conn._current_session.set(test_session)
+    try:
+        await test_session.execute(text("SELECT 1"))
+        bus.publish(outer)
+        with pytest.raises(ValueError):
+            async with test_session.begin_nested():
+                bus.publish(inner)
+                raise ValueError
+
+        await test_session.commit()
+        await asyncio.sleep(0.05)
+        assert calls == [outer]
+    finally:
+        conn._current_session.reset(token)
+
+
+@pytest.mark.asyncio
 async def test_admin_session_is_registered_for_deferred_dispatch(monkeypatch):
     # Payment webhooks run on the admin session. Their events must wait for
     # its commit, or handlers save the pre-payment order over the paid one.

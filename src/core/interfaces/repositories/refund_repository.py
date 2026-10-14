@@ -46,8 +46,16 @@ class IRefundRepository(BaseRepository[Refund]):
         ...
 
     @abstractmethod
-    async def get_total_refunded_for_order(self, order_id: UUID) -> int:
-        """Get total refunded amount (completed refunds) for an order in cents."""
+    async def get_total_refunded_for_order(
+        self, order_id: UUID, *, include_open: bool = False
+    ) -> int:
+        """Total refunded for an order in cents (completed; plus still-open
+        refunds when ``include_open``)."""
+        ...
+
+    @abstractmethod
+    async def get_by_id_for_update(self, entity_id: UUID) -> Refund | None:
+        """Get refund by ID, row-locked until the transaction ends."""
         ...
 
     @abstractmethod

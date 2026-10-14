@@ -145,7 +145,9 @@ class ProcessRefundUseCase:
         if store.owner_id != user_id:
             raise AuthorizationError("You don't have permission to process refunds")
 
-        refund = await self.refund_repository.get_by_id(refund_id)
+        # Locked: a concurrent process call waits, then fails the
+        # approved/failed -> processing transition instead of paying twice.
+        refund = await self.refund_repository.get_by_id_for_update(refund_id)
         if not refund:
             raise EntityNotFoundError("Refund", str(refund_id))
         if refund.store_id != store_id:

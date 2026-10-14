@@ -117,6 +117,7 @@ async def _run_deposit_sweep(monkeypatch, order, intent=None):
     from src.infrastructure.repositories import (
         instapay_intent_repository,
         order_repository,
+        payment_proof_repository,
     )
     from src.infrastructure.tenancy import rls
 
@@ -142,6 +143,10 @@ async def _run_deposit_sweep(monkeypatch, order, intent=None):
         instapay_intent_repository,
         "ManualPaymentIntentRepository",
         lambda _s: intent_repo,
+    )
+    proof_repo = MagicMock(has_recorded_payments=AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        payment_proof_repository, "PaymentProofRepository", lambda _s: proof_repo
     )
     stats = await deposit_expiry_task._sweep()
     return stats, order_repo

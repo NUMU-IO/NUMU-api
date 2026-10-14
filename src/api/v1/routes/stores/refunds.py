@@ -19,7 +19,10 @@ from src.api.dependencies.repositories import (
     get_network_reputation_repository,
     get_refund_repository,
 )
-from src.api.dependencies.services import get_payment_service_for_provider
+from src.api.dependencies.services import (
+    get_payment_service_for_provider,
+    get_paymob_service_for_store,
+)
 
 logger = logging.getLogger(__name__)
 from src.api.responses import SuccessResponse
@@ -268,7 +271,16 @@ async def process_refund(
     payment_service = None
     if refund and refund.payment_provider:
         try:
-            payment_service = get_payment_service_for_provider(refund.payment_provider)
+            if refund.payment_provider.startswith("paymob"):
+                # The order was paid into the merchant's Paymob account.
+                store = await store_repo.get_by_id(store_id)
+                payment_service = await get_paymob_service_for_store(
+                    store.settings if store else {}
+                )
+            else:
+                payment_service = get_payment_service_for_provider(
+                    refund.payment_provider
+                )
         except ValueError:
             pass  # Will fall through to manual processing
 

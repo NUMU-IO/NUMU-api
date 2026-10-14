@@ -25,7 +25,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services import admin_notifications
-from src.application.use_cases.wallet.credit_wallet import credit_topup_intent
+from src.application.use_cases.wallet.credit_wallet import (
+    credit_topup_intent,
+    lock_topup_intent,
+)
 from src.config.settings import get_settings
 from src.core.entities.wallet import (
     MANUAL_TOPUP_METHODS,
@@ -364,12 +367,16 @@ class SubmitTopupProofUseCase:
             # case). Not spendable: gate/commissions read balance_cents.
             from src.application.services.wallet_service import WalletService
 
+            await lock_topup_intent(self.session, intent)
             if intent.status == TopupIntentStatus.AWAITING_PROOF.value:
                 service = WalletService(self.session)
                 wallet = await service.get_or_create_wallet(tenant_id, for_update=True)
                 service.add_pending_hold(wallet, intent.amount_cents)
                 on_hold = True
-            intent.status = TopupIntentStatus.UNDER_REVIEW.value
+            # A concurrent proof may have credited it meanwhile — never
+            # move a succeeded intent back.
+            if intent.status != TopupIntentStatus.SUCCEEDED.value:
+                intent.status = TopupIntentStatus.UNDER_REVIEW.value
             logger.info(
                 "wallet_topup_proof_queued_for_review",
                 extra={

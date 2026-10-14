@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.entities.refund import Refund, RefundStatus
 from src.core.interfaces.repositories.refund_repository import IRefundRepository
 from src.infrastructure.database.connection import get_tenant_id
+from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.refund import RefundModel
 
 
@@ -89,6 +90,13 @@ class RefundRepository(IRefundRepository):
     async def get_by_id(self, entity_id: UUID) -> Refund | None:
         """Get refund by ID."""
         query = select(RefundModel).where(RefundModel.id == entity_id)
+        result = await self.session.execute(self._tenant_filter(query))
+        model = result.scalar_one_or_none()
+        return self._to_entity(model) if model else None
+
+    async def get_by_id_for_update(self, entity_id: UUID) -> Refund | None:
+        """Get refund by ID, row-locked until the transaction ends."""
+        query = select(RefundModel).where(RefundModel.id == entity_id).with_for_update()
         result = await self.session.execute(self._tenant_filter(query))
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
@@ -209,11 +217,25 @@ class RefundRepository(IRefundRepository):
         result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
 
-    async def get_total_refunded_for_order(self, order_id: UUID) -> int:
-        """Get total refunded amount (completed refunds) for an order in cents."""
+    async def get_total_refunded_for_order(
+        self, order_id: UUID, *, include_open: bool = False
+    ) -> int:
+        """Total refunded for an order in cents (completed refunds only).
+
+        ``include_open`` also counts refunds that can still complete
+        (requested/approved/processing/processed, and failed — retryable),
+        and row-locks the order so concurrent creates see each other: this
+        is the budget a new refund must fit in.
+        """
+        if include_open:
+            await self.session.execute(
+                select(OrderModel.id).where(OrderModel.id == order_id).with_for_update()
+            )
+            status_filter = RefundModel.status != RefundStatus.REJECTED
+        else:
+            status_filter = RefundModel.status == RefundStatus.COMPLETED
         query = select(func.coalesce(func.sum(RefundModel.amount), 0)).where(
-            RefundModel.order_id == order_id,
-            RefundModel.status == RefundStatus.COMPLETED,
+            RefundModel.order_id == order_id, status_filter
         )
         result = await self.session.execute(self._tenant_filter(query))
         return result.scalar() or 0
