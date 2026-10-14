@@ -10,6 +10,7 @@ Supported URL formats:
   - https://www.facebook.com/photo?fbid=123456
 """
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -17,6 +18,8 @@ from html import unescape
 from urllib.parse import urlparse
 
 import httpx
+
+from src.core.url_guard import UnsafeUrlError, assert_webhook_target
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +60,36 @@ class ScrapedPost:
     error: str | None = None
 
 
+def _host_in(host: str, *domains: str) -> bool:
+    return any(host == d or host.endswith(f".{d}") for d in domains)
+
+
 def detect_platform(url: str) -> str | None:
     """Detect platform from URL."""
     parsed = urlparse(url)
-    host = parsed.hostname or ""
-    if "instagram.com" in host:
+    host = (parsed.hostname or "").lower()
+    if _host_in(host, "instagram.com"):
         return "instagram"
-    if "facebook.com" in host or "fb.com" in host:
+    if _host_in(host, "facebook.com", "fb.com"):
         return "facebook"
     return None
+
+
+async def get_public(
+    client: httpx.AsyncClient, url: str, max_redirects: int = 5
+) -> httpx.Response:
+    """GET ``url`` following redirects by hand, SSRF-checking every hop.
+
+    The client must not follow redirects itself: a public page can redirect
+    to an internal address, and the body here is stored publicly.
+    """
+    for _ in range(max_redirects + 1):
+        await asyncio.to_thread(assert_webhook_target, url)
+        resp = await client.get(url)
+        if resp.next_request is None:
+            return resp
+        url = str(resp.next_request.url)
+    raise UnsafeUrlError("Too many redirects.")
 
 
 def _extract_shortcode(url: str) -> str | None:
@@ -313,7 +337,6 @@ async def _scrape_facebook(url: str) -> ScrapedPost:
     try:
         async with httpx.AsyncClient(
             timeout=15,
-            follow_redirects=True,
             headers={
                 **_HEADERS,
                 "User-Agent": (
@@ -323,7 +346,7 @@ async def _scrape_facebook(url: str) -> ScrapedPost:
                 ),
             },
         ) as client:
-            resp = await client.get(url)
+            resp = await get_public(client, url)
             resp.raise_for_status()
             html = resp.text
     except Exception as e:

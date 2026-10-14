@@ -12,6 +12,7 @@ from src.api.dependencies.repositories import (
     get_message_thread_repository,
 )
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.omnichannel.threads import get_store_thread
 from src.application.dto.omnichannel import SendMessageBodyDTO
 from src.application.use_cases.omnichannel import (
     ListMessagesUseCase,
@@ -24,7 +25,7 @@ from src.infrastructure.repositories import (
     MessageThreadRepositoryImpl,
 )
 
-router = APIRouter(tags=["Omnichannel"])
+router = APIRouter(tags=["Omnichannel"], dependencies=[Depends(get_store_thread)])
 
 
 @router.get("/", status_code=status.HTTP_200_OK)

@@ -28,8 +28,9 @@ import tempfile
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+from src.core.exceptions.base import EntityAlreadyExistsError
 from src.infrastructure.messaging.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -823,7 +824,18 @@ def _build_register_activate(
             theme_repo = ThemeRepository(session)
             version_repo = ThemeVersionRepository(session)
 
-            existing = await theme_repo.get_by_slug(theme_id_slug)
+            # A code-editor build is owned by its store, a ZIP build by its
+            # uploader; never write into a slug someone else holds.
+            owner_id = UUID(activate_for_store_id or uploader_id)
+            try:
+                existing = await theme_repo.get_by_slug_for_owner(
+                    theme_id_slug, owner_id
+                )
+            except EntityAlreadyExistsError as exc:
+                raise ThemeBuildError(
+                    f"Theme id '{theme_id_slug}' is taken. "
+                    "Use a unique id in theme.json."
+                ) from exc
             if existing:
                 theme = existing
             else:
@@ -839,7 +851,7 @@ def _build_register_activate(
                     settings_schema=settings_schema,
                     section_schemas=section_schemas,
                     supported_features=manifest.get("supports"),
-                    created_by=uuid4() if uploader_id is None else uuid4(),
+                    created_by=owner_id,
                     created_at=datetime.now(UTC),
                     updated_at=datetime.now(UTC),
                 )
