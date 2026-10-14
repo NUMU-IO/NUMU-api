@@ -81,20 +81,30 @@ def _sweep_order_filter(cutoff: datetime) -> Any:
     Timing stays the merchant's decision: the per-order loop skips COD orders
     for stores that configured an explicit ``purchase_trigger``, because there
     the order-status handler owns when Purchase fires.
+
+    Either way the order must still be a sale: a cancelled (often a fake COD
+    order), refunded, returned or draft order is never reported as a Purchase.
     """
     from sqlalchemy import and_, or_
 
     from src.infrastructure.database.models.tenant.order import OrderModel
+    from src.infrastructure.database.order_status_filters import (
+        NOT_A_SALE_STATUSES_LC,
+        status_lc,
+    )
 
-    return or_(
-        and_(OrderModel.paid_at.isnot(None), OrderModel.paid_at >= cutoff),
-        and_(
-            OrderModel.paid_at.is_(None),
-            or_(
-                OrderModel.payment_method == "cod",
-                OrderModel.payment_method.is_(None),
+    return and_(
+        status_lc(OrderModel.status).notin_(NOT_A_SALE_STATUSES_LC),
+        or_(
+            and_(OrderModel.paid_at.isnot(None), OrderModel.paid_at >= cutoff),
+            and_(
+                OrderModel.paid_at.is_(None),
+                or_(
+                    OrderModel.payment_method == "cod",
+                    OrderModel.payment_method.is_(None),
+                ),
+                OrderModel.created_at >= cutoff,
             ),
-            OrderModel.created_at >= cutoff,
         ),
     )
 
