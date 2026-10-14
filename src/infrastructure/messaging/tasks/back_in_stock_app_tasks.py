@@ -11,7 +11,7 @@ stock writes publish no event, and prod Redis can evict queued messages.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -197,7 +197,7 @@ async def send_email_alert(
 
 
 @asynccontextmanager
-async def _sending(waiter_id: UUID) -> AsyncIterator[bool]:
+async def _sending(waiter_id: UUID) -> AsyncGenerator[bool, None]:
     """True when this task alone is sending ``waiter_id``.
 
     A second copy of a send (the broker re-delivers a countdown that outlives
