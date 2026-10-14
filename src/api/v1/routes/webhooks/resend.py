@@ -13,16 +13,15 @@ Setup required:
 4. Set RESEND_FORWARD_TO in .env (email address to forward received emails to)
 """
 
-import logging
-
 import resend
 from fastapi import APIRouter, HTTPException, Request, status
 
 from src.api.dependencies.services import get_email_service
 from src.config import settings
 from src.core.interfaces.services.email_service import EmailMessage
+from src.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

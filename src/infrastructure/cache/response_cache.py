@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import weakref
 from uuid import UUID
 
 import redis.asyncio as redis
@@ -15,15 +17,24 @@ logger = get_logger(__name__)
 PREFIX = "sfresp:v1"
 TTL_SECONDS = 60
 
-_client: redis.Redis | None = None
+_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, redis.Redis] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def response_cache_redis() -> redis.Redis:
-    """One shared bytes client (bodies are gzip, so no decode_responses)."""
-    global _client
-    if _client is None:
-        _client = redis.from_url(settings.redis_url, decode_responses=False)
-    return _client
+    """One bytes client per event loop (bodies are gzip, so no decode_responses).
+
+    A redis.asyncio client belongs to the loop it was made on, and Celery runs
+    each task on a new one, so a single module-wide client fails there.
+    """
+    loop = asyncio.get_running_loop()
+    client = _clients.get(loop)
+    if client is None:
+        client = _clients[loop] = redis.from_url(
+            settings.redis_url, decode_responses=False
+        )
+    return client
 
 
 def store_prefix(store_id: UUID | str) -> str:
