@@ -72,6 +72,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.fraud_tasks",
         "src.infrastructure.messaging.tasks.risk_scoring_tasks",
         "src.infrastructure.messaging.tasks.whatsapp_nudge_task",
+        # Send-now / scheduled WhatsApp campaign runs.
+        "src.infrastructure.messaging.tasks.whatsapp_campaign_tasks",
         # backend-030 / US3 — scheduled-send dispatcher (every 60s).
         "src.infrastructure.messaging.tasks.whatsapp_scheduled_send_dispatcher",
         # backend-030 / US5 — PENDING template polling sync (every 15 min).

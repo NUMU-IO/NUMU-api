@@ -9,9 +9,11 @@ silently dropping the activity.
 
 This scheduler buffers handler dispatch on the request session and flushes it
 from an ``after_commit`` hook, so handlers only run once the data is durable
-and visible. On rollback the buffer is discarded, so events never fire for
-work that did not persist (e.g. an order-created WhatsApp message for an order
-whose transaction rolled back).
+and visible. On rollback the events buffered inside the rolled-back
+(sub)transaction are discarded, so events never fire for work that did not
+persist (e.g. an order-created WhatsApp message for an order whose
+transaction rolled back) — while a rolled-back SAVEPOINT (an idempotent
+insert losing a race) keeps the events buffered outside it.
 
 It falls back to immediate dispatch when there is no request-scoped session
 (Celery tasks, handlers' own sessions, tests), preserving the previous
@@ -44,12 +46,14 @@ def deferred_scheduler(
 
     sync_session = session.sync_session
     buffer = sync_session.info.setdefault(_BUFFER_KEY, [])
-    buffer.append((bus, event, handlers))
+    txn = sync_session.get_nested_transaction() or sync_session.get_transaction()
+    buffer.append((bus, event, handlers, txn))
 
     if not sync_session.info.get(_LISTENER_FLAG):
         sync_session.info[_LISTENER_FLAG] = True
         sa_event.listen(sync_session, "after_commit", _on_commit)
-        sa_event.listen(sync_session, "after_rollback", _on_rollback)
+        # Fires for every rollback, SAVEPOINTs included (after_rollback
+        # does too, but cannot tell which transaction ended).
         sa_event.listen(sync_session, "after_soft_rollback", _on_soft_rollback)
 
 
@@ -60,13 +64,25 @@ def _drain(sync_session: SyncSession) -> list:
 def _on_commit(sync_session: SyncSession) -> None:
     # Runs inside ``await session.commit()`` with the event loop active, so
     # ``asyncio.create_task`` (in _schedule_immediately) works here.
-    for bus, event, handlers in _drain(sync_session):
+    for bus, event, handlers, _ in _drain(sync_session):
         _schedule_immediately(bus, event, handlers)
 
 
-def _on_rollback(sync_session: SyncSession) -> None:
-    _drain(sync_session)  # discard — the work did not persist
+def _inside(txn, rolled_back) -> bool:
+    while txn is not None:
+        if txn is rolled_back:
+            return True
+        txn = txn.parent
+    return False
 
 
 def _on_soft_rollback(sync_session: SyncSession, previous_transaction) -> None:
-    _drain(sync_session)
+    # Discard only what was buffered inside the rolled-back transaction —
+    # that work did not persist; everything outside it still will.
+    kept = [
+        entry
+        for entry in _drain(sync_session)
+        if not _inside(entry[3], previous_transaction)
+    ]
+    if kept:
+        sync_session.info[_BUFFER_KEY] = kept
