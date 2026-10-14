@@ -23,12 +23,12 @@ in the bucket / table uniformly.
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import UTC, datetime, timedelta
 
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _task_loop: asyncio.AbstractEventLoop | None = None
 

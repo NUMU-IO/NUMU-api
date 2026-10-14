@@ -15,7 +15,6 @@ Setup required:
 
 import hashlib
 import hmac
-import logging
 
 import resend
 from fastapi import APIRouter, HTTPException, Request, status
@@ -23,8 +22,9 @@ from fastapi import APIRouter, HTTPException, Request, status
 from src.api.dependencies.services import get_email_service
 from src.config import settings
 from src.core.interfaces.services.email_service import EmailMessage
+from src.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

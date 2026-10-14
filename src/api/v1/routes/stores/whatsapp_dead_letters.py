@@ -12,7 +12,6 @@ store-owner role; staff/viewer tokens get 403 via the existing
 deferred to the polish phase pending rate-limit middleware.
 """
 
-import logging
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
@@ -30,11 +29,12 @@ from src.application.use_cases.whatsapp.replay_dead_letter import (
     ReplayDeadLetterUseCase,
 )
 from src.core.entities.store import Store
+from src.core.logging import get_logger
 from src.infrastructure.repositories.whatsapp_dead_letter_repository import (
     WhatsAppDeadLetterRepository,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter(prefix="/{store_id}/whatsapp/dead-letters")
 
 

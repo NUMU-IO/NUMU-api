@@ -5,12 +5,12 @@ Generates insights for all active stores and caches in store.settings.
 """
 
 import asyncio
-import logging
 from datetime import date, timedelta
 
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _task_loop = None
 

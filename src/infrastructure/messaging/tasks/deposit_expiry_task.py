@@ -21,11 +21,11 @@ per-tenant context even though the scan itself runs under bypass.
 from __future__ import annotations
 
 import asyncio
-import logging
 
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _task_loop: asyncio.AbstractEventLoop | None = None
 

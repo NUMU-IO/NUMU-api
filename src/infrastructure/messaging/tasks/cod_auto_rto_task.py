@@ -21,12 +21,12 @@ scan, narrow-to-tenant for each write.
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import UTC, datetime, timedelta
 
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _DEFAULT_AUTO_RTO_DAYS = 14
 _MIN_AUTO_RTO_DAYS = 7
