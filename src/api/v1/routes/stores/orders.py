@@ -1142,11 +1142,17 @@ async def apply_manual_payment(order, order_repo: OrderRepository):
     two callers.
 
     Payment plane only: the order's fulfilment ``status`` is untouched,
-    matching the behaviour the Mark-as-paid button has always had.
+    matching the behaviour the Mark-as-paid button has always had — except
+    a PENDING_DEPOSIT order, which moves to CONFIRMED.
     Returns the persisted order.
     """
-    from src.core.entities.order import PaymentStatus
+    from src.core.entities.order import OrderStatus, PaymentStatus
 
+    if order.status == OrderStatus.PENDING_DEPOSIT:
+        # Paid in full while the deposit was still due: nothing is left to
+        # wait on, and leaving the status lets the deposit-expiry sweep cancel
+        # a paid order.
+        order.transition_to(OrderStatus.CONFIRMED, reason="paid manually")
     order.payment_status = PaymentStatus.PAID
     order.paid_at = datetime.now(UTC)
     order.touch()

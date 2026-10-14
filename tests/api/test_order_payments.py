@@ -37,7 +37,13 @@ from src.api.v1.routes.stores.payment_proofs import (
     void_recorded_payment,
 )
 from src.core.entities.instapay import PaymentProofStatus
-from src.core.entities.order import OrderStatus, PaymentStatus
+from src.core.entities.order import (
+    Order,
+    OrderLineItem,
+    OrderShippingAddress,
+    OrderStatus,
+    PaymentStatus,
+)
 
 STORE_ID = uuid4()
 TENANT_ID = uuid4()
@@ -252,6 +258,41 @@ async def _record(order, *, amount, method="vodafone_cash", image=None, **kwargs
         # test would trip the look-alike confirmation. Tests of that guard
         # pass False explicitly.
         confirm_duplicate=kwargs.pop("confirm_duplicate", True),
+    )
+
+
+def _deposit_order() -> Order:
+    """A real entity: the deposit path runs ``Order.mark_as_paid``."""
+    return Order(
+        id=uuid4(),
+        store_id=STORE_ID,
+        tenant_id=TENANT_ID,
+        customer_id=uuid4(),
+        order_number="ORD-251727",
+        line_items=[
+            OrderLineItem(
+                product_id=uuid4(),
+                product_name="Book",
+                quantity=1,
+                unit_price=270_000,
+                total_price=270_000,
+            )
+        ],
+        shipping_address=OrderShippingAddress(
+            first_name="Test",
+            last_name="Customer",
+            address_line1="10 Tahrir Square",
+            city="Cairo",
+            country="EG",
+        ),
+        status=OrderStatus.PENDING_DEPOSIT,
+        payment_status=PaymentStatus.PENDING,
+        subtotal=270_000,
+        total=270_000,
+        currency="EGP",
+        payment_method="cod",
+        deposit_required_cents=135_000,
+        deposit_amount_cents=135_000,
     )
 
 
@@ -1026,3 +1067,34 @@ async def test_look_alike_receipt_on_another_order_is_not_questioned(
     await _record(_order(), amount=5000, image=_png((7, 7, 7)))
     await _record(_order(), amount=5000, image=_png((8, 8, 8)), confirm_duplicate=False)
     assert len(wiring.proofs.rows) == 2
+
+
+# ── COD deposit ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_recorded_deposit_confirms_a_pending_deposit_order(wiring, paid_calls):
+    """ORD-251727: the deposit was recorded by hand but the order stayed
+    PENDING_DEPOSIT, so the deposit-expiry sweep cancelled it 30 min later."""
+    order = _deposit_order()
+
+    result = await _record(order, amount=135_000)
+
+    assert order.status == OrderStatus.CONFIRMED
+    assert order.deposit_paid_at is not None
+    assert order.deposit_amount_cents == 135_000
+    assert result.data.balance_due_cents == 135_000
+    assert result.data.order_payment_status == PaymentStatus.PENDING.value
+    assert paid_calls == [], "a deposit is not an OrderPaid"
+
+
+@pytest.mark.asyncio
+async def test_mark_paid_takes_a_pending_deposit_order_out_of_the_sweep():
+    from src.api.v1.routes.stores.orders import apply_manual_payment
+
+    order = _deposit_order()
+
+    await apply_manual_payment(order, _FakeOrderRepo(order))
+
+    assert order.status == OrderStatus.CONFIRMED
+    assert order.payment_status == PaymentStatus.PAID
