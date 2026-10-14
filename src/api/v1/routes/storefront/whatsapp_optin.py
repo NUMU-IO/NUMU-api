@@ -15,7 +15,6 @@ This closes the storefront-opt-in abuse vector from analyze finding A1
 (anyone with a store slug writing arbitrary opt-in rows).
 """
 
-import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -23,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from src.api.dependencies.repositories import get_store_repository
 from src.api.v1.schemas.stores.whatsapp_opt_in import OptInRow, StorefrontOptIn
 from src.application.use_cases.whatsapp.opt_in_customer import OptInCustomerUseCase
+from src.core.logging import get_logger
 from src.core.value_objects.phone import InvalidPhoneError, PhoneNumber
 from src.infrastructure.database.connection import AsyncSessionLocal
 from src.infrastructure.repositories.checkout_session_repository import (
@@ -30,7 +30,7 @@ from src.infrastructure.repositories.checkout_session_repository import (
 )
 from src.infrastructure.repositories.store_repository import StoreRepository
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 

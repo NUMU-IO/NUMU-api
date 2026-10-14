@@ -445,13 +445,15 @@ async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> N
                         phone=canon_phone,
                     )
                     logger.info(
-                        "whatsapp_stop_keyword_opt_out",
-                        phone_tail=canon_phone[-4:],
-                        store_id=str(prior.store_id),
+                        "whatsapp_stop_keyword_opt_out store=%s phone=***%s",
+                        prior.store_id,
+                        canon_phone[-4:],
                     )
                 except Exception as e:
                     logger.warning(
-                        "stop_keyword_opt_out_failed for %s: %s", from_number, e
+                        "stop_keyword_opt_out_failed for ***%s: %s",
+                        str(from_number)[-4:],
+                        e,
                     )
 
         # Verification reply path (backend-015). Only text messages can
@@ -527,7 +529,7 @@ async def _send_optout_ack(
         )
     except Exception as exc:
         logger.warning(
-            "whatsapp_stop_ack_send_failed",
-            phone_tail=phone[-4:],
-            error=str(exc),
+            "whatsapp_stop_ack_send_failed phone=***%s error=%s",
+            phone[-4:],
+            exc,
         )

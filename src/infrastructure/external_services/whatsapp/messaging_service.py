@@ -553,16 +553,16 @@ class WhatsAppMessagingService(IMessagingService):
                     caption=f"Invoice for order {order_number}",
                 )
                 logger.info(
-                    "whatsapp_order_invoice_attachment",
-                    order_number=order_number,
-                    phone=recipient.phone[-4:],
-                    success=attachment_result.success,
+                    "whatsapp_order_invoice_attachment order=%s phone=***%s success=%s",
+                    order_number,
+                    recipient.phone[-4:],
+                    attachment_result.success,
                 )
             except Exception as exc:
                 logger.warning(
-                    "whatsapp_order_invoice_attachment_failed",
-                    order_number=order_number,
-                    error=str(exc),
+                    "whatsapp_order_invoice_attachment_failed order=%s error=%s",
+                    order_number,
+                    exc,
                 )
 
         return result

@@ -7,7 +7,6 @@ Four endpoints under ``/stores/{store_id}/whatsapp/scheduled-sends``:
 - DELETE ``/{send_id}``     cancel a pending row (409 if not pending)
 """
 
-import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -28,11 +27,12 @@ from src.application.use_cases.whatsapp.schedule_send import (
     ScheduleSendUseCase,
 )
 from src.core.entities.store import Store
+from src.core.logging import get_logger
 from src.infrastructure.repositories.whatsapp_scheduled_send_repository import (
     WhatsAppScheduledSendRepository,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter(prefix="/{store_id}/whatsapp/scheduled-sends")
 
 

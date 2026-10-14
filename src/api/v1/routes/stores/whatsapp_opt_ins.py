@@ -10,7 +10,6 @@ The storefront-facing anonymous endpoint lives elsewhere
 checkout-session token rather than bearer auth (FR-007a).
 """
 
-import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -26,12 +25,13 @@ from src.api.v1.schemas.stores.whatsapp_opt_in import (
 from src.application.use_cases.whatsapp.opt_in_customer import OptInCustomerUseCase
 from src.application.use_cases.whatsapp.opt_out_customer import OptOutCustomerUseCase
 from src.core.entities.store import Store
+from src.core.logging import get_logger
 from src.core.value_objects.phone import InvalidPhoneError
 from src.infrastructure.repositories.whatsapp_opt_in_repository import (
     WhatsAppOptInRepository,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter(prefix="/{store_id}/whatsapp/opt-ins")
 
 
