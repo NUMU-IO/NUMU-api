@@ -5,20 +5,30 @@ Requires SUPER_ADMIN role.
 """
 
 import logging
+from types import SimpleNamespace
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
+from src.api.dependencies.sanitization import SanitizedStr
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.stores import orders as store_orders
 from src.api.v1.schemas.public.common import PaginatedListResponse
+from src.api.v1.schemas.tenant.order import (
+    CreateOrderCommentRequest,
+    OrderActivitiesResponse,
+    OrderActivityResponse,
+)
 from src.application.services.audit_service import AuditService
+from src.application.services.stock_service import try_restock_order
+from src.core.entities.instapay import ManualPaymentIntentStatus
 from src.core.entities.order import VALID_STATUS_TRANSITIONS, OrderStatus, PaymentStatus
 from src.infrastructure.database.models.public.tenant import (
     TenantLifecycleState,
@@ -26,6 +36,14 @@ from src.infrastructure.database.models.public.tenant import (
 )
 from src.infrastructure.database.models.tenant.customer import CustomerModel
 from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.repositories.customer_repository import CustomerRepository
+from src.infrastructure.repositories.instapay_intent_repository import (
+    ManualPaymentIntentRepository,
+)
+from src.infrastructure.repositories.order_activity_repository import (
+    OrderActivityRepository,
+)
+from src.infrastructure.repositories.order_repository import OrderRepository
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +146,10 @@ class UpdateOrderStatusRequest(BaseModel):
     status: str
 
 
+class AdminOrderNoteRequest(BaseModel):
+    body: SanitizedStr = Field(..., min_length=1, max_length=2000)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -216,6 +238,64 @@ def _order_to_detail(o: OrderModel) -> AdminOrderDetail:
         fulfilled_at=_ts(o.fulfilled_at),
         created_at=_ts(o.created_at) or "",
         updated_at=_ts(o.updated_at) or "",
+    )
+
+
+async def _load_order(db: AsyncSession, order_id: UUID) -> OrderModel:
+    order = (
+        await db.execute(
+            select(OrderModel)
+            .options(
+                selectinload(OrderModel.customer),
+                selectinload(OrderModel.store),
+            )
+            .where(OrderModel.id == order_id)
+        )
+    ).scalar_one_or_none()
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+    return order
+
+
+async def _load_entity(db: AsyncSession, order_id: UUID):
+    entity = await OrderRepository(db).get_by_id(order_id)
+    if entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+    return entity
+
+
+async def _close_live_intent(db: AsyncSession, order_id: UUID) -> None:
+    """The money is in: a live manual-payment intent left to expire would
+    make the InstaPay sweep cancel and restock this order."""
+    repo = ManualPaymentIntentRepository(db)
+    intent = await repo.get_by_order_id(order_id)
+    if intent is not None and intent.status in (
+        ManualPaymentIntentStatus.AWAITING_PAYMENT,
+        ManualPaymentIntentStatus.PROOF_RECEIVED,
+    ):
+        await repo.update_status(intent.id, ManualPaymentIntentStatus.PAID)
+
+
+async def _audit(db: AsyncSession, admin_id: UUID, entity, event: str, **details):
+    await AuditService(db).log(
+        event_type=f"order.{event}_by_staff",
+        action="update",
+        resource_type="order",
+        resource_id=str(entity.id),
+        user_id=admin_id,
+        tenant_id=entity.tenant_id,
+        store_id=entity.store_id,
+        details={
+            "order_number": entity.order_number,
+            "actor_type": "staff",
+            **details,
+        },
     )
 
 
@@ -338,23 +418,7 @@ async def get_order(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get a single order with full details."""
-    query = (
-        select(OrderModel)
-        .options(
-            selectinload(OrderModel.customer),
-            selectinload(OrderModel.store),
-        )
-        .where(OrderModel.id == order_id)
-    )
-    result = await db.execute(query)
-    order = result.scalars().first()
-
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found",
-        )
-
+    order = await _load_order(db, order_id)
     detail = _order_to_detail(order)
     risk = (
         await db.execute(
@@ -437,26 +501,13 @@ async def _customer_history(db: AsyncSession, order: OrderModel) -> CustomerHist
 async def update_order_status(
     order_id: Annotated[UUID, Path(description="Order ID")],
     request: UpdateOrderStatusRequest,
-    _admin_id: Annotated[UUID, Depends(require_admin)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Update an order's status (admin override)."""
-    query = (
-        select(OrderModel)
-        .options(
-            selectinload(OrderModel.customer),
-            selectinload(OrderModel.store),
-        )
-        .where(OrderModel.id == order_id)
-    )
-    result = await db.execute(query)
-    order = result.scalars().first()
+    """Update an order's status (admin override).
 
-    if not order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Order not found",
-        )
+    Cancelled and returned give the debited stock back, once."""
+    order = await _load_order(db, order_id)
 
     # Parse new status
     try:
@@ -479,7 +530,24 @@ async def update_order_status(
         )
 
     old_status = current.value
+    restocked = False
+    if new_status in (OrderStatus.CANCELLED, OrderStatus.RETURNED):
+        entity = await _load_entity(db, order_id)
+        restocked = await try_restock_order(
+            db, entity, reason=f"admin_{new_status.value}"
+        )
+        if restocked:
+            order.extra_data = entity.metadata
     order.status = new_status
+    await _audit(
+        db,
+        admin_id,
+        order,
+        "status_changed",
+        from_status=old_status,
+        to_status=new_status.value,
+        restocked=restocked,
+    )
     await db.commit()
     await db.refresh(order)
 
@@ -575,3 +643,146 @@ async def delete_order(
     )
     await db.execute(delete(OrderModel).where(OrderModel.id == order_id))
     await db.commit()
+
+
+@router.post(
+    "/{order_id}/mark-paid",
+    response_model=SuccessResponse[AdminOrderDetail],
+    summary="Mark an order paid (admin)",
+    operation_id="admin_mark_order_paid",
+)
+async def mark_order_paid(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Record money collected outside a gateway, exactly like the merchant's
+    Mark-as-paid button (invoice, commission and email ride OrderPaidEvent)."""
+    entity = await _load_entity(db, order_id)
+    if entity.payment_status in (
+        PaymentStatus.PAID,
+        PaymentStatus.PARTIALLY_REFUNDED,
+        PaymentStatus.REFUNDED,
+    ) or entity.status in (
+        OrderStatus.CANCELLED,
+        OrderStatus.RETURNED,
+        OrderStatus.REFUNDED,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Order is {entity.status.value} / {entity.payment_status.value}",
+        )
+    old_status = entity.status.value
+    await store_orders.apply_manual_payment(entity, OrderRepository(db))
+    await _close_live_intent(db, order_id)
+    await _audit(db, admin_id, entity, "marked_paid", from_status=old_status)
+    await db.commit()
+    return SuccessResponse(
+        data=_order_to_detail(await _load_order(db, order_id)),
+        message="Order marked as paid",
+    )
+
+
+@router.post(
+    "/{order_id}/confirm-deposit",
+    response_model=SuccessResponse[AdminOrderDetail],
+    summary="Confirm a COD deposit was received (admin)",
+    operation_id="admin_confirm_order_deposit",
+)
+async def confirm_order_deposit(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """PENDING_DEPOSIT -> CONFIRMED; the balance stays due on delivery."""
+    entity = await _load_entity(db, order_id)
+    if entity.status != OrderStatus.PENDING_DEPOSIT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Order is {entity.status.value}, not pending_deposit",
+        )
+    entity.mark_as_paid(payment_id=f"ADMIN-{admin_id}", payment_method="manual")
+    await OrderRepository(db).update(entity)
+    await _close_live_intent(db, order_id)
+    await _audit(db, admin_id, entity, "deposit_confirmed")
+    await db.commit()
+    return SuccessResponse(
+        data=_order_to_detail(await _load_order(db, order_id)),
+        message="Deposit confirmed",
+    )
+
+
+@router.post(
+    "/{order_id}/resend-whatsapp",
+    response_model=SuccessResponse,
+    summary="Resend the WhatsApp order confirmation (admin)",
+    operation_id="admin_resend_order_whatsapp",
+)
+async def resend_order_whatsapp(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """The merchant's resend, every guard included."""
+    entity = await _load_entity(db, order_id)
+    result = await store_orders.resend_order_whatsapp(
+        order_id,
+        store=SimpleNamespace(id=entity.store_id),
+        order_repo=OrderRepository(db),
+        customer_repo=CustomerRepository(db),
+        db=db,
+    )
+    await _audit(db, admin_id, entity, "whatsapp_resent", sent=result.data.get("sent"))
+    await db.commit()
+    return result
+
+
+@router.get(
+    "/{order_id}/activities",
+    response_model=SuccessResponse[OrderActivitiesResponse],
+    summary="Order activity stream (admin)",
+    operation_id="admin_list_order_activities",
+)
+async def list_order_activities(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+):
+    entity = await _load_entity(db, order_id)
+    return await store_orders.list_order_activities(
+        order_id,
+        store=SimpleNamespace(id=entity.store_id),
+        order_repo=OrderRepository(db),
+        activity_repo=OrderActivityRepository(db),
+        page=page,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/{order_id}/notes",
+    response_model=SuccessResponse[OrderActivityResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Add a staff note to an order (admin)",
+    operation_id="admin_create_order_note",
+)
+async def create_order_note(
+    order_id: Annotated[UUID, Path(description="Order ID")],
+    request: AdminOrderNoteRequest,
+    admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    entity = await _load_entity(db, order_id)
+    result = await store_orders.create_order_comment(
+        order_id,
+        CreateOrderCommentRequest(content=request.body),
+        store=SimpleNamespace(id=entity.store_id),
+        user_id=admin_id,
+        order_repo=OrderRepository(db),
+        activity_repo=OrderActivityRepository(db),
+    )
+    await _audit(db, admin_id, entity, "note_added", activity_id=result.data.id)
+    await db.commit()
+    return result
