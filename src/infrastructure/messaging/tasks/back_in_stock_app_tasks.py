@@ -11,16 +11,18 @@ stock writes publish no event, and prod Redis can evict queued messages.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 
 from src.application.services import back_in_stock as bis
 from src.core.logging import get_logger
-from src.infrastructure.database.connection import AsyncSessionLocal
+from src.infrastructure.database.connection import AsyncSessionLocal, engine
 from src.infrastructure.database.models.tenant.back_in_stock import (
     BackInStockWaiterModel as Waiter,
 )
@@ -60,7 +62,11 @@ async def restock_check(store_id: UUID, product_id: UUID) -> dict:
         if not await repo.is_live(db, store_id):
             return {"skipped": "not_live"}
         product, variants = await repo.product_with_variants(db, store_id, product_id)
-        store = await db.get(StoreModel, store_id)
+        # Lock the store row until the commit: checks of one store then queue
+        # one after another, each counting what the last one queued, so the
+        # daily caps hold when several workers run checks at once. FOR NO KEY
+        # UPDATE, so orders and sign-ups that reference the store never wait.
+        store = await db.get(StoreModel, store_id, with_for_update={"key_share": True})
         if product is None or store is None:
             return {"skipped": "no_product"}
 
@@ -190,9 +196,41 @@ async def send_email_alert(
     return ("email", None) if sent else (None, "email_failed")
 
 
+@asynccontextmanager
+async def _sending(waiter_id: UUID) -> AsyncIterator[bool]:
+    """True when this task alone is sending ``waiter_id``.
+
+    A second copy of a send (the broker re-delivers a countdown that outlives
+    its visibility timeout; a second worker) must not message the shopper
+    again. A row lock would not hold, because core's message log commits
+    mid-send, so this is a session advisory lock on a connection kept for the
+    whole send.
+    """
+    key = waiter_id.int & 0x7FFF_FFFF_FFFF_FFFF
+    async with engine.connect() as conn:
+        # Autocommit: no transaction stays open for the whole send, so the
+        # idle-in-transaction timeout cannot end the connection mid-send.
+        conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        mine = bool(
+            await conn.scalar(text("SELECT pg_try_advisory_lock(:k)"), {"k": key})
+        )
+        try:
+            yield mine
+        finally:
+            if mine:
+                await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+
+
 async def send(waiter_id: UUID, *, final_try: bool = True) -> dict:
     """Send one queued alert. A transient failure raises (Celery retries)
     until ``final_try``; then the waiter is marked failed."""
+    async with _sending(waiter_id) as mine:
+        if not mine:
+            return {"skipped": "sending"}
+        return await _send(waiter_id, final_try=final_try)
+
+
+async def _send(waiter_id: UUID, *, final_try: bool) -> dict:
     async with AsyncSessionLocal() as db:
         await enable_rls_bypass(db)
         waiter = await db.get(Waiter, waiter_id)

@@ -4,6 +4,7 @@ email and the Celery queue."""
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -41,6 +42,16 @@ from tests.unit.test_app_install_gate import _Session
 PHONE = "+201012345678"
 
 
+def _send_lock(mine: bool):
+    """Stands in for the Postgres advisory lock in ``tasks._sending``."""
+
+    @asynccontextmanager
+    async def sending(_waiter_id):
+        yield mine
+
+    return sending
+
+
 @pytest.fixture
 def world(monkeypatch, test_session):
     """A store with the app live, a T-shirt (S in stock, M sold out) and the
@@ -48,6 +59,7 @@ def world(monkeypatch, test_session):
     for module in (tasks, handler):
         monkeypatch.setattr(module, "AsyncSessionLocal", lambda: _Session(test_session))
         monkeypatch.setattr(module, "enable_rls_bypass", AsyncMock())
+    monkeypatch.setattr(tasks, "_sending", _send_lock(True))
     monkeypatch.setattr(shop, "whatsapp_usable", AsyncMock(return_value=True))
     monkeypatch.setattr(wa, "whatsapp_usable", AsyncMock(return_value=True))
     queued = MagicMock()
@@ -651,6 +663,41 @@ async def test_an_unsubscribe_stops_an_alert_already_queued(world, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_second_copy_of_a_send_sends_nothing(world, monkeypatch):
+    """While one task sends a waiter, a re-delivered or parallel copy stops."""
+    x = await world.build()
+    waiter = await _queued_waiter(world, x)
+    send_alert = AsyncMock(return_value=("wamid.1", None))
+    monkeypatch.setattr(wa, "send_alert", send_alert)
+    monkeypatch.setattr(tasks, "_sending", _send_lock(False))
+
+    assert await tasks.send(waiter.id) == {"skipped": "sending"}
+    send_alert.assert_not_awaited()
+    assert waiter.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_a_restock_check_locks_its_store_so_the_daily_cap_holds(
+    world, monkeypatch
+):
+    """Two checks of one store at once must not both read today's count
+    before either commits; the store row lock makes the second one wait."""
+    x = await world.build()
+    await _subscribe(world, x)
+    reads = []
+    get = world.db.get
+
+    async def spy(model, ident, **kw):
+        reads.append((model.__name__, kw.get("with_for_update")))
+        return await get(model, ident, **kw)
+
+    monkeypatch.setattr(world.db, "get", spy)
+    await _restock(world, x, 3)
+
+    assert ("StoreModel", {"key_share": True}) in reads
+
+
+@pytest.mark.asyncio
 async def test_sold_out_again_goes_back_in_line(world):
     x = await world.build()
     waiter = await _queued_waiter(world, x)
@@ -749,6 +796,24 @@ async def test_product_deleted_closes_its_waiters(world):
     )
 
     assert (await _waiters(world.db, x.store.id))[0].status == "closed"
+
+
+@pytest.mark.asyncio
+async def test_product_deleted_also_closes_alerts_already_queued(world, monkeypatch):
+    """Left queued, the send would put the row back to waiting and the sweep
+    would check a product that no longer exists every 10 minutes."""
+    x = await world.build()
+    waiter = await _queued_waiter(world, x)
+    send_alert = AsyncMock(return_value=("wamid.1", None))
+    monkeypatch.setattr(wa, "send_alert", send_alert)
+
+    await handler.on_product_deleted(
+        SimpleNamespace(store_id=x.store.id, product_id=x.product.id)
+    )
+
+    assert (await _waiters(world.db, x.store.id))[0].status == "closed"
+    assert await tasks.send(waiter.id) == {"skipped": "not_queued"}
+    send_alert.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1127,6 +1192,37 @@ async def test_data_rights_export_and_delete(world):
     exported = await repo.export_for(world.db, x.store.id, contacts)
     assert {r["contact"] for r in exported} == {PHONE, "mona@example.com"}
     assert await repo.delete_for(world.db, x.store.id, contacts) == 2
+    assert [w.contact for w in await _waiters(world.db, x.store.id)] == [
+        "+201111111111"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_data_rights_routes_export_and_delete_the_waiters(world):
+    """BIS-S-06 through the storefront routes, whose calls swallow errors:
+    the export lists the shopper's rows and the account deletion removes them."""
+    from fastapi import Response
+
+    from src.api.v1.routes.storefront import data_rights
+
+    x = await world.build()
+    await _subscribe(world, x)
+    await _subscribe(world, x, phone="01111111111")
+    shopper = SimpleNamespace(
+        id=uuid4(), store_id=x.store.id, phone="+20 10 1234 5678", email=None
+    )
+
+    exported = await data_rights._back_in_stock_export(
+        SimpleNamespace(session=world.db), shopper
+    )
+    assert [r["contact"] for r in exported] == [PHONE]
+
+    await data_rights.delete_account(
+        Response(),
+        shopper,
+        SimpleNamespace(session=world.db, update=AsyncMock()),
+        SimpleNamespace(get_by_customer=AsyncMock(return_value=[]), delete=AsyncMock()),
+    )
     assert [w.contact for w in await _waiters(world.db, x.store.id)] == [
         "+201111111111"
     ]

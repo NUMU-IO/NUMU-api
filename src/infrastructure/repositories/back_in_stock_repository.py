@@ -189,7 +189,9 @@ async def close_product(db: AsyncSession, store_id: UUID, product_id: UUID) -> i
         .where(
             Waiter.store_id == store_id,
             Waiter.product_id == product_id,
-            Waiter.status == bis.WAITING,
+            # Queued too: its send would put it back to waiting for a product
+            # that no longer exists, and the sweep would check it forever.
+            Waiter.status.in_((bis.WAITING, bis.QUEUED)),
         )
         .values(status=bis.CLOSED, updated_at=datetime.now(UTC))
     )
