@@ -74,8 +74,9 @@ class CreateRefundUseCase:
             raise ValidationError("Cannot refund an unpaid order")
 
         # Calculate refundable amount
+        # Open refunds count too, else two full refunds fit the same balance.
         already_refunded = await self.refund_repository.get_total_refunded_for_order(
-            dto.order_id
+            dto.order_id, include_open=True
         )
         # After a partial acceptance only the collected amount is refundable.
         collectible = (
