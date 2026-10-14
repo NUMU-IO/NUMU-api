@@ -129,7 +129,9 @@ async def compute_policy(session: AsyncSession, tenant: Any) -> ApiPolicy:
 
     ents = EntitlementService(session)
     return ApiPolicy(
-        allowed=await ents.has(tenant, ACCESS),
+        # A suspended merchant's tokens stop with the store, whatever host
+        # they are sent to (the subdomain middleware only guards its own).
+        allowed=bool(tenant.is_active) and await ents.has(tenant, ACCESS),
         per_minute=_as_limit(await ents.limit(tenant, PER_MINUTE)),
         per_second=_as_limit(await ents.limit(tenant, PER_SECOND)),
         monthly_quota=_as_limit(await ents.limit(tenant, MONTHLY_QUOTA)),

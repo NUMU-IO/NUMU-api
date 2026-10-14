@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.merchant_visibility import LIVE_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,27 @@ class DecisionRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
 
+# The newest assessment of an order is its score; older rows (checkout's
+# preliminary score, a re-score) listed the same order twice with two scores.
+LATEST_ONLY = """NOT EXISTS (
+    SELECT 1 FROM public.risk_assessments newer
+    WHERE newer.order_id = r.order_id AND newer.created_at > r.created_at
+)"""
+
+# Still waiting on a decision: no action recorded, the order is not closed,
+# and the merchant is live. One definition for the queue, its counts and the
+# sidebar badge.
+OPEN_RISK = f"""r.action_taken IS NULL
+    AND {LATEST_ONLY}
+    AND NOT EXISTS (
+        SELECT 1 FROM public.orders closed
+        WHERE closed.id = r.order_id
+          AND upper(closed.status::text) IN
+              ('CANCELLED', 'REFUNDED', 'DELIVERED', 'RETURNED', 'SHIPPED', 'DRAFT')
+    )
+    AND {LIVE_SQL.format(col="r.tenant_id")}"""  # nosec B608 - module literals only
+
+
 @router.get(
     "",
     response_model=SuccessResponse[RiskListResponse],
@@ -104,9 +126,11 @@ async def list_risk(
         where.append("r.risk_level = :level")
         params["level"] = level
     if state == "open":
-        where.append("r.action_taken IS NULL")
+        where.append(OPEN_RISK)
     elif state == "decided":
-        where.append("r.action_taken IS NOT NULL")
+        where.extend(["r.action_taken IS NOT NULL", LATEST_ONLY])
+    else:
+        where.append(LATEST_ONLY)
     if search:
         where.append(
             "(r.order_number ILIKE :q OR r.customer_name ILIKE :q"
@@ -165,14 +189,12 @@ async def list_risk(
     count_rows = (
         await db.execute(
             text(
-                """
+                f"""
                 SELECT r.risk_level, count(*)
                 FROM public.risk_assessments r
-                LEFT JOIN public.tenants t ON t.id = r.tenant_id
-                WHERE r.action_taken IS NULL
-                  AND NOT (t.lifecycle_state = 'demo' OR t.is_internal IS TRUE)
+                WHERE {OPEN_RISK}
                 GROUP BY r.risk_level
-                """
+                """  # nosec B608 - module literals only
             )
         )
     ).all()

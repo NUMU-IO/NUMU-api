@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.merchant_visibility import VISIBLE_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,9 @@ _SELECT = """
 """
 
 
+_CASE_VISIBLE = f"(c.tenant_id IS NULL OR {VISIBLE_SQL.format(col='c.tenant_id')})"
+
+
 def _to_model(r) -> SupportCase:
     return SupportCase(
         id=str(r["id"]),
@@ -149,7 +153,8 @@ async def list_cases(
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
-    where: list[str] = []
+    # A case can come from a partner rather than a merchant (no tenant).
+    where: list[str] = [_CASE_VISIBLE]
     params: dict[str, object] = {"limit": limit, "offset": offset}
 
     if case_status == "unresolved":
@@ -204,7 +209,9 @@ async def list_cases(
 
     count_rows = (
         await db.execute(
-            text("SELECT status, count(*) FROM public.support_cases GROUP BY status")
+            text(
+                f"SELECT status, count(*) FROM public.support_cases c WHERE {_CASE_VISIBLE} GROUP BY status"  # nosec B608 - module literal only
+            )
         )
     ).all()
     counts = {"open": 0, "pending_merchant": 0, "resolved": 0, "closed": 0}

@@ -5,7 +5,7 @@ Requires SUPER_ADMIN role.
 """
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -25,11 +25,11 @@ from src.api.dependencies.services import (
 )
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
+from src.application.services.merchant_visibility import visible
 from src.config import settings
 from src.core.entities.store import StoreStatus
 from src.infrastructure.cache.storefront_cache import StorefrontCache
 from src.infrastructure.database.models.public.tenant import (
-    TenantLifecycleState,
     TenantModel,
 )
 from src.infrastructure.database.models.public.user import UserModel
@@ -172,12 +172,22 @@ async def list_stores(
     db: Annotated[AsyncSession, Depends(get_db)],
     store_status: Annotated[str | None, Query(alias="status")] = None,
     search: Annotated[str | None, Query()] = None,
+    internal: Annotated[Literal["only"] | None, Query()] = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    """List all stores across the platform (paginated)."""
-    query = select(StoreModel)
-    count_query = select(func.count(StoreModel.id))
+    """List stores across the platform (paginated).
+
+    Real merchants only. ``internal=only`` lists NUMU's own and demo tenants
+    instead: the Internal tab is the one place they appear.
+    """
+    shown = (
+        ~visible(StoreModel.tenant_id)
+        if internal == "only"
+        else visible(StoreModel.tenant_id)
+    )
+    query = select(StoreModel).where(shown)
+    count_query = select(func.count(StoreModel.id)).where(shown)
 
     # Status filter
     if store_status:
@@ -397,6 +407,7 @@ async def get_store_detail(
             "next_renewal_at": _iso(tenant.next_renewal_at),
             "payment_method_last4": tenant.payment_method_last4,
             "feature_flags": tenant.feature_flags or {},
+            "is_internal": tenant.is_internal,
             # Demo lead capture — who this demo belongs to.
             "is_demo": tenant.demo_email is not None
             or _enum(tenant.lifecycle_state) == "demo",
@@ -575,6 +586,12 @@ async def update_store_status(
             await db.flush()
 
     await db.commit()
+    if store.tenant_id:
+        # Suspending stops the merchant's API tokens; drop the cached policy
+        # so they stop now rather than when it expires.
+        from src.application.services.api_limits import forget_policy
+
+        await forget_policy(store.tenant_id)
 
     # Dispatch approval email if store was just approved
     if was_pending and new_status == StoreStatus.ACTIVE:
@@ -607,17 +624,9 @@ async def store_stats(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get store counts grouped by status, excluding demo and internal tenants."""
-    excluded_tenant_ids = (
-        select(TenantModel.id)
-        .where(
-            (TenantModel.lifecycle_state == TenantLifecycleState.DEMO.value)
-            | (TenantModel.is_internal.is_(True))
-        )
-        .scalar_subquery()
-    )
     result = await db.execute(
         select(StoreModel.status, func.count(StoreModel.id))
-        .where(StoreModel.tenant_id.notin_(excluded_tenant_ids))
+        .where(visible(StoreModel.tenant_id))
         .group_by(StoreModel.status)
     )
     counts = {row[0]: row[1] for row in result.all()}

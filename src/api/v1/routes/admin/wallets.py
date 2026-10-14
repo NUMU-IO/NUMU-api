@@ -27,6 +27,7 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
+from src.application.services.merchant_visibility import visible
 from src.application.services.wallet_service import (
     WalletService,
     WalletSuspendedError,
@@ -91,6 +92,7 @@ async def list_wallets(
         await db.execute(
             select(MerchantWalletModel, TenantModel.name)
             .join(TenantModel, TenantModel.id == MerchantWalletModel.tenant_id)
+            .where(visible(MerchantWalletModel.tenant_id))
             .order_by(MerchantWalletModel.balance_cents.asc())
             .offset(max(skip, 0))
             .limit(min(max(limit, 1), 200))
@@ -190,7 +192,10 @@ async def list_topup_proofs(
                 WalletTopupIntentModel.id == WalletTopupProofModel.topup_intent_id,
             )
             .join(TenantModel, TenantModel.id == WalletTopupProofModel.tenant_id)
-            .where(WalletTopupProofModel.status == status)
+            .where(
+                WalletTopupProofModel.status == status,
+                visible(WalletTopupProofModel.tenant_id),
+            )
             .order_by(WalletTopupProofModel.created_at.asc())
             .offset(max(skip, 0))
             .limit(min(max(limit, 1), 200))
@@ -204,7 +209,9 @@ async def list_topup_proofs(
             select(
                 WalletTopupProofModel.status,
                 func.count(WalletTopupProofModel.id),
-            ).group_by(WalletTopupProofModel.status)
+            )
+            .where(visible(WalletTopupProofModel.tenant_id))
+            .group_by(WalletTopupProofModel.status)
         )
     ).all()
     counts = {status_val: int(n) for status_val, n in count_rows}
