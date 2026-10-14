@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1.routes.webhooks._replay import ReplayKeys, replay_keys
 from src.config import settings
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -93,6 +94,7 @@ def _extract_fields(raw: dict) -> dict:
 async def moyasar_callback(
     request: Request,
     db: AsyncSession = Depends(get_admin_db_session),
+    replay: ReplayKeys = Depends(replay_keys),
 ):
     """Handle a Moyasar payment webhook."""
     payload = await request.body()
@@ -120,9 +122,7 @@ async def moyasar_callback(
     # ── Replay protection ────────────────────────────────────────────
     if payment_id and _cache_service:
         nonce_key = f"moyasar:processed:{payment_id}:{fields['type']}"
-        was_set = await _cache_service.set_if_absent(
-            nonce_key, "1", expire=NONCE_TTL_SECONDS
-        )
+        was_set = await replay.take(_cache_service, nonce_key, NONCE_TTL_SECONDS)
         if not was_set:
             log.warning("webhook_duplicate_rejected")
             return {"status": "duplicate", "payment_id": payment_id}

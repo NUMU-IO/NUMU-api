@@ -1190,7 +1190,7 @@ async def mark_order_paid(
     store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ):
     """Manually mark an order's payment as paid (e.g. COD collected)."""
-    from src.core.entities.order import PaymentStatus
+    from src.core.entities.order import OrderStatus, PaymentStatus
 
     order = await order_repo.get_by_id(order_id)
     if not order or order.store_id != store.id:
@@ -1202,6 +1202,11 @@ async def mark_order_paid(
         return SuccessResponse(
             data=_order_to_response(OrderDTO.from_entity(order)),
             message="Order is already marked as paid",
+        )
+    if order.status in (OrderStatus.CANCELLED, OrderStatus.REFUNDED, OrderStatus.DRAFT):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A {order.status.value} order cannot be marked as paid.",
         )
 
     updated = await apply_manual_payment(order, order_repo)

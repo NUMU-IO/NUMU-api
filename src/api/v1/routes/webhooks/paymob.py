@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1.routes.webhooks._replay import ReplayKeys, replay_keys
 from src.config import settings
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -103,6 +104,7 @@ async def paymob_callback(
     request: Request,
     db: AsyncSession = Depends(get_admin_db_session),
     hmac: str = Header(None, alias="hmac"),
+    replay: ReplayKeys = Depends(replay_keys),
 ):
     """Handle Paymob payment callback (POST).
 
@@ -190,9 +192,7 @@ async def paymob_callback(
     # carrying a real transaction id blocked the genuine callback for a day.
     if transaction_id and _cache_service:
         nonce_key = f"paymob:processed:{transaction_id}"
-        was_set = await _cache_service.set_if_absent(
-            nonce_key, "1", expire=NONCE_TTL_SECONDS
-        )
+        was_set = await replay.take(_cache_service, nonce_key, NONCE_TTL_SECONDS)
         if not was_set:
             log.warning("webhook_duplicate_rejected")
             return {"status": "duplicate", "transaction_id": transaction_id}

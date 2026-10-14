@@ -531,6 +531,8 @@ async def request_deposit(
             status_code=409,
             detail="Only a pending order can be switched to a deposit.",
         )
+    if order.is_paid:
+        raise HTTPException(status_code=409, detail="This order is already paid.")
     deposit = (
         body.amount_cents
         if body.amount_cents is not None

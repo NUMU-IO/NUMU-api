@@ -27,7 +27,11 @@ import json
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.application.services.fawry_webhook_service import FawryWebhookService
+from src.api.v1.routes.webhooks._replay import ReplayKeys, replay_keys
+from src.application.services.fawry_webhook_service import (
+    NONCE_TTL_SECONDS,
+    FawryWebhookService,
+)
 from src.config import settings
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -58,6 +62,7 @@ async def fawry_callback(
     request: Request,
     db: AsyncSession = Depends(get_admin_db_session),
     x_fawry_signature: str = Header(None, alias="x-fawry-signature"),
+    replay: ReplayKeys = Depends(replay_keys),
 ):
     """Handle Fawry payment notification.
 
@@ -161,7 +166,17 @@ async def fawry_callback(
     )
 
     # ── Security Agent: replay protection ───────────────────────────
-    if reference_number and await webhook_service.check_replay(reference_number):
+    # Keyed per status: a REFUNDED after a PAID on the same reference is a
+    # new event, not a replay.
+    if (
+        reference_number
+        and _cache_service
+        and not await replay.take(
+            _cache_service,
+            f"fawry:processed:{reference_number}:{order_status}",
+            NONCE_TTL_SECONDS,
+        )
+    ):
         log.warning("webhook_duplicate_rejected")
         return {
             "status": "duplicate",

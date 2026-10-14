@@ -257,7 +257,7 @@ async def cancel_order_from_whatsapp(
         return False
     if order.customer_confirmation_status != "pending":
         return False
-    if not order.can_be_cancelled():
+    if not order.can_be_cancelled:
         return False
 
     cust = (

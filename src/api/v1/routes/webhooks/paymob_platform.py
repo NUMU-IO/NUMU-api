@@ -28,6 +28,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1.routes.webhooks._replay import ReplayKeys, replay_keys
 from src.application.use_cases.wallet.credit_wallet import (
     credit_topup_intent,
     notify_topup_credited,
@@ -60,6 +61,7 @@ async def paymob_platform_callback(
     request: Request,
     db: AsyncSession = Depends(get_admin_db_session),
     hmac: str = Header(None, alias="hmac"),
+    replay: ReplayKeys = Depends(replay_keys),
 ):
     payload = await request.body()
     log = logger.bind(webhook="paymob_platform")
@@ -99,10 +101,10 @@ async def paymob_platform_callback(
 
     # ── Replay protection ────────────────────────────────────────────
     if transaction_id and _cache_service:
-        was_set = await _cache_service.set_if_absent(
+        was_set = await replay.take(
+            _cache_service,
             f"paymob:platform:processed:{transaction_id}",
-            "1",
-            expire=NONCE_TTL_SECONDS,
+            NONCE_TTL_SECONDS,
         )
         if not was_set:
             log.warning("platform_webhook_duplicate_rejected")

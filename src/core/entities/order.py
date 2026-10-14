@@ -106,6 +106,16 @@ VALID_STATUS_TRANSITIONS: dict[OrderStatus, list[OrderStatus]] = {
 }
 
 
+# Statuses a successful full payment moves to PROCESSING. A payment landing
+# on a later or closed order records the money but leaves the status alone.
+PRE_FULFILMENT_STATUSES: frozenset[OrderStatus] = frozenset({
+    OrderStatus.PENDING,
+    OrderStatus.CONFIRMED,
+    OrderStatus.AWAITING_PAYMENT,
+    OrderStatus.PAYMENT_FAILED,
+})
+
+
 class PaymentStatus(StrEnum):
     """Payment status enumeration."""
 
@@ -566,8 +576,10 @@ class Order(BaseEntity):
               payment_id, sets `deposit_paid_at`, transitions to
               CONFIRMED. `payment_status` STAYS `PENDING` — the main
               order amount is still collected on delivery (COD).
-            * Everything else → full-payment flow. Sets `payment_status=PAID`,
-              transitions to PROCESSING (existing behaviour).
+            * Everything else → full-payment flow. Sets `payment_status=PAID`;
+              moves to PROCESSING only from a pre-fulfilment status.
+            * CANCELLED / REFUNDED → the payment is recorded but the status
+              is kept and ``metadata["payment_after_cancel"]`` flags it.
 
         Centralizing the branch here means gateway webhook handlers
         don't need to be deposit-aware — they just call `mark_as_paid`
@@ -579,33 +591,59 @@ class Order(BaseEntity):
                 deposit orders this is stored on `deposit_gateway`;
                 for full-payment orders it's stored on `payment_method`.
         """
-        if self.status == OrderStatus.PENDING_DEPOSIT:
+        closed = self.status in (OrderStatus.CANCELLED, OrderStatus.REFUNDED)
+        if self.status == OrderStatus.PENDING_DEPOSIT or (
+            closed and self.deposit_required_cents and self.deposit_paid_at is None
+        ):
             # Deposit flow: the customer has paid the deposit amount.
             # The balance (total - deposit) is still due on delivery.
             self.deposit_paid_at = datetime.now(UTC)
             self.deposit_payment_id = payment_id
             if payment_method:
                 self.deposit_gateway = payment_method
-            # Transition via the canonical path — enforces allowed
-            # transitions and records the change in metadata.
-            self.transition_to(
-                OrderStatus.CONFIRMED,
-                reason=f"deposit_paid via {payment_method or 'unknown'}",
-            )
-            return
-        # Full-payment flow (existing behaviour)
-        self.payment_status = PaymentStatus.PAID
-        self.payment_id = payment_id
-        if payment_method:
-            self.payment_method = payment_method
-        self.paid_at = datetime.now(UTC)
-        self.status = OrderStatus.PROCESSING
+            if not closed:
+                self.transition_to(
+                    OrderStatus.CONFIRMED,
+                    reason=f"deposit_paid via {payment_method or 'unknown'}",
+                )
+        else:
+            self.payment_status = PaymentStatus.PAID
+            self.payment_id = payment_id
+            if payment_method:
+                self.payment_method = payment_method
+            self.paid_at = datetime.now(UTC)
+            if self.status in PRE_FULFILMENT_STATUSES:
+                self.status = OrderStatus.PROCESSING
+        if closed:
+            # Money arrived after the order ended (late webhook, expired
+            # deposit). Never revive it: keep the status and flag it so the
+            # merchant refunds or reopens it by hand.
+            self.metadata["payment_after_cancel"] = {
+                "payment_id": payment_id,
+                "payment_method": payment_method,
+                "status": self.status.value,
+                "at": datetime.now(UTC).isoformat(),
+            }
         self.touch()
 
     @property
     def collectible_total(self) -> int:
         """What the merchant should actually receive for this order."""
         return self.total if self.collected_total is None else self.collected_total
+
+    def amount_due_cents(self, proofs_paid_cents: int = 0) -> int:
+        """Money still owed: what the courier or a pay link should collect.
+
+        ``proofs_paid_cents`` is the approved proof total
+        (``PaymentProofRepository.amount_paid_cents``). A deposit paid by
+        proof is already inside it, so only a card-gateway deposit is added.
+        """
+        if self.is_paid:
+            return 0
+        paid = proofs_paid_cents
+        if self.deposit_paid_at and self.deposit_gateway in CARD_GATEWAY_PREFIXES:
+            paid += self.deposit_amount_cents or 0
+        return max(0, self.collectible_total - paid)
 
     def reverse_payment(self, reason: str | None = None) -> int:
         """Undo a manual mark-paid (wrong order, cancelled after marking, ...).

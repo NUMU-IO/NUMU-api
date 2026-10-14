@@ -28,6 +28,7 @@ def _order(
         payment_status=payment_status,
         currency="EGP",
         total=25000,
+        amount_due_cents=lambda proofs_paid_cents=0: 25000 - proofs_paid_cents,
         payment_id=None,
         metadata={},
         customer_email="sara@example.com",
@@ -44,6 +45,14 @@ def _order(
             email=None,
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_recorded_proofs(monkeypatch):
+    from src.api.v1.routes.storefront import pay
+
+    repo = SimpleNamespace(amount_paid_cents=AsyncMock(return_value=0))
+    monkeypatch.setattr(pay, "PaymentProofRepository", lambda _session: repo)
 
 
 def _store(store_id, settings):
