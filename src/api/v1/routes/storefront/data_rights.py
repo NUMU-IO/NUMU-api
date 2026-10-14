@@ -244,8 +244,8 @@ async def data_export(
         customer=_customer_to_dict(current_customer),
         addresses=[_address_to_dict(a) for a in addresses],
         orders=[_order_to_dict(o) for o in orders],
-        # Wishlist + back-in-stock subscriptions land in extras to
-        # keep the top-level shape stable as we add data categories.
+        # New data categories (such as the Back in Stock app's rows) land
+        # in extras to keep the top-level shape stable.
         wishlist=[],
         reviews=[_review_to_dict(r) for r in reviews],
         notification_preferences=current_customer.notification_preferences or {},
@@ -299,11 +299,12 @@ async def delete_account(
         was already snapshotted on the order at checkout time.
       - Reviews remain visible but reviewer_name is replaced with
         "Anonymous"
+      - Back in Stock app sign-ups under the customer's email or phone
+        in this store are deleted (no legal retention requirement)
       - Auth cookies cleared so the next request lands as a guest
 
     What does NOT happen:
-      - Wishlist + back-in-stock subscriptions are deleted (no legal
-        retention requirement)
+      - Wishlist rows are not deleted
       - The user is NOT able to undo this — Egyptian DP Law has no
         "right to be forgotten with grace period" carve-out
 

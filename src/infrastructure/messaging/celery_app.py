@@ -138,8 +138,6 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.theme_build_tasks",
         "src.infrastructure.messaging.tasks.theme_upload_tasks",
         "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
-        # Phase 3.5 — back-in-stock subscription sweep + email dispatch.
-        "src.infrastructure.messaging.tasks.back_in_stock_tasks",
         # Back in Stock app: restock checks, paced sends, attribution.
         "src.infrastructure.messaging.tasks.back_in_stock_app_tasks",
         # Phase 4.4 — smart-collection membership sweep.
@@ -314,15 +312,6 @@ celery_app.conf.beat_schedule = {
         "task": "marketing.campaign.process_scheduled",
         "schedule": 60.0,
     },
-    # Phase 3.5 — sweep pending back-in-stock subscriptions and notify
-    # subscribers of products that came back in stock since the last
-    # sweep. Hourly cadence matches Shopify's documented behavior;
-    # smaller intervals risk emailing during transient stock flips
-    # caused by refund-window decrements.
-    "back-in-stock-sweep": {
-        "task": "tasks.product_subscription_sweep",
-        "schedule": crontab(minute=15),  # Hourly at :15 past the hour
-    },
     # Back in Stock app (docs/Plans/APPS/01-back-in-stock): the safety net
     # behind the stock event, and retention (BIS-D6). Both find no rows until
     # a store installs the app.
@@ -368,10 +357,9 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.run_alerts_sweep",
         "schedule": crontab(minute=20),
     },
-    # Phase 4.4 — smart-collection membership recompute. Hourly at :30
-    # so it doesn't pile onto the back-in-stock sweep at :15. Inline
-    # invalidation (on every product save) is too expensive at scale;
-    # hourly batch matches Shopify's documented cadence.
+    # Phase 4.4 — smart-collection membership recompute, hourly at :30.
+    # Inline invalidation (on every product save) is too expensive at
+    # scale; hourly batch matches Shopify's documented cadence.
     "smart-collection-sweep": {
         "task": "tasks.smart_collection_sweep",
         "schedule": crontab(minute=30),

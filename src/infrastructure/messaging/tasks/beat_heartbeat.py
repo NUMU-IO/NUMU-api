@@ -11,8 +11,8 @@ single tick doesn't immediately register as stale; the staleness
 threshold lives in the health check (~120s).
 
 Why a separate task instead of piggybacking on an existing periodic
-task: a domain-bound task (smart-collection sweep, back-in-stock,
-etc.) that fails would also stop heartbeat updates, masking a beat
+task: a domain-bound task (smart-collection sweep, Back in Stock app
+sweep, etc.) that fails would also stop heartbeat updates, masking a beat
 problem as a domain problem. Keeping the heartbeat its own no-op
 task isolates the signal.
 """

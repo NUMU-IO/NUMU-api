@@ -51,7 +51,6 @@ from src.api.dependencies.promotion_preview import maybe_preview_for_store
 from src.api.dependencies.repositories import (
     get_menu_repository,
     get_page_repository,
-    get_product_subscription_repository,
 )
 from src.api.responses import SuccessResponse
 from src.api.utils.cookies import (
@@ -2014,77 +2013,6 @@ async def _resolve_public_metafields(
         ]
     except Exception:
         return []
-
-
-class BackInStockSubscribeRequest(BaseModel):
-    """Body for `POST /products/{id}/notify-back-in-stock` (Phase 3.5)."""
-
-    email: EmailStr = Field(..., max_length=254, description="Recipient email")
-    variant_id: UUID | None = Field(
-        None,
-        description=(
-            "Specific variant to wait on (e.g. Large/Blue). When omitted, "
-            "the subscription fires the moment the product-level stock "
-            "flips back in."
-        ),
-    )
-
-
-@router.post(
-    "/products/{product_id}/notify-back-in-stock",
-    status_code=status.HTTP_202_ACCEPTED,
-    summary="Subscribe an email to back-in-stock notifications",
-    operation_id="notify_back_in_stock",
-)
-async def notify_back_in_stock(
-    store_id: Annotated[UUID, Path(description="Store ID")],
-    product_id: Annotated[UUID, Path(description="Product ID")],
-    body_in: BackInStockSubscribeRequest,
-    product_repo: Annotated[ProductRepository, Depends(get_product_repository)],
-    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
-    sub_repo: Annotated[
-        Any,
-        Depends(get_product_subscription_repository),
-    ],
-):
-    """Phase 3.5 — record a back-in-stock subscription.
-
-    Idempotent: a second click for the same (product, variant, email)
-    upserts to the existing row so the customer can't accidentally
-    flood the queue. Returns 202 (request accepted) without confirming
-    whether the email is new or existing — that distinction is internal.
-
-    The Celery sweep task (`product_subscription_sweep`) handles
-    delivery on its hourly schedule. Out of scope for this endpoint:
-    we never email synchronously here, since a single product flipping
-    in-stock could fan out to thousands of subscribers.
-
-    Returns 200 with `{ status: "subscribed" }` on success even when
-    the product is currently in-stock — the customer's intent ("notify
-    me next time it goes back in stock") is preserved for the next
-    stockout cycle. The Celery sweep skips currently-in-stock products
-    that haven't seen a stockout-then-restock cycle.
-    """
-    store = await store_repo.get_by_id(store_id)
-    if not store:
-        raise EntityNotFoundError("Store", str(store_id))
-
-    product = await product_repo.get_by_id(product_id)
-    if not product or product.store_id != store_id:
-        raise EntityNotFoundError("Product", str(product_id))
-
-    await sub_repo.upsert_subscription(
-        tenant_id=store.tenant_id or store_id,
-        store_id=store_id,
-        product_id=product_id,
-        variant_id=body_in.variant_id,
-        email=body_in.email,
-    )
-
-    return SuccessResponse(
-        data={"status": "subscribed"},
-        message="You'll be notified when this product is back in stock.",
-    )
 
 
 NEWSLETTER_TAG = "newsletter"

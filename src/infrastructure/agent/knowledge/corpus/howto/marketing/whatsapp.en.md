@@ -18,4 +18,4 @@ opted in — a high-open-rate channel in Egypt and the Gulf.
 
 ## Notes
 Keep broadcasts relevant and infrequent to protect your sender reputation. You can reuse
-segments for abandoned-cart and back-in-stock messages too.
+segments for abandoned-cart messages too.
