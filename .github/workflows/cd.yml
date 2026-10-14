@@ -575,7 +575,11 @@ jobs:
             df -h / | tail -1
 
             echo "==> Blue/green API deployment (${TRAFFIC_PERCENT}% candidate traffic)..."
-            /opt/numu-api/deploy-blue-green.sh "${NUMU_API_IMAGE}" "${TRAFFIC_PERCENT}" "${DEPLOYMENT_ACTION}"
+            # </dev/null: this step's own commands reach the box as this
+            # heredoc on ssh's stdin, and the script's inner ssh calls read
+            # stdin. Without it they swallow every line below, so the workers
+            # were never realigned while the job still showed green.
+            /opt/numu-api/deploy-blue-green.sh "${NUMU_API_IMAGE}" "${TRAFFIC_PERCENT}" "${DEPLOYMENT_ACTION}" </dev/null
 
             echo "==> Aligning background workers with the active API slot..."
             ACTIVE_IMAGE_REF=\$(sed -n 's/^ACTIVE_IMAGE_REF=//p' /opt/numu-api/.api-blue-green-state)
