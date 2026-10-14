@@ -21,10 +21,10 @@ reconciliation of historically drifted rows is a separate backfill concern.
 The variant column may go negative on allowed oversell; that is deliberate,
 so debit and restock stay exactly inverse operations.
 
-Restocks replay the debit manifest checkout stamps on
-``order.metadata["stock_debited"]``. Orders without the manifest (placed
-before this shipped, imported historical orders, merchant-created drafts)
-are never restocked — restoring stock that was never debited would inflate
+Restocks replay the debit manifest checkout (and merchant order creation)
+stamps on ``order.metadata["stock_debited"]``. Orders without the manifest
+(placed before this shipped, imported historical orders, drafts) are
+never restocked — restoring stock that was never debited would inflate
 inventory.
 """
 
@@ -187,6 +187,9 @@ async def apply_line_delta(
     # skips the JSONB UPDATE on flush.
     attrs = copy.deepcopy(product.attributes or {})
     combo = _find_combo(attrs, selections)
+    variant_row = await _resolve_variant_row(
+        session, product_id, variant_id, selections
+    )
 
     # ── Guards (debit only) ──
     if delta < 0:
@@ -195,7 +198,15 @@ async def apply_line_delta(
         if combo is not None and combo.get("enabled") is False:
             return False, "combo_disabled", None
         if not allow_negative:
-            available = _combo_stock(combo) if combo is not None else product.quantity
+            if combo is not None:
+                available = _combo_stock(combo)
+            elif variant_row is not None and variant_row.id == variant_id:
+                # products.quantity is the sum over variants; the variant's
+                # own count is safe to read here: every stock write locks
+                # the product row first.
+                available = variant_row.inventory_quantity
+            else:
+                available = product.quantity
             if available < -delta:
                 return False, "insufficient_stock", None
 
@@ -206,9 +217,6 @@ async def apply_line_delta(
         combo["stock"] = str(_combo_stock(combo) + delta)
         product.attributes = attrs  # reassign so SQLAlchemy sees the JSONB change
 
-    variant_row = await _resolve_variant_row(
-        session, product_id, variant_id, selections
-    )
     if variant_row is not None:
         variant_row.inventory_quantity = variant_row.inventory_quantity + delta
         await _mirror_into_levels(session, variant_row, delta)
@@ -279,6 +287,34 @@ async def restock_lines(
     return count
 
 
+def _minus_restocked(
+    lines: list[dict[str, Any]], restocked: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Take pieces already put back line-by-line (partial acceptance's
+    ``stock_restocked_lines`` ledger) off the debit manifest, so a later
+    full restock only returns what is still out."""
+    remaining = [dict(ln) for ln in lines]
+    for done in restocked:
+        qty = int(done.get("quantity") or 0)
+        for ln in remaining:
+            if qty <= 0:
+                break
+            if str(ln.get("product_id")) != str(done.get("product_id")):
+                continue
+            # The manifest names the resolved variant row even for a
+            # default-variant line; only differing explicit ids mismatch.
+            if (
+                done.get("variant_id")
+                and ln.get("variant_id")
+                and str(ln["variant_id"]) != str(done["variant_id"])
+            ):
+                continue
+            take = min(qty, int(ln.get("quantity") or 0))
+            ln["quantity"] = int(ln.get("quantity") or 0) - take
+            qty -= take
+    return remaining
+
+
 async def restock_order(
     session: AsyncSession, order, *, reason: str | None = None
 ) -> bool:
@@ -300,6 +336,7 @@ async def restock_order(
         return False
     if metadata.get("stock_restocked_at"):
         return False
+    lines = _minus_restocked(lines, metadata.get("stock_restocked_lines") or [])
 
     async with session.begin_nested():
         restored = await restock_lines(session, tenant_id=order.tenant_id, lines=lines)

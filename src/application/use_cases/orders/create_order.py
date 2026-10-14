@@ -3,6 +3,10 @@
 from uuid import UUID
 
 from src.application.dto.order import CreateOrderDTO, OrderDTO
+from src.application.services.stock_service import (
+    build_debit_manifest,
+    debit_order_line,
+)
 from src.core.entities.order import (
     Order,
     OrderLineItem,
@@ -12,7 +16,11 @@ from src.core.entities.order import (
 )
 from src.core.events.base import EventBus
 from src.core.events.order_events import OrderCreatedEvent
-from src.core.exceptions import AuthorizationError, EntityNotFoundError
+from src.core.exceptions import (
+    AuthorizationError,
+    EntityNotFoundError,
+    ValidationError,
+)
 from src.core.interfaces.repositories.customer_repository import ICustomerRepository
 from src.core.interfaces.repositories.onboarding_repository import (
     IOnboardingRepository,
@@ -20,6 +28,8 @@ from src.core.interfaces.repositories.onboarding_repository import (
 from src.core.interfaces.repositories.order_repository import IOrderRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.logging import get_logger
+from src.infrastructure.database.models.tenant.product import ProductModel
+from src.infrastructure.database.models.tenant.variant import VariantModel
 
 logger = get_logger(__name__)
 
@@ -167,6 +177,13 @@ class CreateOrderUseCase:
             customer_notes=dto.customer_notes,
         )
 
+        # Drafts are quotes: stock moves only for a real order. Same write
+        # path and manifest as checkout, so cancel/return/refund can restock.
+        if not as_draft:
+            debited = await self._debit_stock(store.tenant_id, line_items)
+            if debited:
+                order.metadata = {"stock_debited": build_debit_manifest(debited)}
+
         # Save order
         created_order = await self.order_repository.create(order)
 
@@ -213,3 +230,33 @@ class CreateOrderUseCase:
                 pass
 
         return OrderDTO.from_entity(created_order)
+
+    async def _debit_stock(
+        self, tenant_id: UUID, line_items: list[OrderLineItem]
+    ) -> list[dict]:
+        session = self.order_repository.session
+        debited: list[dict] = []
+        for li in line_items:
+            product = await session.get(ProductModel, li.product_id)
+            if product is None:
+                continue
+            if li.variant_id is not None:
+                variant = await session.get(VariantModel, li.variant_id)
+                if variant is not None and not variant.track_inventory:
+                    continue
+            ok, _, replay = await debit_order_line(
+                session,
+                tenant_id=tenant_id,
+                product_id=li.product_id,
+                variant_id=li.variant_id,
+                selections=None,
+                quantity=li.quantity,
+                allow_negative=bool(
+                    (product.attributes or {}).get("continue_selling_when_out_of_stock")
+                ),
+            )
+            if not ok:
+                raise ValidationError(f"Insufficient stock for {li.product_name}")
+            if replay:
+                debited.append(replay)
+        return debited
