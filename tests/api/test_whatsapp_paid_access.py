@@ -22,10 +22,12 @@ import pytest
 from src.application.services.whatsapp_entitlement import (
     Entitlement,
     activate_paid_access,
+    count_messages,
     entitlement,
     open_payment,
     period_start,
 )
+from src.core.entities.message_log import MessageDirection, MessageStatus
 from src.core.interfaces.services.messaging_service import (
     MessageContent,
     MessageRecipient,
@@ -34,6 +36,7 @@ from src.core.interfaces.services.messaging_service import (
 from src.infrastructure.database.models.public.whatsapp_access import (
     WhatsAppAccessStatus,
 )
+from src.infrastructure.database.models.tenant.message_log import MessageLogModel
 from src.infrastructure.external_services.whatsapp.gowa_provider import GowaProvider
 from src.infrastructure.external_services.whatsapp.messaging_service import (
     WhatsAppMessagingService,
@@ -245,6 +248,38 @@ def test_usage_period_is_anchored_to_the_paid_period():
 
 def test_remaining_is_none_when_uncapped():
     assert Entitlement(active=True, status="approved").remaining is None
+
+
+@pytest.mark.asyncio
+async def test_failed_sends_do_not_use_up_the_allowance(test_session):
+    """Only messages that went out count. The guard logs its own refusals as
+    failed, and an undelivered message is not billed; counting them blocked a
+    store that had sent 30 of its 30 as if it had sent 34."""
+    tenant_id, store_id, now = uuid4(), uuid4(), datetime.now(UTC)
+    for status, error in [
+        (MessageStatus.QUEUED, None),
+        (MessageStatus.SENT, None),
+        (MessageStatus.DELIVERED, None),
+        (MessageStatus.READ, None),
+        (MessageStatus.FAILED, "whatsapp_access_not_active"),
+        (MessageStatus.FAILED, "131026"),
+    ]:
+        test_session.add(
+            MessageLogModel(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                phone="201000000000",
+                message_id=f"wamid.{uuid4().hex}",
+                direction=MessageDirection.OUTBOUND,
+                template_name="order_confirmation_request_v2",
+                status=status,
+                error_code=error,
+                created_at=now,
+            )
+        )
+    await test_session.flush()
+
+    assert await count_messages(test_session, store_id, now - timedelta(days=1)) == 4
 
 
 class _Intent(SimpleNamespace):
