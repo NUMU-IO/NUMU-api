@@ -25,7 +25,7 @@ D, R, C = OrderStatus.DELIVERED, OrderStatus.RETURNED, OrderStatus.CANCELLED
 P, U = PaymentStatus.PAID, PaymentStatus.PENDING
 
 
-async def _buyer(session, *, lifecycle="active", orders=()):
+async def _buyer(session, *, lifecycle="active", orders=(), phone=PHONE):
     tenant = TenantModel(
         id=uuid4(),
         name="T",
@@ -57,7 +57,7 @@ async def _buyer(session, *, lifecycle="active", orders=()):
         email=f"{uuid4().hex[:6]}@x.io",
         first_name="Ali",
         last_name="Hassan",
-        phone=PHONE,
+        phone=phone,
     )
     rows = [
         OrderModel(
@@ -114,6 +114,15 @@ async def test_no_delivered_or_returned_means_no_rate(test_session):
     await _buyer(test_session, orders=[(OrderStatus.PENDING, U, 100)])
     data = (await lookup_phone(uuid4(), test_session, PHONE)).data
     assert data.stats.return_rate is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_stored_forms_are_found(test_session):
+    for stored in ("201001234567", "01001234567"):
+        await _buyer(test_session, orders=[(D, P, 100)], phone=stored)
+    data = (await lookup_phone(uuid4(), test_session, PHONE)).data
+    assert len(data.customers) == 2
+    assert data.stats.orders == 2
 
 
 @pytest.mark.asyncio

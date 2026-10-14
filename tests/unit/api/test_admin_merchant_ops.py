@@ -42,6 +42,7 @@ async def test_expired_trial_goes_back_to_trial_and_off_the_purge(test_session):
     t = await _tenant(
         test_session,
         lifecycle_state="read_only",
+        trial_started_at=now - timedelta(days=40),
         read_only_at=now,
         delete_at=now + timedelta(days=30),
     )
@@ -79,14 +80,27 @@ async def test_live_trial_extends_from_its_current_end(test_session):
 
 
 @pytest.mark.asyncio
-async def test_converted_read_only_tenant_is_refused(test_session):
-    """Cancelled or dunned subscribers are read_only too, but never trials."""
+@pytest.mark.parametrize(
+    "fields",
+    [
+        # Converted, then dunned or cancelled.
+        {"trial_started_at": -90, "trial_converted_at": -60},
+        # Created straight into active: no trial, so no trial_converted_at.
+        {},
+        # A trial that cancelled before converting.
+        {"trial_started_at": -20, "cancelled_at": -5},
+    ],
+)
+async def test_read_only_tenant_that_was_no_lapsed_trial_is_refused(
+    test_session, fields
+):
+    """Cancelled, dunned or never-trial tenants are read_only too."""
     now = datetime.now(UTC)
     t = await _tenant(
         test_session,
         lifecycle_state="read_only",
-        trial_converted_at=now - timedelta(days=60),
         delete_at=now + timedelta(days=10),
+        **{k: now + timedelta(days=d) for k, d in fields.items()},
     )
 
     with pytest.raises(HTTPException) as exc:

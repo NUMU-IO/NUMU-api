@@ -44,6 +44,9 @@ from src.infrastructure.repositories.order_activity_repository import (
     OrderActivityRepository,
 )
 from src.infrastructure.repositories.order_repository import OrderRepository
+from src.infrastructure.repositories.payment_proof_repository import (
+    PaymentProofRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -609,12 +612,17 @@ async def delete_order(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Order not found",
         )
-    if order.payment_status == PaymentStatus.PAID:
+    if (
+        order.payment_status not in (PaymentStatus.PENDING, PaymentStatus.FAILED)
+        or order.deposit_paid_at is not None
+        or await PaymentProofRepository(db).has_recorded_payments(order.id)
+    ):
         # Deleting would leave the money, the invoice and the commission
         # behind with no order. Un-mark or refund it first.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This order is paid. Refund or un-mark it before deleting.",
+            detail="Money was taken against this order. Refund or un-mark it "
+            "before deleting.",
         )
 
     logger.warning(
@@ -624,12 +632,17 @@ async def delete_order(
         admin_id,
     )
 
-    # Give back the stock it debited (a no-op if a cancel already did).
+    # Give back the stock it debited (a no-op if a cancel already did),
+    # unless it shipped: that stock left with the parcel.
     from src.application.services.stock_service import restock_order
     from src.infrastructure.repositories.order_repository import OrderRepository
 
     entity = await OrderRepository(db).get_by_id(order_id)
-    if entity is not None:
+    if entity is not None and entity.status not in (
+        OrderStatus.SHIPPED,
+        OrderStatus.DELIVERED,
+        OrderStatus.RETURNED,
+    ):
         await restock_order(db, entity, reason="admin_deleted")
     await AuditService(db).log(
         event_type="order.deleted_by_staff",

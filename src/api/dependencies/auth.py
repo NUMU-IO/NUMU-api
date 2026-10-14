@@ -136,7 +136,10 @@ async def _get_admin_user_role(request: Request) -> tuple[UUID, str]:
 # ponytail: path-section allow-list; move to per-endpoint permissions if scopes multiply.
 ADMIN_SCOPES: dict[str, tuple[str, ...]] = {
     "support": (
-        "admin/orders",
+        # Not DELETE: hard-deleting an order is for full admins only.
+        "GET admin/orders",
+        "POST admin/orders",
+        "PATCH admin/orders",
         "admin/customers",
         "admin/support-cases",
         "admin/risk",
@@ -150,13 +153,19 @@ ADMIN_SCOPES: dict[str, tuple[str, ...]] = {
         "admin/merchants/*/invoices",
         "admin/merchants/*/extend-trial",
         "admin/merchants/*/pause-billing",
+        # Read-only merchant pages, to find the tenant a payment belongs to.
+        "GET admin/stores",
+        "GET admin/merchants/attention",
+        "GET admin/merchants/*/insights",
         "GET admin/dashboard",
         "GET admin/audit",
     ),
     "ops": (
         "admin/stores",
         "admin/tenants",
-        "admin/merchants",
+        # Not the billing actions under admin/merchants: those are finance's.
+        "GET admin/merchants/attention",
+        "GET admin/merchants/*/insights",
         "admin/api-tokens",
         "admin/whatsapp",
         "admin/entitlements",

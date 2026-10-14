@@ -11,6 +11,8 @@ a share of that merchant's NUMU plan payments.
   partner gets ``referral_bps`` of it as a ``referral`` ledger entry while
   the invoice falls within ``referral_months`` of the tenant's first paid
   invoice. One entry per invoice (the ledger's idempotency key).
+- **Refunds**: an admin refund of the invoice calls ``reverse_invoice``,
+  which books the same amount back as a negative ``referral`` entry.
 - **Payouts** are the existing manual ones (``record_payout``).
 """
 
@@ -168,6 +170,43 @@ async def _credit(
         tenant_id=invoice.tenant_id,
         idempotency_key=f"referral:{invoice.id}",
         created_at=paid_at,
+    )
+    db.add(entry)
+    await db.flush()
+    return entry
+
+
+async def reverse_invoice(
+    db: AsyncSession, invoice: BillingInvoiceModel, *, actor_user_id: UUID, note: str
+) -> PartnerLedgerEntryModel | None:
+    """Take back the partner's credit for a refunded plan invoice.
+
+    A negative ``referral`` entry, so the partner's balance and the store's
+    earned total both net out. None when the invoice credited nobody or is
+    already reversed. Caller owns the commit.
+    """
+    key = f"referral-refund:{invoice.id}"
+    credit = await db.scalar(
+        select(PartnerLedgerEntryModel).where(
+            PartnerLedgerEntryModel.idempotency_key == f"referral:{invoice.id}"
+        )
+    )
+    if credit is None or await db.scalar(
+        select(PartnerLedgerEntryModel.id).where(
+            PartnerLedgerEntryModel.idempotency_key == key
+        )
+    ):
+        return None
+    entry = PartnerLedgerEntryModel(
+        partner_id=credit.partner_id,
+        kind="referral",
+        amount_cents=-credit.amount_cents,
+        gross_cents=-(credit.gross_cents or 0),
+        currency=credit.currency,
+        tenant_id=credit.tenant_id,
+        idempotency_key=key,
+        actor_user_id=actor_user_id,
+        note=note,
     )
     db.add(entry)
     await db.flush()

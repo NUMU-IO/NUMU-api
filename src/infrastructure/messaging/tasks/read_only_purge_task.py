@@ -39,7 +39,7 @@ async def _async_purge(batch_size: int) -> dict:
             # Staff paused billing (admin merchant_ops): never delete it.
             # ponytail: skipped after the LIMIT, so over batch_size paused
             # tenants would starve the rest; filter in the query then.
-            if (tenant.settings or {}).get("billing_paused"):
+            if (tenant.settings or {}).get("billing_paused") is True:
                 continue
             try:
                 tenant_id = tenant.id

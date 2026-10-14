@@ -8,6 +8,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
+import phonenumbers
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -242,6 +243,9 @@ async def lookup_phone(
     raw = phone.strip()
     try:
         e164 = PhoneNumber.parse(raw, "EG").e164
+        national = "0" + phonenumbers.national_significant_number(
+            phonenumbers.parse(e164)
+        )
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -253,7 +257,8 @@ async def lookup_phone(
             select(CustomerModel, StoreModel.name)
             .join(StoreModel, StoreModel.id == CustomerModel.store_id)
             .where(
-                CustomerModel.phone.in_({e164, raw}),
+                # Older rows hold the phone as typed: 2010… or 010….
+                CustomerModel.phone.in_({e164, raw, e164[1:], national}),
                 visible(CustomerModel.tenant_id),
             )
         )

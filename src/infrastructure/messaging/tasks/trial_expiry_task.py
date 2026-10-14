@@ -41,7 +41,7 @@ async def _async_expiry(batch_size: int) -> dict:
             # Staff paused billing (admin merchant_ops): the trial stays live.
             # ponytail: skipped after the LIMIT, so over batch_size paused
             # expired trials would starve the rest; filter in the query then.
-            if (tenant.settings or {}).get("billing_paused"):
+            if (tenant.settings or {}).get("billing_paused") is True:
                 continue
             try:
                 tenant.lifecycle_state = "read_only"

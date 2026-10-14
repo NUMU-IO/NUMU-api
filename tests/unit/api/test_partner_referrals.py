@@ -17,12 +17,15 @@ from sqlalchemy import select
 
 from src.api.dependencies.partners import partner_context
 from src.api.v1.routes import partner_portal as portal
+from src.api.v1.routes.admin import merchant_ops
 from src.api.v1.routes.public import partners as directory
 from src.application.services.merchant_leads import attach_tenant_to_lead
 from src.application.services.partner_referrals import (
     attribute_tenant,
     credit_invoice,
     ensure_code,
+    referred_stores,
+    reverse_invoice,
 )
 from src.core.entities.user import UserRole, UserStatus
 from src.infrastructure.database.models.public.app_billing import (
@@ -245,6 +248,50 @@ async def test_rate_is_per_partner(test_session):
     )
     assert (await _invoice(test_session, tenant, T0)).amount_cents == 10_000
     assert await _invoice(test_session, tenant, T0 + timedelta(days=31)) is None
+
+
+async def test_refunding_an_invoice_takes_the_credit_back_once(test_session):
+    partner = await _partner(test_session)
+    tenant = await _tenant(test_session)
+    await attribute_tenant(
+        test_session,
+        code=partner.referral_code,
+        tenant_id=tenant.id,
+        user_id=uuid4(),
+    )
+    await _invoice(test_session, tenant, T0)
+    inv = await test_session.scalar(
+        select(BillingInvoiceModel).where(BillingInvoiceModel.tenant_id == tenant.id)
+    )
+    admin = uuid4()
+
+    await merchant_ops.refund_invoice(
+        tenant.id,
+        inv.id,
+        merchant_ops.RefundIn(reason="double charge"),
+        admin_id=admin,
+        db=test_session,
+    )
+
+    amounts = sorted(e.amount_cents for e in await _credits(test_session, partner))
+    assert amounts == [-20_000, 20_000]
+    assert (await referred_stores(test_session, partner.id))[0]["earned_cents"] == 0
+    assert (
+        await reverse_invoice(test_session, inv, actor_user_id=admin, note="x") is None
+    )
+
+
+async def test_refunding_an_uncredited_invoice_reverses_nothing(test_session):
+    tenant = await _tenant(test_session)
+    await _invoice(test_session, tenant, T0)
+    inv = await test_session.scalar(
+        select(BillingInvoiceModel).where(BillingInvoiceModel.tenant_id == tenant.id)
+    )
+    assert (
+        await reverse_invoice(test_session, inv, actor_user_id=uuid4(), note="x")
+        is None
+    )
+    assert inv.status == "paid"
 
 
 # ─── Portal authorization ─────────────────────────────────────────

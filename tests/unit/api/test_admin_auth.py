@@ -54,6 +54,20 @@ def mock_regular_user():
     return user
 
 
+@pytest.fixture
+def db_admin():
+    """The user row ``authenticate`` re-reads; set ``.role``/``.admin_scope``."""
+    row = MagicMock(role=UserRole.SUPER_ADMIN, admin_scope=None)
+    with patch("src.api.admin.auth.AsyncSessionLocal") as mock_session_local:
+        mock_session = AsyncMock()
+        mock_session_local.return_value.__aenter__.return_value = mock_session
+        mock_session_local.return_value.__aexit__.return_value = None
+        mock_session.execute = AsyncMock(
+            return_value=MagicMock(first=MagicMock(return_value=row))
+        )
+        yield row
+
+
 class TestAdminAuthLogin:
     """Tests for AdminAuth.login() method."""
 
@@ -363,7 +377,7 @@ class TestAdminAuthAuthenticate:
 
     @pytest.mark.asyncio
     async def test_authenticate_success_with_valid_session(
-        self, admin_auth, mock_request
+        self, admin_auth, mock_request, db_admin
     ):
         """Test authenticate succeeds with valid session."""
         # Setup session with admin user ID
@@ -377,6 +391,28 @@ class TestAdminAuthAuthenticate:
 
         # Assertions
         assert result is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("role", "scope"),
+        [
+            (UserRole.SUPER_ADMIN, "support"),
+            (UserRole.SUPER_ADMIN, "finance"),
+            (UserRole.STORE_OWNER, None),
+        ],
+    )
+    async def test_authenticate_ends_session_once_role_or_scope_narrows(
+        self, admin_auth, mock_request, db_admin, role, scope
+    ):
+        """SQLAdmin is raw table access: a narrowed scope must end it now."""
+        db_admin.role, db_admin.admin_scope = role, scope
+        mock_request.session = {"admin_user_id": str(uuid4())}
+        mock_request.url_for = MagicMock(return_value="/admin/login")
+
+        result = await admin_auth.authenticate(mock_request)
+
+        assert isinstance(result, RedirectResponse)
+        assert mock_request.session == {}
 
     @pytest.mark.asyncio
     async def test_authenticate_redirects_without_session(
@@ -455,6 +491,7 @@ class TestAdminAuthSessionPersistence:
             # Setup mock execute result
             mock_result = MagicMock()
             mock_result.scalar_one_or_none.return_value = mock_super_admin_user
+            mock_result.first.return_value = mock_super_admin_user
             mock_session.execute = AsyncMock(return_value=mock_result)
 
             # Setup password verification
@@ -478,7 +515,7 @@ class TestAdminAuthSessionPersistence:
 
     @pytest.mark.asyncio
     async def test_session_cleared_after_logout(
-        self, admin_auth, mock_request, mock_super_admin_user
+        self, admin_auth, mock_request, mock_super_admin_user, db_admin
     ):
         """Test that session is cleared after logout."""
         # Setup initial session

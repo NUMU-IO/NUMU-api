@@ -45,6 +45,7 @@ from src.application.services.health_score_service import (
     calculate_store_health_score,
 )
 from src.application.services.merchant_visibility import LIVE_SQL, live
+from src.application.services.partner_referrals import reverse_invoice
 from src.application.services.wallet_service import WalletService
 from src.application.services.whatsapp_entitlement import count_messages
 from src.core.entities.wallet import WARNING_LEVEL_LOW, WalletStatus
@@ -368,7 +369,7 @@ async def merchant_insights(
         data={
             "tenant_id": str(tenant.id),
             "billing": {
-                "paused": bool(settings.get("billing_paused")),
+                "paused": settings.get("billing_paused") is True,
                 "lifecycle_state": tenant.lifecycle_state,
                 "expires_at": _iso(tenant.expires_at),
                 "read_only_at": _iso(tenant.read_only_at),
@@ -444,11 +445,18 @@ async def extend_trial(
     A tenant the trial expiry sweep already moved to read_only is put back
     into the trial: that sweep set read_only_at and delete_at and cleared
     expires_at, so the inverse clears both and sets expires_at again. Such a
-    tenant is told apart from a cancelled or dunned one by never having
-    converted (``trial_converted_at`` is set by every activation path).
+    tenant is told apart from a cancelled or dunned one by having started a
+    trial, never having converted (``trial_converted_at`` is set by every
+    activation path) and never having cancelled. A tenant created straight
+    into active has no trial_started_at, so it never counts as one.
     """
     tenant = await _get_tenant(db, tenant_id)
-    expired_trial = tenant.is_read_only and tenant.trial_converted_at is None
+    expired_trial = (
+        tenant.is_read_only
+        and tenant.trial_started_at is not None
+        and tenant.trial_converted_at is None
+        and tenant.cancelled_at is None
+    )
     if not (tenant.is_on_trial or expired_trial):
         raise HTTPException(
             status_code=409,
@@ -511,7 +519,7 @@ async def pause_billing(
 ):
     """Set or clear ``settings.billing_paused`` (see the module docstring)."""
     tenant = await _get_tenant(db, tenant_id)
-    was = bool((tenant.settings or {}).get("billing_paused"))
+    was = (tenant.settings or {}).get("billing_paused") is True
     # Reassigned, not mutated in place: JSONB changes are not tracked.
     tenant.settings = {**(tenant.settings or {}), "billing_paused": body.paused}
     await _audit(
@@ -560,6 +568,8 @@ async def refund_invoice(
             detail=f"Only a paid invoice can be refunded ({invoice.status})",
         )
     invoice.status = "refunded"
+    # Activation credited the referring partner for this invoice; take it back.
+    await reverse_invoice(db, invoice, actor_user_id=admin_id, note=body.reason)
     await _audit(
         db,
         admin_id,
