@@ -52,20 +52,21 @@ class RedisCacheService(ICacheService):
         ``RedisCacheService()`` is built per request in ~80 places; each used
         to open its own connection pool, paying a fresh TCP connect per
         request. Keyed by loop because a redis.asyncio client belongs to the
-        loop it was made on (Celery runs each task on a new one).
+        loop it was made on (Celery runs each task on a new one). Looked up on
+        every call, never kept from the first one: a long-lived instance (the
+        product-cache singleton) outlives the loop it was first used on.
         """
-        if self._client is None:
-            per_loop = _shared_clients.setdefault(asyncio.get_running_loop(), {})
-            client = per_loop.get(self.redis_url)
-            if client is None:
-                client = redis.from_url(
-                    self.redis_url,
-                    encoding="utf-8",
-                    decode_responses=True,
-                )
-                per_loop[self.redis_url] = client
-            self._client = client
-        return self._client
+        per_loop = _shared_clients.setdefault(asyncio.get_running_loop(), {})
+        client = per_loop.get(self.redis_url)
+        if client is None:
+            client = redis.from_url(
+                self.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+            )
+            per_loop[self.redis_url] = client
+        self._client = client
+        return client
 
     async def close(self) -> None:
         """Release this service's handle; the shared client stays open."""
