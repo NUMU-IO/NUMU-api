@@ -27,6 +27,7 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
+from src.application.services.merchant_visibility import visible
 from src.application.use_cases.billing.review_subscription_payment_proof import (
     ReviewSubscriptionPaymentProofUseCase,
 )
@@ -119,7 +120,10 @@ async def list_subscription_payment_proofs(
             .join(
                 TenantModel, TenantModel.id == SubscriptionPaymentProofModel.tenant_id
             )
-            .where(SubscriptionPaymentProofModel.status == status)
+            .where(
+                SubscriptionPaymentProofModel.status == status,
+                visible(SubscriptionPaymentProofModel.tenant_id),
+            )
             .order_by(SubscriptionPaymentProofModel.created_at.asc())
             .offset(max(skip, 0))
             .limit(min(max(limit, 1), 200))
@@ -131,7 +135,9 @@ async def list_subscription_payment_proofs(
             select(
                 SubscriptionPaymentProofModel.status,
                 func.count(SubscriptionPaymentProofModel.id),
-            ).group_by(SubscriptionPaymentProofModel.status)
+            )
+            .where(visible(SubscriptionPaymentProofModel.tenant_id))
+            .group_by(SubscriptionPaymentProofModel.status)
         )
     ).all()
     counts = {status_val: int(n) for status_val, n in count_rows}

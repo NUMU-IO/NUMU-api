@@ -5,11 +5,11 @@ Public routes for tenant/store registration and admin routes for management.
 
 import logging
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -28,6 +28,7 @@ from src.api.v1.schemas.public.tenant import (
 )
 from src.application.services.api_access import FEATURE as API_FEATURE
 from src.application.services.api_access import decide as decide_api_access
+from src.application.services.api_limits import forget_policy
 from src.application.services.audit_service import AuditService
 from src.application.services.entitlement_service import plan_grants
 from src.config import settings
@@ -244,15 +245,56 @@ async def patch_tenant_feature_flags(
 
 
 class ApiAccessPatch(BaseModel):
-    """Grant or revoke the public API for one merchant."""
+    """Set the public API for one merchant.
 
-    enabled: bool
+    ``mode``: ``plan`` follows the merchant's plan, ``on`` grants it whatever
+    the plan, ``off`` blocks it whatever the plan. ``enabled`` is the older
+    two-state form (true = on, false = plan) and is still accepted.
+    """
+
+    mode: Literal["plan", "on", "off"] | None = None
+    enabled: bool | None = None
     note: str | None = None
+
+
+async def _api_access_state(db: AsyncSession, tenant) -> dict:
+    access = await decide_api_access(db, tenant)
+    return {
+        "tenant_id": str(tenant.id),
+        "mode": "on" if access.granted else "off" if access.blocked else "plan",
+        "granted": access.granted,
+        "blocked": access.blocked,
+        "in_plan": access.in_plan,
+        "allowed": access.allowed and bool(tenant.is_active),
+        "plan": access.plan,
+        "active": bool(tenant.is_active),
+    }
+
+
+@admin_router.get(
+    "/{tenant_id}/api-access",
+    summary="Public API access for a tenant, and why",
+    operation_id="get_tenant_api_access",
+    response_model=SuccessResponse[dict],
+)
+async def get_tenant_api_access(
+    tenant_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+) -> SuccessResponse[dict]:
+    await db.execute(text("SET search_path TO public"))
+    tenant = await TenantRepository(db).get_by_id(tenant_id)
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found",
+        )
+    return SuccessResponse(data=await _api_access_state(db, tenant))
 
 
 @admin_router.patch(
     "/{tenant_id}/api-access",
-    summary="Grant or revoke public API access for a tenant",
+    summary="Grant, block or reset public API access for a tenant",
     operation_id="patch_tenant_api_access",
     response_model=SuccessResponse[dict],
 )
@@ -262,17 +304,18 @@ async def patch_tenant_api_access(
     db: Annotated[AsyncSession, Depends(get_db)],
     admin_id: Annotated[UUID, Depends(require_admin)],
 ) -> SuccessResponse[dict]:
-    """Switch the public API on for a merchant whose plan does not include it.
+    """Grant or block the public API for one merchant, or hand it back to
+    the plan.
 
     A thin, named wrapper over an ``api_access`` entitlement override: the
     plan matrix is too blunt for a partner on a pilot or an agency integrating
-    one Starter merchant. A grant is open-ended, so it is a ``contract``
-    override; revoking ends it. Either takes effect on the next request —
-    existing tokens are checked on every request, and webhook deliveries stop
-    with them.
-
-    A tenant whose PLAN includes the API keeps it regardless of this grant.
+    one Starter merchant, and NUMU must be able to cut off a merchant whose
+    plan includes the API. Overrides are open-ended, so they are ``contract``
+    overrides; ``plan`` ends the current one. The cached policy is dropped, so
+    existing tokens see the change on their next request. Webhook deliveries
+    are a separate entitlement (``webhooks_access``) and are not affected.
     """
+    mode = body.mode or ("on" if body.enabled else "plan")
     await db.execute(text("SET search_path TO public"))
 
     tenant_repo = TenantRepository(db)
@@ -295,61 +338,101 @@ async def patch_tenant_api_access(
     )
     if live is not None:
         live.revoked_at, live.revoked_by = now, admin_id
-    if body.enabled:
+    if mode != "plan":
         db.add(
             EntitlementOverrideModel(
                 tenant_id=tenant_id,
                 feature_key=API_FEATURE,
-                value=True,
+                value=mode == "on",
                 starts_at=now,
                 source="contract",
-                reason=(body.note or "").strip() or "Public API granted by NUMU",
+                reason=(body.note or "").strip()
+                or (
+                    "Public API granted by NUMU"
+                    if mode == "on"
+                    else "Public API blocked by NUMU"
+                ),
                 created_by=admin_id,
             )
         )
     await tenant_repo.bump_entitlements_version(tenant_id)
     await AuditService(db).log(
         event_type="entitlement.override.create"
-        if body.enabled
+        if mode != "plan"
         else "entitlement.override.revoke",
-        action="create" if body.enabled else "revoke",
+        action="create" if mode != "plan" else "revoke",
         resource_type="feature",
         resource_id=API_FEATURE,
         tenant_id=tenant_id,
         user_id=admin_id,
-        old_value={"granted": live is not None and live.value is True},
-        new_value={"granted": body.enabled},
+        old_value={"override": None if live is None else live.value},
+        new_value={"mode": mode},
         details={"reason": body.note},
     )
     await db.commit()
+    await forget_policy(tenant_id)
     await db.refresh(tenant)
 
-    access = await decide_api_access(db, tenant)
+    state = await _api_access_state(db, tenant)
     logger.info(
         "tenant api access patched",
         extra={
             "tenant_id": str(tenant_id),
-            "enabled": body.enabled,
+            "mode": mode,
             "note": body.note,
-            "effective": access.allowed,
+            "effective": state["allowed"],
         },
     )
     # Wrapped like every other endpoint: the admin client reads `data` off
     # the envelope, so a bare dict arrives as undefined and the page throws
     # while the grant it just made has actually gone through.
     return SuccessResponse(
-        data={
-            "tenant_id": str(tenant_id),
-            "granted": access.granted,
-            "in_plan": access.in_plan,
-            "allowed": access.allowed,
-            "plan": access.plan,
-        },
+        data=state,
         message=(
             "Public API enabled for this merchant"
-            if access.allowed
+            if state["allowed"]
             else "Public API disabled for this merchant"
         ),
+    )
+
+
+class RevokeAllTokensIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+@admin_router.post(
+    "/{tenant_id}/api-tokens/revoke-all",
+    summary="Revoke every live API token a tenant holds",
+    operation_id="revoke_all_tenant_api_tokens",
+    response_model=SuccessResponse[dict],
+)
+async def revoke_all_tenant_api_tokens(
+    tenant_id: UUID,
+    body: RevokeAllTokensIn,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+) -> SuccessResponse[dict]:
+    """Kill switch for one merchant's keys. Partner-app tokens are separate
+    (uninstall or suspend the app); to keep new keys from being minted,
+    block API access as well."""
+    from src.api.v1.routes.admin.api_tokens import _revoke
+    from src.infrastructure.database.models.public.personal_access_token import (
+        PersonalAccessTokenModel,
+    )
+
+    await db.execute(text("SET search_path TO public"))
+    tokens = list(
+        await db.scalars(
+            select(PersonalAccessTokenModel).where(
+                PersonalAccessTokenModel.tenant_id == tenant_id,
+                PersonalAccessTokenModel.revoked_at.is_(None),
+            )
+        )
+    )
+    await _revoke(db, tokens, admin_id, body.reason)
+    return SuccessResponse(
+        data={"revoked": len(tokens)},
+        message=f"Revoked {len(tokens)} token(s)",
     )
 
 
@@ -409,6 +492,9 @@ async def update_tenant(
         tenant.settings = request.settings
 
     updated = await tenant_repo.update(tenant)
+    await db.commit()
+    # Plan and active state both decide API access; don't serve the cached one.
+    await forget_policy(tenant_id)
     await db.refresh(updated)
     return TenantResponse.model_validate(updated)
 

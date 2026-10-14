@@ -28,23 +28,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.merchant_visibility import LIVE_SQL, VISIBLE_SQL
 from src.core.entities.plan import PLAN_LIMITS
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Every aggregate on this screen excludes demo tenants and NUMU's own
-# internal ones, exactly as /admin/dashboard/stats does. Written once here
-# and interpolated, because repeating it in nine queries is how two tiles end
-# up counting different populations.
-_LIVE_TENANTS = """
-    NOT EXISTS (
-        SELECT 1 FROM public.tenants x
-        WHERE x.id = {alias}.tenant_id
-          AND (x.lifecycle_state = 'demo' OR x.is_internal IS TRUE)
-    )
+# One assessment per order, the newest. Checkout writes a preliminary score,
+# the fraud task a final one and Shopify webhooks their own, so joining the
+# table directly listed an order once per assessment, each with a different
+# score, and counted the risk queue per row instead of per order.
+_LATEST_RISK = """
+    SELECT DISTINCT ON (r.order_id)
+           r.order_id, r.risk_score, r.risk_level, r.customer_name,
+           r.payment_method, r.action_taken, r.created_at
+    FROM public.risk_assessments r
+    ORDER BY r.order_id, r.created_at DESC
 """
+
+# Orders nobody needs to act on any more. Compared as upper(text) because the
+# enum's labels are not all one case on every database.
+_CLOSED = "('CANCELLED', 'REFUNDED', 'DELIVERED', 'RETURNED', 'SHIPPED', 'DRAFT')"
+
+# A COD order still waiting on the merchant's decision: open, not shipped.
+_COD_AWAITING = f"""
+    FROM ({_LATEST_RISK}) r
+    JOIN public.orders o ON o.id = r.order_id
+    WHERE r.action_taken IS NULL
+      AND lower(coalesce(r.payment_method, o.payment_method, '')) IN ('cod', 'cash_on_delivery')
+      AND upper(o.status::text) NOT IN {_CLOSED}
+      AND {LIVE_SQL.format(col="o.tenant_id")}
+"""  # nosec B608 - module literals only
 
 
 class Trend(BaseModel):
@@ -179,8 +194,12 @@ async def get_overview(
     now = datetime.now(UTC)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    orders_live = _LIVE_TENANTS.format(alias="o")
-    stores_live = _LIVE_TENANTS.format(alias="s")
+    # Every number and queue here counts live merchants only: not internal,
+    # not demo, not suspended (see merchant_visibility).
+    orders_live = LIVE_SQL.format(col="o.tenant_id")
+    stores_live = LIVE_SQL.format(col="s.tenant_id")
+    hooks_live = f"w.store_id IN (SELECT s.id FROM public.stores s WHERE {stores_live})"  # nosec B608 - module literals only
+    tenants_visible = VISIBLE_SQL.format(col="t.id")
 
     # ── Merchants and stores, with a 7-day signup shape ─────────────────────
     active_merchants = await _scalar(
@@ -308,19 +327,19 @@ async def get_overview(
     # ── Trial → paid over the last 30 days ─────────────────────────────────
     trial_started = await _scalar(
         db,
-        """
+        f"""
         SELECT count(*) FROM public.tenants t
-        WHERE t.trial_started_at >= :since AND t.is_internal IS FALSE
-        """,
+        WHERE t.trial_started_at >= :since AND {tenants_visible}
+        """,  # nosec B608 - module literals only; values are bound
         since=now - timedelta(days=30),
     )
     trial_converted = await _scalar(
         db,
-        """
+        f"""
         SELECT count(*) FROM public.tenants t
         WHERE t.trial_started_at >= :since AND t.trial_converted_at IS NOT NULL
-          AND t.is_internal IS FALSE
-        """,
+          AND {tenants_visible}
+        """,  # nosec B608 - module literals only; values are bound
         since=now - timedelta(days=30),
     )
     trial_pct = (
@@ -362,64 +381,58 @@ async def get_overview(
 
     high_risk = await _scalar(
         db,
-        """
-        SELECT count(*) FROM public.risk_assessments r
-        WHERE r.risk_level IN ('high', 'critical')
-          AND lower(coalesce(r.payment_method, '')) IN ('cod', 'cash_on_delivery')
-          AND r.action_taken IS NULL
-        """,
+        f"SELECT count(*) {_COD_AWAITING} AND r.risk_level IN ('high', 'critical')",  # nosec B608 - module literals only
     )
     high_risk_oldest = await _scalar(
         db,
-        """
-        SELECT min(r.created_at) FROM public.risk_assessments r
-        WHERE r.risk_level IN ('high', 'critical')
-          AND lower(coalesce(r.payment_method, '')) IN ('cod', 'cash_on_delivery')
-          AND r.action_taken IS NULL
-        """,
+        f"SELECT min(r.created_at) {_COD_AWAITING} AND r.risk_level IN ('high', 'critical')",  # nosec B608 - module literals only
     )
 
+    # A case can come from a partner rather than a merchant (no tenant).
+    cases_visible = f"(c.tenant_id IS NULL OR {VISIBLE_SQL.format(col='c.tenant_id')})"
     open_cases = await _scalar(
         db,
-        """
+        f"""
         SELECT count(*) FROM public.support_cases c
-        WHERE c.status IN ('open', 'pending_merchant')
-        """,
+        WHERE c.status IN ('open', 'pending_merchant') AND {cases_visible}
+        """,  # nosec B608 - module literals only
     )
     urgent_cases = await _scalar(
         db,
-        """
+        f"""
         SELECT count(*) FROM public.support_cases c
         WHERE c.status IN ('open', 'pending_merchant')
-          AND c.priority IN ('high', 'urgent')
-        """,
+          AND c.priority IN ('high', 'urgent') AND {cases_visible}
+        """,  # nosec B608 - module literals only
     )
 
     failed_hooks = await _scalar(
         db,
-        "SELECT count(*) FROM public.webhook_delivery_logs w WHERE w.status IN ('failed', 'exhausted')",
+        f"SELECT count(*) FROM public.webhook_delivery_logs w WHERE w.status IN ('failed', 'exhausted') AND {hooks_live}",  # nosec B608 - module literals only
     )
     failed_hooks_24h = await _scalar(
         db,
-        """
+        f"""
         SELECT count(*) FROM public.webhook_delivery_logs w
         WHERE w.status IN ('failed', 'exhausted') AND w.created_at >= :since
-        """,
+          AND {hooks_live}
+        """,  # nosec B608 - module literals only; values are bound
         since=now - timedelta(hours=24),
     )
 
     hook_rows = (
         await db.execute(
             text(
-                """
+                f"""
                 SELECT g.h AS hour, count(w.id) AS failures
                 FROM generate_series(23, 0, -1) AS g(h)
                 LEFT JOIN public.webhook_delivery_logs w
                   ON w.status IN ('failed', 'exhausted')
                  AND w.created_at >= CAST(:now AS timestamptz) - ((g.h + 1) || ' hours')::interval
                  AND w.created_at <  CAST(:now AS timestamptz) - (g.h || ' hours')::interval
+                 AND {hooks_live}
                 GROUP BY g.h ORDER BY g.h DESC
-                """
+                """  # nosec B608 - module literals only; values are bound
             ),
             {"now": now},
         )
@@ -461,10 +474,11 @@ async def get_overview(
                 FROM public.orders o
                 JOIN public.stores s ON s.id = o.store_id
                 LEFT JOIN public.customers c ON c.id = o.customer_id
-                LEFT JOIN public.risk_assessments r ON r.order_id = o.id
+                LEFT JOIN ({_LATEST_RISK}) r ON r.order_id = o.id
                 WHERE {orders_live}
+                  AND upper(o.status::text) NOT IN {_CLOSED}
                   AND (
-                        o.status IN ('PENDING', 'CONFIRMED', 'PAYMENT_FAILED')
+                        upper(o.status::text) IN ('PENDING', 'CONFIRMED', 'PAYMENT_FAILED')
                      OR o.payment_status = 'FAILED'
                      OR r.risk_level IN ('high', 'critical')
                   )
@@ -488,16 +502,18 @@ async def get_overview(
         (
             await db.execute(
                 text(
-                    """
+                    f"""
                 SELECT a.id, a.action, a.event_type, a.severity, a.details, a.created_at,
-                       u.email AS actor_email,
+                       a.user_id, u.email AS actor_email,
                        s.name AS store_name
                 FROM public.audit_logs a
                 LEFT JOIN public.users u ON u.id = a.user_id
                 LEFT JOIN public.stores s ON s.id = a.store_id
+                WHERE (a.tenant_id IS NULL OR {VISIBLE_SQL.format(col="a.tenant_id")})
+                  AND (s.id IS NULL OR {VISIBLE_SQL.format(col="s.tenant_id")})
                 ORDER BY a.created_at DESC
                 LIMIT 8
-                """
+                """  # nosec B608 - module literals only
                 ),
             )
         )
@@ -558,12 +574,7 @@ async def get_overview(
 
     awaiting_risk = await _scalar(
         db,
-        """
-        SELECT count(*) FROM public.risk_assessments r
-        JOIN public.tenants t ON t.id = r.tenant_id
-        WHERE r.action_taken IS NULL
-          AND NOT (t.lifecycle_state = 'demo' OR t.is_internal IS TRUE)
-        """,
+        f"SELECT count(*) {_COD_AWAITING}",  # nosec B608 - module literals only
     )
 
     hooks = failed_hooks_24h or 0
@@ -590,7 +601,7 @@ async def get_overview(
             id="risk_queue",
             severity="warning" if (awaiting_risk or 0) >= 25 else "ok",
             title=(
-                f"{awaiting_risk} cash-on-delivery orders awaiting a decision"
+                f"{awaiting_risk} cash-on-delivery order{'' if awaiting_risk == 1 else 's'} awaiting a decision"
                 if awaiting_risk
                 else "No cash-on-delivery orders awaiting a decision"
             ),
@@ -611,13 +622,13 @@ async def get_overview(
     plan_rows = (
         await db.execute(
             text(
-                """
+                f"""
                 SELECT t.plan, coalesce(t.billing_cycle, 'monthly') AS cycle, count(*) AS n
                 FROM public.tenants t
                 WHERE t.lifecycle_state = 'active'
-                  AND t.is_internal IS FALSE
+                  AND {tenants_visible}
                 GROUP BY t.plan, coalesce(t.billing_cycle, 'monthly')
-                """
+                """  # nosec B608 - module literals only
             )
         )
     ).all()
@@ -646,15 +657,15 @@ async def get_overview(
 
     subscriptions_collected = await _scalar(
         db,
-        """
+        f"""
         SELECT coalesce(sum(i.amount_cents), 0)
         FROM public.subscription_payment_proofs p
         JOIN public.subscription_payment_intents i ON i.id = p.intent_id
         JOIN public.tenants t ON t.id = p.tenant_id
         WHERE p.status IN ('approved', 'auto_approved')
           AND p.review_decision_at >= :since
-          AND t.is_internal IS FALSE
-        """,
+          AND {tenants_visible}
+        """,  # nosec B608 - module literals only; values are bound
         since=window_30d,
     )
 
@@ -662,37 +673,37 @@ async def get_overview(
     # positive. NUMU's net take is the negation of their sum.
     payg_commission = await _scalar(
         db,
-        """
+        f"""
         SELECT -coalesce(sum(w.amount_cents), 0)
         FROM public.wallet_transactions w
         JOIN public.tenants t ON t.id = w.tenant_id
         WHERE w.kind IN ('commission', 'commission_reversal')
           AND w.created_at >= :since
-          AND t.is_internal IS FALSE
-        """,
+          AND {tenants_visible}
+        """,  # nosec B608 - module literals only; values are bound
         since=window_30d,
     )
 
     topups_collected = await _scalar(
         db,
-        """
+        f"""
         SELECT coalesce(sum(w.amount_cents), 0)
         FROM public.wallet_transactions w
         JOIN public.tenants t ON t.id = w.tenant_id
         WHERE w.kind = 'topup' AND w.created_at >= :since
-          AND t.is_internal IS FALSE
-        """,
+          AND {tenants_visible}
+        """,  # nosec B608 - module literals only; values are bound
         since=window_30d,
     )
 
     wallet_float = await _scalar(
         db,
-        """
+        f"""
         SELECT coalesce(sum(m.balance_cents), 0)
         FROM public.merchant_wallets m
         JOIN public.tenants t ON t.id = m.tenant_id
-        WHERE t.is_internal IS FALSE
-        """,
+        WHERE {tenants_visible}
+        """,  # nosec B608 - module literals only
     )
 
     earnings = Earnings(
@@ -796,7 +807,8 @@ async def get_overview(
                 id=str(r["id"]),
                 action=r["action"] or r["event_type"],
                 actor=r["actor_email"] or (r["details"] or {}).get("actor_type"),
-                actor_type=(r["details"] or {}).get("actor_type", "system"),
+                actor_type=(r["details"] or {}).get("actor_type")
+                or ("staff" if r["user_id"] else "system"),
                 entity=r["store_name"],
                 note=(r["details"] or {}).get("note"),
                 severity=r["severity"],

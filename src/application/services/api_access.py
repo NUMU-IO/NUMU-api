@@ -40,6 +40,8 @@ class ApiAccess:
     #: "included in your plan" rather than "granted by NUMU".
     in_plan: bool
     granted: bool
+    #: NUMU switched it off for this merchant, plan or not.
+    blocked: bool = False
 
     @property
     def reason(self) -> str | None:
@@ -72,11 +74,13 @@ async def api_access_for_store(session: AsyncSession, store_id: UUID) -> ApiAcce
 async def decide(session: AsyncSession, tenant: TenantModel) -> ApiAccess:
     state = await EntitlementService(session).feature(tenant, FEATURE)
     in_plan = bool(state.get("in_plan"))
-    granted = state.get("source") == "override" and state["value"] is True
+    overridden = state.get("source") == "override"
+    granted = overridden and state["value"] is True
     return ApiAccess(
         allowed=bool(state["available"]),
         source="plan" if in_plan else ("grant" if granted else None),
         plan=(tenant.plan or "free").lower(),
         in_plan=in_plan,
         granted=granted,
+        blocked=overridden and state["value"] is False,
     )

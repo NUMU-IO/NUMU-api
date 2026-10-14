@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.api.v1.routes.admin.risk import OPEN_RISK
+from src.application.services.merchant_visibility import VISIBLE_SQL, visible
 from src.core.entities.marketplace_theme import MarketplaceVersionStatus
 from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.entities.plan import PLAN_LIMITS
@@ -372,7 +374,8 @@ async def get_queue_counts(
 
     whatsapp_access = await _count(
         select(func.count(WhatsAppAccessRequestModel.id)).where(
-            WhatsAppAccessRequestModel.status == WhatsAppAccessStatus.PENDING
+            WhatsAppAccessRequestModel.status == WhatsAppAccessStatus.PENDING,
+            visible(WhatsAppAccessRequestModel.tenant_id),
         )
     )
     marketplace_review = await _count(
@@ -383,23 +386,31 @@ async def get_queue_counts(
     )
     subscription_payments = await _count(
         select(func.count(SubscriptionPaymentProofModel.id)).where(
-            SubscriptionPaymentProofModel.status == "awaiting_review"
+            SubscriptionPaymentProofModel.status == "awaiting_review",
+            visible(SubscriptionPaymentProofModel.tenant_id),
         )
     )
     wallet_topups = await _count(
         select(func.count(WalletTopupProofModel.id)).where(
-            WalletTopupProofModel.status == "awaiting_review"
+            WalletTopupProofModel.status == "awaiting_review",
+            visible(WalletTopupProofModel.tenant_id),
         )
     )
     risk_review = await _count(
         select(func.count())
         .select_from(text("public.risk_assessments r"))
-        .where(text("r.action_taken IS NULL AND r.risk_level IN ('high','critical')"))
+        .where(text("r.risk_level IN ('high','critical') AND " + OPEN_RISK))
     )
     support_cases = await _count(
         select(func.count())
         .select_from(text("public.support_cases c"))
-        .where(text("c.status IN ('open','pending_merchant')"))
+        .where(
+            text(
+                "c.status IN ('open','pending_merchant') AND (c.tenant_id IS NULL OR "
+                + VISIBLE_SQL.format(col="c.tenant_id")
+                + ")"
+            )
+        )
     )
     payment_failed_orders = await _count(
         select(func.count(OrderModel.id)).where(

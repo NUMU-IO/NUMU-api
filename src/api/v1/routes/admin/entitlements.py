@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin, require_admin_2fa
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.api_limits import forget_policy
 from src.application.services.audit_service import AuditService
 from src.application.services.entitlement_service import (
     EntitlementService,
@@ -494,11 +495,13 @@ async def create_override(
         details={"reason": body.reason},
     )
     try:
-        await db.flush()
+        await db.commit()
     except IntegrityError as exc:  # uq_entitlement_overrides_live
         raise HTTPException(
             status_code=409, detail="This override changed a moment ago. Reload."
         ) from exc
+    # API keys read a cached policy built from these overrides.
+    await forget_policy(tenant_id)
     await db.refresh(tenant)
     return SuccessResponse(
         data=_override_out(row, now, await _emails(db, {admin_id}))
@@ -536,6 +539,8 @@ async def revoke_override(
         old_value={"id": str(row.id), "value": row.value},
         details={"reason": body.reason},
     )
+    await db.commit()
+    await forget_policy(row.tenant_id)
     emails = await _emails(db, {row.created_by, admin_id})
     return SuccessResponse(data=_override_out(row, now, emails))
 

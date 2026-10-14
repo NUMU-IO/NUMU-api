@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -40,9 +40,11 @@ class AdminOrderListItem(BaseModel):
     id: str
     store_id: str
     store_name: str | None = None
+    tenant_id: str | None = None
     customer_id: str
     customer_name: str | None = None
     customer_email: str | None = None
+    customer_phone: str | None = None
     order_number: str
     status: str
     payment_status: str
@@ -63,6 +65,7 @@ class AdminOrderDetail(BaseModel):
     customer_id: str
     customer_name: str | None = None
     customer_email: str | None = None
+    customer_phone: str | None = None
     order_number: str
     status: str
     payment_status: str
@@ -89,6 +92,35 @@ class AdminOrderDetail(BaseModel):
     fulfilled_at: str | None = None
     created_at: str
     updated_at: str
+    #: Newest risk assessment for this order, if any.
+    risk_score: int | None = None
+    risk_level: str | None = None
+    customer_history: "CustomerHistory | None" = None
+
+
+class CustomerHistoryOrder(BaseModel):
+    id: str
+    order_number: str
+    status: str
+    payment_status: str
+    total: int
+    currency: str
+    created_at: str
+
+
+class CustomerHistory(BaseModel):
+    """The same customer's orders at this store, this one included."""
+
+    orders: int
+    delivered: int
+    cancelled: int
+    returned: int
+    paid_total: int
+    first_order_at: str | None
+    recent: list[CustomerHistoryOrder]
+
+
+AdminOrderDetail.model_rebuild()
 
 
 class UpdateOrderStatusRequest(BaseModel):
@@ -114,11 +146,13 @@ def _order_to_list_item(o: OrderModel) -> AdminOrderListItem:
         id=str(o.id),
         store_id=str(o.store_id),
         store_name=store.name if store else None,
+        tenant_id=str(o.tenant_id) if o.tenant_id else None,
         customer_id=str(o.customer_id),
         customer_name=f"{customer.first_name} {customer.last_name}"
         if customer
         else None,
         customer_email=customer.email if customer else None,
+        customer_phone=customer.phone if customer else None,
         order_number=o.order_number,
         status=o.status.value if hasattr(o.status, "value") else str(o.status),
         payment_status=o.payment_status.value
@@ -150,6 +184,7 @@ def _order_to_detail(o: OrderModel) -> AdminOrderDetail:
         if customer
         else None,
         customer_email=customer.email if customer else None,
+        customer_phone=customer.phone if customer else None,
         order_number=o.order_number,
         status=o.status.value if hasattr(o.status, "value") else str(o.status),
         payment_status=o.payment_status.value
@@ -319,9 +354,76 @@ async def get_order(
             detail="Order not found",
         )
 
-    return SuccessResponse(
-        data=_order_to_detail(order),
-        message="Order retrieved successfully",
+    detail = _order_to_detail(order)
+    risk = (
+        await db.execute(
+            text(
+                "SELECT risk_score, risk_level FROM public.risk_assessments "
+                "WHERE order_id = :id ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"id": order.id},
+        )
+    ).first()
+    if risk is not None:
+        detail.risk_score, detail.risk_level = risk.risk_score, risk.risk_level
+    if order.customer_id:
+        detail.customer_history = await _customer_history(db, order)
+
+    return SuccessResponse(data=detail, message="Order retrieved successfully")
+
+
+def _enum_value(v) -> str:
+    return v.value if hasattr(v, "value") else str(v)
+
+
+async def _customer_history(db: AsyncSession, order: OrderModel) -> CustomerHistory:
+    """What support needs to judge a COD order: has this customer ordered
+    here before, and did those orders arrive or come back."""
+    same_customer = OrderModel.customer_id == order.customer_id
+    counts = (
+        await db.execute(
+            select(
+                func.count(OrderModel.id),
+                func.count().filter(OrderModel.status == OrderStatus.DELIVERED),
+                func.count().filter(OrderModel.status == OrderStatus.CANCELLED),
+                func.count().filter(OrderModel.status == OrderStatus.RETURNED),
+                func.coalesce(
+                    func.sum(OrderModel.total).filter(
+                        OrderModel.payment_status == PaymentStatus.PAID
+                    ),
+                    0,
+                ),
+                func.min(OrderModel.created_at),
+            ).where(same_customer)
+        )
+    ).one()
+    recent = (
+        await db.scalars(
+            select(OrderModel)
+            .where(same_customer)
+            .order_by(OrderModel.created_at.desc())
+            .limit(10)
+        )
+    ).all()
+    return CustomerHistory(
+        orders=counts[0],
+        delivered=counts[1],
+        cancelled=counts[2],
+        returned=counts[3],
+        paid_total=int(counts[4]),
+        first_order_at=_ts(counts[5]),
+        recent=[
+            CustomerHistoryOrder(
+                id=str(o.id),
+                order_number=o.order_number,
+                status=_enum_value(o.status),
+                payment_status=_enum_value(o.payment_status),
+                total=o.total,
+                currency=o.currency,
+                created_at=_ts(o.created_at) or "",
+            )
+            for o in recent
+        ],
     )
 
 

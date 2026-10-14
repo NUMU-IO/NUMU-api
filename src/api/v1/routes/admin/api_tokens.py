@@ -2,16 +2,18 @@
 
 Lists every personal access token with who minted it and for which store,
 plus a summary of its recent request trail, and returns the trail itself for
-one token. Read-only: revoking stays with the merchant, or with the per-tenant
-API-access switch on the merchant page.
+one token. Staff can revoke one token, or every token a merchant holds; the
+per-tenant API-access switch on the merchant page blocks the API outright.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +21,9 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.middleware.token_activity import KEEP, recent_requests
 from src.api.responses import SuccessResponse
+from src.application.services import api_limits
+from src.application.services.audit_service import AuditService
+from src.application.services.merchant_visibility import visible
 from src.infrastructure.database.models.public.personal_access_token import (
     PersonalAccessTokenModel,
 )
@@ -35,8 +40,22 @@ router = APIRouter(
 REFUSED = {401, 402, 403}
 
 
+class RevokeTokensIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
 @router.get("", response_model=SuccessResponse[list[dict]])
-async def list_api_tokens(db: Annotated[AsyncSession, Depends(get_db)]):
+async def list_api_tokens(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: UUID | None = None,
+):
+    """Every token on the platform, or one merchant's. Internal and demo
+    merchants' tokens are left out of the platform-wide list."""
+    scope = (
+        PersonalAccessTokenModel.tenant_id == tenant_id
+        if tenant_id
+        else visible(PersonalAccessTokenModel.tenant_id)
+    )
     rows = (
         await db.execute(
             select(
@@ -50,34 +69,92 @@ async def list_api_tokens(db: Annotated[AsyncSession, Depends(get_db)]):
             )
             .outerjoin(StoreModel, StoreModel.id == PersonalAccessTokenModel.store_id)
             .outerjoin(UserModel, UserModel.id == PersonalAccessTokenModel.user_id)
+            .where(scope)
             .order_by(PersonalAccessTokenModel.last_used_at.desc().nullslast())
         )
     ).all()
 
-    items = []
-    for token, subdomain, store_name, email in rows:
-        trail = await recent_requests(str(token.id))
-        items.append({
-            "id": str(token.id),
-            "name": token.name,
-            "token_prefix": token.token_prefix,
-            "scopes": token.scopes,
-            "tenant": subdomain,
-            "store_id": str(token.store_id) if token.store_id else None,
-            "store_name": store_name,
-            "minted_by": email,
-            "created_at": token.created_at,
-            "last_used_at": token.last_used_at,
-            "expires_at": token.expires_at,
-            "revoked_at": token.revoked_at,
-            "trail": {
-                "requests": len(trail),
-                "refused": sum(1 for e in trail if e["status"] in REFUSED),
-                "distinct_ips": len({e["ip"] for e in trail}),
-                "last": trail[0] if trail else None,
-            },
-        })
-    return SuccessResponse(data=items)
+    return SuccessResponse(
+        data=[
+            await _token_out(token, subdomain, store_name, email)
+            for token, subdomain, store_name, email in rows
+        ]
+    )
+
+
+async def _token_out(token, subdomain, store_name, email) -> dict:
+    trail = await recent_requests(str(token.id))
+    return {
+        "id": str(token.id),
+        "tenant_id": str(token.tenant_id),
+        "name": token.name,
+        "token_prefix": token.token_prefix,
+        "scopes": token.scopes,
+        "tenant": subdomain,
+        "store_id": str(token.store_id) if token.store_id else None,
+        "store_name": store_name,
+        "minted_by": email,
+        "created_at": token.created_at,
+        "last_used_at": token.last_used_at,
+        "expires_at": token.expires_at,
+        "revoked_at": token.revoked_at,
+        "trail": {
+            "requests": len(trail),
+            "refused": sum(1 for e in trail if e["status"] in REFUSED),
+            "distinct_ips": len({e["ip"] for e in trail}),
+            "last": trail[0] if trail else None,
+        },
+    }
+
+
+async def _revoke(db: AsyncSession, tokens: list, admin_id: UUID, reason: str) -> None:
+    """Revoke, audit, commit, then drop each cached key. Commit first: dropped
+    before it, a request in between re-caches the not-yet-revoked row."""
+    now = datetime.now(UTC)
+    audit = AuditService(db)
+    for token in tokens:
+        token.revoked_at = now
+        await audit.log(
+            event_type="api_key.revoked_by_staff",
+            action="delete",
+            resource_type="api_key",
+            resource_id=str(token.id),
+            user_id=admin_id,
+            tenant_id=token.tenant_id,
+            store_id=token.store_id,
+            details={"reason": reason, "actor_type": "staff"},
+        )
+    await db.commit()
+    for token in tokens:
+        await api_limits.forget_key(token.token_hash)
+
+
+@router.post("/{token_id}/revoke", response_model=SuccessResponse[dict])
+async def revoke_api_token(
+    token_id: UUID,
+    body: RevokeTokensIn,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    admin_id: Annotated[UUID, Depends(require_admin)],
+):
+    token = await db.get(PersonalAccessTokenModel, token_id)
+    if token is None:
+        raise HTTPException(status_code=404, detail="Token not found")
+    if token.revoked_at is not None:
+        raise HTTPException(status_code=409, detail="Token already revoked")
+    await _revoke(db, [token], admin_id, body.reason)
+    row = (
+        await db.execute(
+            select(TenantModel.subdomain, StoreModel.name, UserModel.email)
+            .select_from(PersonalAccessTokenModel)
+            .outerjoin(
+                TenantModel, TenantModel.id == PersonalAccessTokenModel.tenant_id
+            )
+            .outerjoin(StoreModel, StoreModel.id == PersonalAccessTokenModel.store_id)
+            .outerjoin(UserModel, UserModel.id == PersonalAccessTokenModel.user_id)
+            .where(PersonalAccessTokenModel.id == token_id)
+        )
+    ).one()
+    return SuccessResponse(data=await _token_out(token, *row))
 
 
 @router.get("/{token_id}/requests", response_model=SuccessResponse[list[dict]])

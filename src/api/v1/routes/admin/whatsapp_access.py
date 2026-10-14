@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
+from src.application.services.merchant_visibility import visible
 from src.application.services.whatsapp_entitlement import (
     BillingUnavailableError,
     count_messages,
@@ -291,7 +292,11 @@ async def list_access_requests(
     """List access requests, newest first. ``status`` filters the rows
     ('pending' by default; 'all' for everything). ``counts`` is always the
     full per-status breakdown so the UI can label tabs regardless of filter."""
-    stmt = _joined_select().order_by(WhatsAppAccessRequestModel.created_at.desc())
+    stmt = (
+        _joined_select()
+        .where(visible(WhatsAppAccessRequestModel.tenant_id))
+        .order_by(WhatsAppAccessRequestModel.created_at.desc())
+    )
     if status_filter != "all":
         stmt = stmt.where(
             WhatsAppAccessRequestModel.status == WhatsAppAccessStatus(status_filter)
@@ -311,7 +316,9 @@ async def list_access_requests(
             select(
                 WhatsAppAccessRequestModel.status,
                 func.count(),
-            ).group_by(WhatsAppAccessRequestModel.status)
+            )
+            .where(visible(WhatsAppAccessRequestModel.tenant_id))
+            .group_by(WhatsAppAccessRequestModel.status)
         )
     ).all()
     counts = {s.value: 0 for s in WhatsAppAccessStatus}
