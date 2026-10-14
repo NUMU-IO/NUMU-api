@@ -62,9 +62,9 @@ class ReviewTopupProofUseCase:
             )
         intent = (
             await self.db.execute(
-                select(WalletTopupIntentModel).where(
-                    WalletTopupIntentModel.id == proof.topup_intent_id
-                )
+                select(WalletTopupIntentModel)
+                .where(WalletTopupIntentModel.id == proof.topup_intent_id)
+                .with_for_update()
             )
         ).scalar_one()
         return proof, intent
@@ -78,13 +78,7 @@ class ReviewTopupProofUseCase:
         proof.review_decision_by = admin_user_id
         proof.review_decision_at = datetime.now(UTC)
 
-        # The optimistic hold becomes real money: release the pending
-        # amount and write the settled ledger credit.
-        service = WalletService(self.db)
-        wallet = await service.get_or_create_wallet(intent.tenant_id, for_update=True)
-        if intent.status == TopupIntentStatus.UNDER_REVIEW.value:
-            service.release_pending_hold(wallet, intent.amount_cents)
-
+        # Releases the on-hold amount and writes the settled ledger credit.
         tx = await credit_topup_intent(
             self.db,
             intent=intent,
@@ -124,9 +118,11 @@ class ReviewTopupProofUseCase:
             service.release_pending_hold(wallet, intent.amount_cents)
 
         # Give the merchant another shot while the window is open;
-        # otherwise the expiry sweep will close the intent.
-        intent.status = TopupIntentStatus.AWAITING_PROOF.value
-        intent.failure_reason = proof.rejection_reason
+        # otherwise the expiry sweep will close the intent. An intent
+        # another proof already credited stays succeeded.
+        if intent.status != TopupIntentStatus.SUCCEEDED.value:
+            intent.status = TopupIntentStatus.AWAITING_PROOF.value
+            intent.failure_reason = proof.rejection_reason
 
         await self.db.flush()
         logger.info(

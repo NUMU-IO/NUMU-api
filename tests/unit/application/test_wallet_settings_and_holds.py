@@ -304,6 +304,57 @@ async def test_admin_reject_drops_hold_without_credit(test_session):
     assert txs == []
 
 
+async def _auto_approve_second_proof(session, intent) -> None:
+    """Proof B on the same intent passes auto-approval while proof A is
+    still in the admin queue (submit_topup_proof's approved branch)."""
+    from src.application.use_cases.wallet.credit_wallet import credit_topup_intent
+
+    tx = await credit_topup_intent(
+        session,
+        intent=intent,
+        idempotency_key=f"proof:{uuid4()}",
+        source="vodafone_cash_auto_approval",
+    )
+    assert tx is not None
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_admin_approve_after_other_proof_credited_does_not_double_credit(
+    test_session,
+):
+    tenant = await _mk_tenant(test_session)
+    intent, proof_a = await _mk_under_review_topup(test_session, tenant.id)
+    await _auto_approve_second_proof(test_session, intent)
+
+    result = await ReviewTopupProofUseCase(test_session).approve(
+        proof_id=proof_a.id, admin_user_id=None
+    )
+    await test_session.commit()
+
+    wallet = await WalletService(test_session).get_or_create_wallet(tenant.id)
+    assert wallet.balance_cents == 10_000  # credited once, not twice
+    assert wallet.pending_balance_cents == 0  # hold released by the credit
+    assert result.credited_balance_cents is None
+    assert intent.status == TopupIntentStatus.SUCCEEDED.value
+
+
+@pytest.mark.asyncio
+async def test_admin_reject_never_reopens_a_credited_intent(test_session):
+    tenant = await _mk_tenant(test_session)
+    intent, proof_a = await _mk_under_review_topup(test_session, tenant.id)
+    await _auto_approve_second_proof(test_session, intent)
+
+    await ReviewTopupProofUseCase(test_session).reject(
+        proof_id=proof_a.id, admin_user_id=None, reason="dup"
+    )
+    await test_session.commit()
+
+    assert intent.status == TopupIntentStatus.SUCCEEDED.value
+    wallet = await WalletService(test_session).get_or_create_wallet(tenant.id)
+    assert wallet.balance_cents == 10_000
+
+
 # ─── Method configuration gating + admin min top-up ──────────────────────
 
 

@@ -17,6 +17,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services.wallet_service import WalletService
@@ -35,8 +36,6 @@ async def _convert_payg_tenant(session: AsyncSession, tenant_id: UUID) -> None:
     No-op for every other plan and for tenants already writable, so it is
     safe on the replay path and on ordinary top-ups by paying merchants.
     """
-    from sqlalchemy import select
-
     from src.infrastructure.database.models.public.tenant import (
         TenantLifecycleState,
         TenantModel,
@@ -63,6 +62,22 @@ async def _convert_payg_tenant(session: AsyncSession, tenant_id: UUID) -> None:
     )
 
 
+async def lock_topup_intent(
+    session: AsyncSession, intent: WalletTopupIntentModel
+) -> WalletTopupIntentModel:
+    """Row-lock the intent and reload its committed state into ``intent``."""
+    # Autoflush is off: flush so populate_existing can't discard pending edits.
+    await session.flush()
+    return (
+        await session.execute(
+            select(WalletTopupIntentModel)
+            .where(WalletTopupIntentModel.id == intent.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+
 async def credit_topup_intent(
     session: AsyncSession,
     *,
@@ -73,12 +88,30 @@ async def credit_topup_intent(
 ) -> WalletTransactionModel | None:
     """Mark the intent succeeded and credit its amount to the wallet.
 
-    Idempotent at two layers: the intent-status guard (only a
-    non-terminal intent transitions) and the ledger's unique
-    ``idempotency_key``. Returns the ledger row, or ``None`` when this
-    credit was already applied.
+    Idempotent at two layers: the locked intent-status guard (a
+    succeeded intent is never credited again, whichever proof or webhook
+    asks) and the ledger's unique ``idempotency_key``. Returns the ledger
+    row, or ``None`` when this intent was already credited.
     """
+    # Two proofs of one intent carry different ledger keys, so only the
+    # intent row itself can say "already paid".
+    await lock_topup_intent(session, intent)
+    if (
+        intent.status == TopupIntentStatus.SUCCEEDED.value
+        or intent.credited_transaction_id is not None
+    ):
+        logger.info(
+            "wallet_topup_already_credited",
+            extra={"intent_id": str(intent.id), "idempotency_key": idempotency_key},
+        )
+        return None
+
     service = WalletService(session)
+    if intent.status == TopupIntentStatus.UNDER_REVIEW.value:
+        # The optimistic on-hold amount becomes real money.
+        wallet = await service.get_or_create_wallet(intent.tenant_id, for_update=True)
+        service.release_pending_hold(wallet, intent.amount_cents)
+
     tx = await service.apply_entry(
         tenant_id=intent.tenant_id,
         kind=WalletTransactionKind.TOPUP,
