@@ -11,7 +11,7 @@ import json
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
@@ -121,17 +121,6 @@ async def fawaterak_callback(
     )
     log.info("webhook_received")
 
-    # Replay protection
-    nonce_id = transaction_id or invoice_id or reference_number
-    if nonce_id and _cache_service:
-        nonce_key = f"fawaterak:processed:{nonce_id}"
-        was_set = await _cache_service.set_if_absent(
-            nonce_key, "1", expire=NONCE_TTL_SECONDS
-        )
-        if not was_set:
-            log.warning("webhook_duplicate_rejected")
-            return {"status": "duplicate", "id": nonce_id}
-
     order_repo = OrderRepository(db)
     store_repo = StoreRepository(db)
 
@@ -145,8 +134,10 @@ async def fawaterak_callback(
 
     log = log.bind(order_id=str(order.id), order_number=order.order_number)
 
-    # Per-merchant HMAC verification
+    # Per-merchant HMAC verification. Refused unless it verifies: it is the
+    # only thing standing between a forged "paid" body and a free order.
     store = await store_repo.get_by_id(order.store_id)
+    verified_data = None
     if store:
         try:
             from src.infrastructure.external_services.fawaterak.payment_service import (
@@ -157,10 +148,25 @@ async def fawaterak_callback(
             creds = await get_merchant_fawaterak_credentials(store.settings)
             service = FawaterakPaymentService(vendor_key=creds.get("vendor_key"))
             verified_data = service.verify_webhook_signature(payload, "")
-            if not verified_data:
-                log.warning("webhook_signature_invalid_proceeding")
         except Exception as e:
             log.warning("webhook_hmac_resolution_failed", error=str(e))
+    if not verified_data:
+        log.warning("webhook_signature_invalid_rejected")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not verify webhook signature",
+        )
+
+    # Replay protection, after verification (see the Paymob callback).
+    nonce_id = transaction_id or invoice_id or reference_number
+    if nonce_id and _cache_service:
+        nonce_key = f"fawaterak:processed:{nonce_id}"
+        was_set = await _cache_service.set_if_absent(
+            nonce_key, "1", expire=NONCE_TTL_SECONDS
+        )
+        if not was_set:
+            log.warning("webhook_duplicate_rejected")
+            return {"status": "duplicate", "id": nonce_id}
 
     # Narrow RLS for subsequent writes
     await narrow_to_tenant(db, order.tenant_id)
