@@ -38,6 +38,11 @@ async def _async_expiry(batch_size: int) -> dict:
         expired_trials = await repo.find_expired_trials(limit=batch_size)
 
         for tenant in expired_trials:
+            # Staff paused billing (admin merchant_ops): the trial stays live.
+            # ponytail: skipped after the LIMIT, so over batch_size paused
+            # expired trials would starve the rest; filter in the query then.
+            if (tenant.settings or {}).get("billing_paused"):
+                continue
             try:
                 tenant.lifecycle_state = "read_only"
                 tenant.read_only_at = now
