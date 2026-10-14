@@ -28,11 +28,10 @@ async def test_a_stock_change_flushes_the_cached_product(monkeypatch):
         async def invalidate_store_products(self, store_id):
             flushed.append((store_id, None))
 
-    monkeypatch.setattr(
-        "src.infrastructure.cache.product_cache.get_product_cache", FakeCache
-    )
     from src.infrastructure.events.setup import create_event_bus
 
+    # create_event_bus() is idempotent, so another test may have built the bus
+    # already: swap the cache on the subscribed invalidator itself.
     bus = create_event_bus()
     event = InventoryLevelChangedEvent(
         store_id=uuid4(), product_id=uuid4(), variant_id=uuid4()
@@ -44,5 +43,6 @@ async def test_a_stock_change_flushes_the_cached_product(monkeypatch):
     ]
     assert handlers, "no product-cache handler for InventoryLevelChangedEvent"
     for handler in handlers:
+        monkeypatch.setattr(handler.__self__, "_cache", FakeCache())
         await handler(event)
     assert flushed == [(event.store_id, event.product_id)]
