@@ -35,7 +35,10 @@ from uuid import UUID, uuid4
 
 from fastapi import Depends, HTTPException, Request, Response, status
 
-from src.api.dependencies.auth import get_optional_customer
+from src.api.dependencies.auth import (
+    get_optional_customer,
+    resolve_store_id_from_host,
+)
 from src.api.dependencies.repositories import get_store_repository
 from src.core.entities.customer import Customer
 from src.infrastructure.repositories.store_repository import StoreRepository
@@ -74,37 +77,6 @@ class CartOwner:
         return (owner_id, self.store_id)
 
 
-async def _resolve_store_id_from_host(
-    request: Request,
-    store_repo: StoreRepository,
-) -> UUID | None:
-    """Look up the store from the `x-numu-host` header set by the
-    storefront's proxy. Returns None if the header is missing or the
-    store can't be resolved — the caller decides whether to 400."""
-    host = request.headers.get("x-numu-host") or ""
-    host = host.split(":")[0].lower().strip()
-    if not host:
-        return None
-    # Subdomain pattern: `<sub>.numueg.app` / `<sub>.localhost`.
-    sub: str | None = None
-    if host.endswith(".numueg.app"):
-        sub = host.removesuffix(".numueg.app")
-    elif host.endswith(".localhost"):
-        sub = host.removesuffix(".localhost")
-    if sub:
-        store = await store_repo.get_by_subdomain(sub)
-        if store:
-            return store.id
-    # Custom-domain fallback.
-    try:
-        store = await store_repo.get_by_custom_domain(host)
-        if store:
-            return store.id
-    except Exception:
-        pass
-    return None
-
-
 async def get_cart_owner(
     request: Request,
     response: Response,
@@ -127,7 +99,7 @@ async def get_cart_owner(
         )
 
     # Guest path — need a store_id from the host.
-    store_id = await _resolve_store_id_from_host(request, store_repo)
+    store_id = await resolve_store_id_from_host(request, store_repo)
     if store_id is None:
         # Without a store we can't safely key a cart. Better to 400
         # loudly than silently bind the cart to the wrong tenant.

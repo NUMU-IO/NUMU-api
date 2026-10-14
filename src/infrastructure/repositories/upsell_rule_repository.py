@@ -7,6 +7,9 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.infrastructure.database.models.tenant.upsell_rule import UpsellRuleModel
+from src.infrastructure.repositories.product_repository import (
+    assert_products_in_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,9 @@ class UpsellRuleRepository:
         self.session = session
 
     async def create(self, data: dict) -> UpsellRuleModel:
+        await assert_products_in_store(
+            self.session, data["store_id"], [data["offer_product_id"]]
+        )
         model = UpsellRuleModel(**data)
         self.session.add(model)
         await self.session.flush()
@@ -90,6 +96,9 @@ class UpsellRuleRepository:
         return matching
 
     async def update(self, rule: UpsellRuleModel) -> UpsellRuleModel:
+        await assert_products_in_store(
+            self.session, rule.store_id, [rule.offer_product_id]
+        )
         await self.session.flush()
         return rule
 

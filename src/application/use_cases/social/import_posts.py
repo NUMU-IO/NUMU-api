@@ -14,6 +14,7 @@ from src.core.interfaces.repositories.social_post_repository import (
     ISocialPostRepository,
 )
 from src.core.value_objects.money import Currency, Money
+from src.infrastructure.external_services.meta.url_scraper import get_public
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +66,8 @@ async def _download_and_upload_image(image_url: str, store_id: UUID) -> str | No
                 "+http://www.google.com/bot.html)"
             )
 
-        async with httpx.AsyncClient(
-            timeout=30, follow_redirects=True, headers=headers
-        ) as client:
-            resp = await client.get(image_url)
+        async with httpx.AsyncClient(timeout=30, headers=headers) as client:
+            resp = await get_public(client, image_url)
             resp.raise_for_status()
 
         content_type = resp.headers.get("content-type", "image/jpeg")

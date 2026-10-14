@@ -19,12 +19,28 @@ from src.application.use_cases.omnichannel import (
     CreateTemplateUseCase,
     ListTemplatesUseCase,
 )
+from src.core.entities.channel_connection import ChannelConnection
+from src.core.exceptions import EntityNotFoundError
 from src.infrastructure.repositories import (
     ChannelConnectionRepositoryImpl,
     WhatsAppTemplateRepositoryImpl,
 )
 
 router = APIRouter(tags=["Omnichannel"])
+
+
+async def get_store_connection(
+    store_id: UUID,
+    connection_id: UUID,
+    connection_repo: ChannelConnectionRepositoryImpl = Depends(
+        get_channel_connection_repository
+    ),
+) -> ChannelConnection:
+    """The connection, only when it belongs to the path's store (else 404)."""
+    connection = await connection_repo.get_by_id(connection_id)
+    if not connection or connection.store_id != store_id:
+        raise EntityNotFoundError("Connection")
+    return connection
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
@@ -44,6 +60,7 @@ async def create_template(
     POST /stores/{store_id}/channels/whatsapp/templates
     Body: { "name", "category", "language", "components": [...] }
     """
+    await get_store_connection(store_id, dto.connection_id, connection_repo)
     use_case = CreateTemplateUseCase(
         channel_connection_repository=connection_repo,
         whatsapp_template_repository=template_repo,
@@ -68,7 +85,11 @@ async def create_template(
     )
 
 
-@router.get("/", status_code=status.HTTP_200_OK)
+@router.get(
+    "/",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(get_store_connection)],
+)
 async def list_templates(
     connection_id: UUID,
     status_filter: str | None = Query(None, description="Filter by status"),

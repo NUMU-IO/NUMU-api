@@ -158,6 +158,13 @@ class InventoryService:
             )
 
         if target == TransferStatus.RECEIVED:
+            # The ids came from the request body unchecked, and level rows are
+            # keyed without store_id: a foreign id would move another store's
+            # stock.
+            for location_id in (current.from_location_id, current.to_location_id):
+                await self.assert_location_in_store(current.store_id, location_id)
+            for line in current.lines:
+                await self.assert_variant_in_store(current.store_id, line.variant_id)
             # Move stock — subtract from from_location, add to
             # to_location, for every line. All in this session's
             # transaction; the route commit at the end persists the

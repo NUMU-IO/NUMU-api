@@ -209,3 +209,63 @@ async def test_inventory_set_level_allows_own_variant_and_location():
     svc._session = _FakeSession(variant_store=store, location_store=store)
     # Must NOT raise — both belong to the store.
     await svc._assert_owned_by_store(store, uuid4(), uuid4())
+
+
+class _SeqSession:
+    """Answers each ownership select with the next store id in `owners`."""
+
+    def __init__(self, owners) -> None:
+        self._owners = iter(owners)
+
+    async def execute(self, query):  # noqa: ANN001, ARG002
+        value = next(self._owners)
+
+        class _R:
+            def scalar_one_or_none(self_inner):
+                return value
+
+        return _R()
+
+
+class _Levels:
+    def __init__(self) -> None:
+        self.touched = False
+
+    def __getattr__(self, name):
+        async def _touch(**kwargs):
+            self.touched = True
+
+        return _touch
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("foreign", ["from_location", "to_location", "variant"])
+async def test_transfer_receive_rejects_foreign_ids(foreign):
+    """A transfer's ids come from the request body; receiving one must not
+    move stock at another store's location or for another store's variant."""
+    from types import SimpleNamespace
+
+    from src.application.services.inventory_service import InventoryService
+    from src.core.entities.inventory_transfer import TransferStatus
+
+    store = uuid4()
+    owners = [store, store, store]  # from_location, to_location, variant
+    owners[["from_location", "to_location", "variant"].index(foreign)] = uuid4()
+    transfer = SimpleNamespace(
+        store_id=store,
+        from_location_id=uuid4(),
+        to_location_id=uuid4(),
+        lines=[SimpleNamespace(variant_id=uuid4(), quantity=1)],
+        can_transition_to=lambda target: True,
+    )
+
+    async def get_by_id(transfer_id):
+        return transfer
+
+    svc = InventoryService.__new__(InventoryService)
+    svc._session = _SeqSession(owners)
+    svc._transfers = SimpleNamespace(get_by_id=get_by_id)
+    svc._levels = _Levels()
+    with pytest.raises(EntityNotFoundError):
+        await svc.transition_transfer(uuid4(), TransferStatus.RECEIVED)
+    assert not svc._levels.touched

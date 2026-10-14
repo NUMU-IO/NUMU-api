@@ -52,6 +52,7 @@ from src.core.entities.theme import (
     ThemeType,
     ThemeVersion,
 )
+from src.core.exceptions.base import EntityAlreadyExistsError
 from src.core.url_guard import UnsafeUrlError, assert_public_http_url
 from src.infrastructure.cache.theme_build_store import get_theme_build_store
 from src.infrastructure.repositories import StoreRepository
@@ -360,6 +361,13 @@ async def connect_dev_server(
         )
 
     theme_id = manifest["id"]
+    try:
+        theme_entity = await theme_repo.get_by_slug_for_owner(theme_id, store.id)
+    except EntityAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Theme id '{theme_id}' is taken. Use a unique id in theme.json.",
+        ) from exc
 
     # Preserve any merchant_settings that were set against this same theme
     # before the reconnect, so a dev-server restart doesn't wipe customizations.
@@ -414,7 +422,6 @@ async def connect_dev_server(
         # 1. Theme row — upsert by slug. The slug must match manifest.id
         #    so subsequent reconnects (e.g. after a Vite restart) update
         #    the same row instead of inserting duplicates.
-        theme_entity = await theme_repo.get_by_slug(theme_id)
         if theme_entity is None:
             theme_entity = Theme(
                 id=uuid4(),
@@ -428,6 +435,7 @@ async def connect_dev_server(
                 settings_schema=settings_schema or {},
                 section_schemas=sections_manifest or {},
                 supported_features=manifest.get("supports"),
+                created_by=store.id,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
             )
