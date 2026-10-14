@@ -37,6 +37,7 @@ from src.api.v1.routes.admin.marketing import router as marketing_router
 from src.api.v1.routes.admin.merchant_hub_nav import (
     router as merchant_hub_nav_router,
 )
+from src.api.v1.routes.admin.merchant_ops import router as merchant_ops_router
 from src.api.v1.routes.admin.orders import router as orders_router
 from src.api.v1.routes.admin.partners import router as partners_router
 from src.api.v1.routes.admin.plan_limits import router as plan_limits_router
@@ -100,6 +101,9 @@ router.include_router(products_router, prefix="/products", tags=["Admin - Produc
 router.include_router(push_router, prefix="/push", tags=["Admin - Push"])
 router.include_router(email_templates_router, tags=["Admin - Email Templates"])
 router.include_router(stores_router, prefix="/stores", tags=["Admin - Stores"])
+router.include_router(
+    merchant_ops_router, prefix="/merchants", tags=["Admin - Merchants"]
+)
 router.include_router(
     plan_limits_router, prefix="/plan-limits", tags=["Admin - Plan Limits"]
 )

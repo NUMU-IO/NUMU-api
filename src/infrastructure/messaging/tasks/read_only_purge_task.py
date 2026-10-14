@@ -36,6 +36,11 @@ async def _async_purge(batch_size: int) -> dict:
         purgeable = await repo.find_purgeable_read_only(limit=batch_size)
 
         for tenant in purgeable:
+            # Staff paused billing (admin merchant_ops): never delete it.
+            # ponytail: skipped after the LIMIT, so over batch_size paused
+            # tenants would starve the rest; filter in the query then.
+            if (tenant.settings or {}).get("billing_paused"):
+                continue
             try:
                 tenant_id = tenant.id
                 subdomain = tenant.subdomain
