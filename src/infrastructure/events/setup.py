@@ -421,7 +421,7 @@ def create_event_bus() -> EventBus:
         # A stock change (variant edit, inventory adjustment, order) fires no
         # product event, so without this a sold-out size stays "in stock" on
         # the storefront until the 30-minute detail TTL.
-        bus.subscribe(InventoryLevelChangedEvent, _product_invalidator.on_updated)  # type: ignore[arg-type]
+        bus.subscribe(InventoryLevelChangedEvent, _product_invalidator.on_stock_changed)  # type: ignore[arg-type]
     except Exception as exc:  # noqa: BLE001 — startup tolerates missing Redis
         logger = __import__("logging").getLogger(__name__)
         logger.warning(
