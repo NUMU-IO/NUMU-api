@@ -131,7 +131,16 @@ class UpdateOrderStatusUseCase:
             elif new_status == OrderStatus.PAYMENT_FAILED:
                 order.mark_payment_failed(dto.reason)
             else:
-                # For other statuses, directly set
+                # For other statuses, directly set. A closed order already
+                # gave its stock back; reopening it here would not re-debit.
+                if order.status in (
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REFUNDED,
+                    OrderStatus.RETURNED,
+                ) and not order.can_transition_to(new_status):
+                    raise ValueError(
+                        f"Cannot move a {order.status.value} order to {new_status.value}"
+                    )
                 order.status = new_status
                 order.touch()
         except ValueError as e:

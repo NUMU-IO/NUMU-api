@@ -285,6 +285,9 @@ async def process_refund(
             pass  # Will fall through to manual processing
 
     result = await use_case.execute(refund_id, store_id, user_id, payment_service)
+    # The use case proved the refund is this store's; its order is the one to
+    # touch. The path's order_id is unchecked and may be another store's.
+    order_id = result.order_id
 
     # ── Per-refund "restock items" (merchant opt-in) ─────────────────
     # Replays the checkout debit manifest exactly once; stamps the

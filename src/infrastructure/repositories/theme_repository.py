@@ -9,7 +9,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.theme import Theme, ThemeStatus, ThemeType
+from src.core.exceptions.base import EntityAlreadyExistsError
 from src.core.interfaces.repositories.theme_repository import IThemeRepository
+from src.infrastructure.database.models.tenant.marketplace_theme import (
+    MarketplaceThemeModel,
+)
 from src.infrastructure.database.models.tenant.theme import ThemeModel
 
 
@@ -130,6 +134,28 @@ class ThemeRepository(IThemeRepository):
         )
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
+
+    async def get_by_slug_for_owner(self, slug: str, owner_id: UUID) -> Theme | None:
+        """The theme at ``slug`` if ``owner_id`` (a store, or a ZIP uploader)
+        owns it; ``None`` when the slug is free to create.
+
+        Slugs are global, so a writer that matched by slug alone would let a
+        theme.json ``id`` overwrite a platform/marketplace theme or another
+        store's. Raises ``EntityAlreadyExistsError`` for any slug held by
+        someone else.
+        """
+        listed = await self.session.execute(
+            select(MarketplaceThemeModel.id).where(MarketplaceThemeModel.slug == slug)
+        )
+        if listed.first() is None:
+            theme = await self.get_by_slug(slug)
+            if theme is None or theme.created_by == owner_id:
+                return theme
+            # Code-editor rows that predate ownership stamping: their slug
+            # ends in the store's id prefix (ThemeCodeService.scaffold).
+            if slug.endswith(f"-{owner_id.hex[:8]}"):
+                return theme
+        raise EntityAlreadyExistsError("Theme", "slug", slug)
 
     async def list_published(
         self,

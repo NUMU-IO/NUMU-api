@@ -106,29 +106,16 @@ async def whatsapp_callback(
     payload = await request.body()
     meta = await get_meta_platform_credentials(db)
 
-    # Verify signature
-    if meta.app_secret or settings.whatsapp_app_secret:
-        verifier = WhatsAppMessagingService(
-            app_secret=meta.app_secret or settings.whatsapp_app_secret
-        )
-        verified_data = verifier.verify_webhook_signature(
-            payload,
-            x_hub_signature_256 or "",
-        )
-        if not verified_data:
-            logger.warning("WhatsApp webhook signature verification failed")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid webhook signature",
-            )
-        data = verified_data
-    else:
-        # In development, accept without verification
-        import json
-
-        data = json.loads(payload)
-        logger.warning(
-            "WhatsApp webhook received without signature verification (dev mode)"
+    # Verify signature; with no app secret configured nothing verifies.
+    verifier = WhatsAppMessagingService(
+        app_secret=meta.app_secret or settings.whatsapp_app_secret
+    )
+    data = verifier.verify_webhook_signature(payload, x_hub_signature_256 or "")
+    if not data:
+        logger.warning("WhatsApp webhook signature verification failed")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature",
         )
 
     # Process the webhook event
@@ -445,13 +432,15 @@ async def _upsert_conversations_from_webhook(db: AsyncSession, value: dict) -> N
                         phone=canon_phone,
                     )
                     logger.info(
-                        "whatsapp_stop_keyword_opt_out",
-                        phone_tail=canon_phone[-4:],
-                        store_id=str(prior.store_id),
+                        "whatsapp_stop_keyword_opt_out store=%s phone=***%s",
+                        prior.store_id,
+                        canon_phone[-4:],
                     )
                 except Exception as e:
                     logger.warning(
-                        "stop_keyword_opt_out_failed for %s: %s", from_number, e
+                        "stop_keyword_opt_out_failed for ***%s: %s",
+                        str(from_number)[-4:],
+                        e,
                     )
 
         # Verification reply path (backend-015). Only text messages can
@@ -527,7 +516,7 @@ async def _send_optout_ack(
         )
     except Exception as exc:
         logger.warning(
-            "whatsapp_stop_ack_send_failed",
-            phone_tail=phone[-4:],
-            error=str(exc),
+            "whatsapp_stop_ack_send_failed phone=***%s error=%s",
+            phone[-4:],
+            exc,
         )

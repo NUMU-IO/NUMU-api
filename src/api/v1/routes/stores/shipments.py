@@ -53,6 +53,9 @@ from src.infrastructure.repositories import (
     OrderRepository,
     ShipmentRepository,
 )
+from src.infrastructure.repositories.payment_proof_repository import (
+    PaymentProofRepository,
+)
 
 router = APIRouter(prefix="/{store_id}/shipments")
 
@@ -203,8 +206,8 @@ async def _create_shipment_for_order(
         "cod",
         "cash_on_delivery",
     ):
-        cod_amount = (
-            order.collected_total if order.collected_total is not None else order.total
+        cod_amount = order.amount_due_cents(
+            await PaymentProofRepository(order_repo.session).amount_paid_cents(order.id)
         )
 
     rate_id = f"{carrier}_{shipping_method}"

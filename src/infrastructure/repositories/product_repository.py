@@ -8,11 +8,31 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.product import Product, ProductStatus
+from src.core.exceptions import EntityNotFoundError
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.value_objects.money import Currency, Money
 from src.infrastructure.database.connection import get_tenant_id
 from src.infrastructure.database.models import ProductModel
 from src.infrastructure.database.models.tenant.variant import VariantModel
+
+
+async def assert_products_in_store(
+    session: AsyncSession, store_id: UUID, product_ids
+) -> None:
+    """404 unless every id is a product of this store.
+
+    Rows that point at products (bundles, upsell offers) render the product's
+    name, price and stock to shoppers, so a foreign id would publish another
+    store's catalog, drafts included.
+    """
+    ids = set(product_ids)
+    found = await session.scalar(
+        select(func.count(ProductModel.id)).where(
+            ProductModel.id.in_(ids), ProductModel.store_id == store_id
+        )
+    )
+    if found != len(ids):
+        raise EntityNotFoundError("Product")
 
 
 class ProductRepository(IProductRepository):

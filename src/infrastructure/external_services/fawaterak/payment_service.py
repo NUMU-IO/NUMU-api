@@ -344,8 +344,11 @@ class FawaterakPaymentService(IPaymentService):
                     f"&PaymentMethod={data.get('paymentMethod', '')}"
                 )
             else:
-                # Refund or unknown - no hash verification
-                return data
+                # Refunds and unknown shapes carry no hash we can check, so
+                # they are refused: refund in the Fawaterak dashboard and
+                # reflect it on the order by hand.
+                logger.warning("Fawaterak webhook without a verifiable hash")
+                return None
 
             expected = hmac.new(
                 self.vendor_key.encode(),

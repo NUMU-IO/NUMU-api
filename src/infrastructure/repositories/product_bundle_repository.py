@@ -14,6 +14,9 @@ from sqlalchemy.orm import selectinload
 from src.infrastructure.database.models.tenant.product_bundle import (
     ProductBundleModel,
 )
+from src.infrastructure.repositories.product_repository import (
+    assert_products_in_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,11 @@ class ProductBundleRepository:
 
     async def create(self, data: dict) -> ProductBundleModel:
         """Create a single bundle association."""
+        await assert_products_in_store(
+            self.session,
+            data["store_id"],
+            (data["primary_product_id"], data["bundled_product_id"]),
+        )
         model = ProductBundleModel(**data)
         self.session.add(model)
         await self.session.flush()
@@ -42,6 +50,12 @@ class ProductBundleRepository:
         `bundle.bundled_product`, because the relationship would otherwise
         lazy-load *outside* the async session context.
         """
+        for item in items:
+            await assert_products_in_store(
+                self.session,
+                item["store_id"],
+                (item["primary_product_id"], item["bundled_product_id"]),
+            )
         models = [ProductBundleModel(**item) for item in items]
         self.session.add_all(models)
         await self.session.flush()

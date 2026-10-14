@@ -12,6 +12,9 @@ This is the same post-commit guarantee the promotion cache invalidator
 relies on.
 """
 
+from uuid import UUID
+
+from src.core.events.commerce_events import InventoryLevelChangedEvent
 from src.core.events.product_events import (
     ProductCreatedEvent,
     ProductDeletedEvent,
@@ -32,6 +35,8 @@ class ProductCacheInvalidator:
 
     def __init__(self, cache: ProductCacheService) -> None:
         self._cache = cache
+        self._flushing: set[UUID] = set()
+        self._dirty: set[UUID] = set()
 
     async def on_created(self, event: ProductCreatedEvent) -> None:
         # A newly-created product only changes listing pages (no detail
@@ -55,6 +60,28 @@ class ProductCacheInvalidator:
             store_id=str(event.store_id),
             product_id=str(event.product_id),
         )
+
+    async def on_stock_changed(self, event: InventoryLevelChangedEvent) -> None:
+        # One commit can change many variants (an order's lines, a stock
+        # import, a variant matrix), one event each. While a store's flush
+        # runs, later changes only ask for one more flush after it, so a burst
+        # costs one or two store-wide flushes, not two Redis scans per variant.
+        # The store-wide sweep also clears the detail entries
+        # (products:store:{id}:detail:*).
+        store = event.store_id
+        if store in self._flushing:
+            self._dirty.add(store)
+            return
+        self._flushing.add(store)
+        try:
+            while True:
+                self._dirty.discard(store)
+                await self._cache.invalidate_store_products(store)
+                if store not in self._dirty:
+                    break
+        finally:
+            self._flushing.discard(store)
+        logger.info("product_cache_invalidated", reason="stock", store_id=str(store))
 
     async def on_deleted(self, event: ProductDeletedEvent) -> None:
         await self._cache.invalidate_product(event.store_id, event.product_id)

@@ -23,12 +23,12 @@ in the bucket / table uniformly.
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import UTC, datetime, timedelta
 
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _task_loop: asyncio.AbstractEventLoop | None = None
 
@@ -135,7 +135,9 @@ async def _sweep(
                         "instapay_expiry_order_missing",
                         intent_id=str(intent.id),
                     )
-                elif await proof_repo.has_recorded_payments(intent.order_id):
+                elif order.is_paid or await proof_repo.has_recorded_payments(
+                    intent.order_id
+                ):
                     # The merchant already collected money against this order
                     # out of band and recorded it from the order page. The
                     # intent is expired above either way — the customer can no

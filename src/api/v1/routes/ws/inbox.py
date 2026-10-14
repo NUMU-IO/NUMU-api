@@ -6,6 +6,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
+from src.core.entities.user import UserRole
+from src.infrastructure.database.models.public.user import UserModel
+
 router = APIRouter(tags=["WebSocket"])
 
 
@@ -73,7 +76,7 @@ def _verify_token(token: str) -> dict[str, Any] | None:
 
     try:
         service = TokenService()
-        payload = service.verify_token(token)
+        payload = service.verify_access_token(token)
         return {
             "user_id": str(payload.user_id),
             "email": payload.email,
@@ -85,7 +88,8 @@ def _verify_token(token: str) -> dict[str, Any] | None:
 
 
 async def _user_may_access_store(payload: dict[str, Any], store_id: str) -> bool:
-    """Owner of the store, or a member of its tenant, or a super admin."""
+    """Owner of the store, or a member of its tenant, or a super admin whose
+    staff scope covers support (read from the DB, like ``require_admin``)."""
     from sqlalchemy import select
 
     from src.infrastructure.database.connection import AsyncSessionLocal
@@ -97,7 +101,19 @@ async def _user_may_access_store(payload: dict[str, Any], store_id: str) -> bool
         return False
     role = str(payload.get("role") or "").lower()
     if role in {"super_admin", "superadmin"}:
-        return True
+        async with AsyncSessionLocal() as session:
+            admin = (
+                await session.execute(
+                    select(UserModel.role, UserModel.admin_scope).where(
+                        UserModel.id == UUID(payload["user_id"])
+                    )
+                )
+            ).first()
+        return (
+            admin is not None
+            and admin.role == UserRole.SUPER_ADMIN
+            and admin.admin_scope in (None, "all", "support")
+        )
     async with AsyncSessionLocal() as session:
         row = (
             await session.execute(

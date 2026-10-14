@@ -20,6 +20,7 @@ from src.application.use_cases.omnichannel import (
     MarkThreadReadUseCase,
     ResolveThreadUseCase,
 )
+from src.core.entities.message_thread import MessageThread
 from src.core.exceptions import EntityNotFoundError
 from src.core.logging import get_logger
 from src.infrastructure.repositories import MessageThreadRepositoryImpl
@@ -28,6 +29,18 @@ from src.infrastructure.repositories.customer_repository import CustomerReposito
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["Omnichannel"])
+
+
+async def get_store_thread(
+    store_id: UUID,
+    thread_id: UUID,
+    thread_repo: MessageThreadRepositoryImpl = Depends(get_message_thread_repository),
+) -> MessageThread:
+    """The path's thread, only when it belongs to the path's store (else 404)."""
+    thread = await thread_repo.get_by_id(thread_id)
+    if not thread or thread.store_id != store_id:
+        raise EntityNotFoundError("Thread")
+    return thread
 
 
 @router.get("/", response_model=SuccessResponse, status_code=status.HTTP_200_OK)
@@ -68,7 +81,10 @@ async def list_threads(
 
 
 @router.get(
-    "/{thread_id}", response_model=SuccessResponse, status_code=status.HTTP_200_OK
+    "/{thread_id}",
+    response_model=SuccessResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(get_store_thread)],
 )
 async def get_thread(
     thread_id: UUID,
@@ -87,7 +103,10 @@ async def get_thread(
 
 
 @router.post(
-    "/{thread_id}/read", response_model=SuccessResponse, status_code=status.HTTP_200_OK
+    "/{thread_id}/read",
+    response_model=SuccessResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(get_store_thread)],
 )
 async def mark_read(
     thread_id: UUID,
@@ -108,6 +127,7 @@ async def mark_read(
     "/{thread_id}/resolve",
     response_model=SuccessResponse,
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(get_store_thread)],
 )
 async def resolve_thread(
     thread_id: UUID,

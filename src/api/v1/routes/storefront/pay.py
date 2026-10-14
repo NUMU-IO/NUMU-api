@@ -49,6 +49,9 @@ from src.core.entities.order import OrderStatus, PaymentStatus
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
 from src.infrastructure.repositories.order_repository import OrderRepository
+from src.infrastructure.repositories.payment_proof_repository import (
+    PaymentProofRepository,
+)
 from src.infrastructure.repositories.store_repository import StoreRepository
 
 # Replay guard for payment initiation, mirroring the checkout route. The
@@ -161,11 +164,13 @@ def _enabled_manual_methods(store_settings: dict | None) -> list[str]:
     return out
 
 
-def _amount_due(order) -> int:
-    """The deposit while the order waits for one; otherwise the total."""
+async def _amount_due(order, order_repo) -> int:
+    """The deposit while the order waits for one; otherwise what is still owed."""
     if order.status == OrderStatus.PENDING_DEPOSIT and order.deposit_required_cents:
         return int(order.deposit_required_cents)
-    return order.total
+    return order.amount_due_cents(
+        await PaymentProofRepository(order_repo.session).amount_paid_cents(order.id)
+    )
 
 
 def _payable_state(order) -> tuple[bool, str | None]:
@@ -247,7 +252,7 @@ async def get_pay_order_view(
             else str(order.payment_status),
             currency=order.currency,
             total=order.total,
-            amount_due=_amount_due(order),
+            amount_due=await _amount_due(order, order_repo),
             subtotal=order.subtotal,
             shipping_cost=order.shipping_cost,
             discount_amount=order.discount_amount,
@@ -332,7 +337,7 @@ async def initiate_pay_order(
         )
 
     method = (request.payment_method or "").lower()
-    amount_due = _amount_due(order)
+    amount_due = await _amount_due(order, order_repo)
     currency = order.currency
     ship = order.shipping_address
     customer_email = (
@@ -420,7 +425,7 @@ async def _initiate_manual(order, store, method_value: str, order_repo) -> dict:
     for _ in range(5):
         candidate = generate_reference_code(manual_method.reference_prefix)
         qr_payload, expires_at = manual_service.build_intent_payload(
-            amount_cents=_amount_due(order),
+            amount_cents=await _amount_due(order, order_repo),
             reference_code=candidate,
             note=f"Order {order.order_number}",
         )
@@ -432,7 +437,7 @@ async def _initiate_manual(order, store, method_value: str, order_repo) -> dict:
             method=manual_method,
             display_destination=credentials["destination"],
             display_phone=credentials.get("fallback_phone"),
-            amount_cents=_amount_due(order),
+            amount_cents=await _amount_due(order, order_repo),
             expires_at=expires_at,
             qr_payload=qr_payload,
         )
@@ -511,6 +516,10 @@ async def _initiate_paymob(
                 },
             },
         )
+        order.metadata = {
+            **(order.metadata or {}),
+            "paymob_order_id": intent.gateway_order_id,
+        }
         await _stamp_recovery_initiated(order, order_repo, intent.id)
     except Exception as e:  # noqa: BLE001 — graceful gateway-down behaviour
         logger.error(f"Recovery Paymob initiation failed: {e}")

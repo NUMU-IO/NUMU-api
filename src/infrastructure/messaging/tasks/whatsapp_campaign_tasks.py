@@ -58,10 +58,10 @@ def execute_campaign_task(self, campaign_id: str, store_id: str) -> dict:
     except NonRetriableWhatsAppError as exc:
         # Non-retriable — straight to DLQ, no retries.
         logger.warning(
-            "campaign_non_retriable_error",
-            campaign_id=campaign_id,
-            classification=exc.classification,
-            code=exc.code,
+            "campaign_non_retriable_error campaign=%s classification=%s code=%s",
+            campaign_id,
+            exc.classification,
+            exc.code,
         )
         try:
             _run_async(_mark_failed(campaign_id))
@@ -78,10 +78,10 @@ def execute_campaign_task(self, campaign_id: str, store_id: str) -> dict:
         # again or move to the exhausted path.
         if self.request.retries >= self.max_retries:
             logger.error(
-                "campaign_retries_exhausted",
-                campaign_id=campaign_id,
-                retries=self.request.retries,
-                error=str(exc),
+                "campaign_retries_exhausted campaign=%s retries=%s error=%s",
+                campaign_id,
+                self.request.retries,
+                exc,
             )
             try:
                 _run_async(_mark_failed(campaign_id))
@@ -101,9 +101,9 @@ def execute_campaign_task(self, campaign_id: str, store_id: str) -> dict:
     except Exception as exc:
         # Unknown error class — treat as retriable but log loudly.
         logger.error(
-            "campaign_unknown_error",
-            campaign_id=campaign_id,
-            error=str(exc),
+            "campaign_unknown_error campaign=%s error=%s",
+            campaign_id,
+            exc,
             exc_info=True,
         )
         try:

@@ -10,7 +10,6 @@ to template-based text.
 
 import asyncio
 import json
-import logging
 import math
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -18,11 +17,12 @@ from datetime import UTC, datetime
 from openai import AsyncOpenAI
 
 from src.config import settings
+from src.core.logging import get_logger
 from src.infrastructure.database.models.tenant.analytics_rollup import (
     AnalyticsDailyRollupModel,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ── Signal types ──

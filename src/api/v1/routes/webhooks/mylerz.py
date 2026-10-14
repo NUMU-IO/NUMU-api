@@ -15,12 +15,12 @@ import json
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1.routes.webhooks.shipping import verify_carrier_webhook
 from src.application.services.carrier_registry import get_spec
 from src.application.services.funnel_emit_service import emit_order_delivered
-from src.config import settings
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.core.logging import get_logger
@@ -121,13 +121,12 @@ async def _update_shipment_status(shipment, shipment_repo, state: str, log, **kw
 async def mylerz_callback(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_admin_db_session)],
-    x_mylerz_signature: str = Header(None, alias="x-mylerz-signature"),
 ):
     """Handle Mylerz delivery status webhook.
 
     Mylerz sends POST requests when delivery status changes.
     Uses per-store webhook secret for verification (each merchant has their own
-    Mylerz account). Falls back to global secret, then dev mode (no verification).
+    Mylerz account), falling back to the global secret; unverified calls get 401.
     """
     payload = await request.body()
     log = logger.bind(webhook="mylerz")
@@ -163,63 +162,19 @@ async def mylerz_callback(
     elif order:
         tenant_id = order.tenant_id
 
-    # Verify signature using per-store secret, then global fallback
-    signature_verified = False
-    if tenant_id and x_mylerz_signature:
-        try:
-            from src.infrastructure.repositories.store_repository import (
-                StoreRepository,
-            )
-
-            store_repo = StoreRepository(session)
-            store = await store_repo.get_by_id(tenant_id)
-            if store and store.settings:
-                mylerz_config = store.settings.get("shipping", {}).get("mylerz", {})
-                encrypted_creds = mylerz_config.get("encrypted_credentials")
-                key_id = mylerz_config.get("encryption_key_id")
-                if encrypted_creds and key_id:
-                    import base64
-
-                    from src.infrastructure.external_services.secrets.secrets_manager import (
-                        get_secrets_manager,
-                    )
-
-                    secrets = get_secrets_manager()
-                    cred_data = await secrets.decrypt(
-                        base64.b64decode(encrypted_creds), key_id
-                    )
-                    store_webhook_secret = cred_data.get("webhook_secret")
-                    if store_webhook_secret:
-                        store_mylerz = MylerzShippingService(
-                            webhook_secret=store_webhook_secret
-                        )
-                        verified = store_mylerz.verify_webhook_signature(
-                            payload, x_mylerz_signature
-                        )
-                        if verified:
-                            signature_verified = True
-                            log.info("webhook_verified_per_store")
-                        else:
-                            log.warning("webhook_per_store_signature_invalid")
-        except Exception as e:
-            log.warning("webhook_per_store_verify_error", error=str(e))
-
-    if not signature_verified and x_mylerz_signature:
-        if settings.mylerz_webhook_secret:
-            verified_data = mylerz_service.verify_webhook_signature(
-                payload, x_mylerz_signature
-            )
-            if verified_data:
-                signature_verified = True
-                log.info("webhook_verified_global")
-            else:
-                log.warning("webhook_global_signature_invalid")
-
-    if not signature_verified:
-        if x_mylerz_signature:
-            log.warning("webhook_signature_unverified_accepting", mode="permissive")
-        else:
-            log.warning("webhook_no_signature", mode="development")
+    if not await verify_carrier_webhook(
+        spec=get_spec("mylerz"),
+        session=session,
+        tenant_id=tenant_id,
+        request=request,
+        raw_body=payload,
+        log=log,
+    ):
+        log.warning("webhook_signature_invalid_rejected")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not verify webhook signature",
+        )
 
     if tenant_id:
         await narrow_to_tenant(session, tenant_id)

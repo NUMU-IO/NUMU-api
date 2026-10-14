@@ -15,7 +15,8 @@ from src.core.entities.user import UserRole
 from src.core.exceptions import InvalidTokenError, TokenExpiredError
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
-from src.infrastructure.database.connection import set_tenant_id
+from src.infrastructure.database.connection import AsyncSessionLocal, set_tenant_id
+from src.infrastructure.database.models.public.user import UserModel
 from src.infrastructure.external_services.token_service import token_service
 
 _revocation_service = TokenRevocationService(RedisCacheService())
@@ -115,7 +116,7 @@ async def _get_admin_user_role(request: Request) -> tuple[UUID, str]:
         )
 
     try:
-        payload = token_service.verify_token(token)
+        payload = token_service.verify_access_token(token)
     except (TokenExpiredError, InvalidTokenError) as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
@@ -128,11 +129,85 @@ async def _get_admin_user_role(request: Request) -> tuple[UUID, str]:
     return payload.user_id, payload.role
 
 
+#: Staff roles. What each limited scope may open, as paths under /api/v1/.
+#: NULL or 'all' is a full super admin; any other scope, and every path not
+#: listed, is denied. A rule may be pinned to one method ("GET admin/audit")
+#: and "*" stands for one path segment. /admin/auth is open to every admin.
+# ponytail: path-section allow-list; move to per-endpoint permissions if scopes multiply.
+ADMIN_SCOPES: dict[str, tuple[str, ...]] = {
+    "support": (
+        # Not DELETE: hard-deleting an order is for full admins only.
+        "GET admin/orders",
+        "POST admin/orders",
+        "PATCH admin/orders",
+        "admin/customers",
+        "admin/support-cases",
+        "admin/risk",
+        "GET admin/dashboard",
+        "GET admin/audit",
+    ),
+    "finance": (
+        "admin/wallets",
+        "admin/subscription-payments",
+        "admin/reconciliation",
+        "admin/merchants/*/invoices",
+        "admin/merchants/*/extend-trial",
+        "admin/merchants/*/pause-billing",
+        # Read-only merchant pages, to find the tenant a payment belongs to.
+        "GET admin/stores",
+        "GET admin/merchants/attention",
+        "GET admin/merchants/*/insights",
+        "GET admin/dashboard",
+        "GET admin/audit",
+    ),
+    "ops": (
+        "admin/stores",
+        "admin/tenants",
+        # Not the billing actions under admin/merchants: those are finance's.
+        "GET admin/merchants/attention",
+        "GET admin/merchants/*/insights",
+        "admin/api-tokens",
+        "admin/whatsapp",
+        "admin/entitlements",
+        "admin/apps",
+        "admin/partners",
+        "admin/themes",
+        "marketplace/admin",
+        "GET admin/dashboard",
+        "GET admin/audit",
+    ),
+}
+
+
+def admin_scope_allows(scope: str | None, method: str, path: str) -> bool:
+    """Whether an admin with ``scope`` may call ``method path``."""
+    if scope in (None, "all"):
+        return True
+    segments = path.split("/api/v1/", 1)[-1].strip("/").split("/")
+    if segments[:2] == ["admin", "auth"]:
+        return True
+    for rule in ADMIN_SCOPES.get(scope, ()):
+        verb, _, prefix = rule.rpartition(" ")
+        want = prefix.split("/")
+        if (
+            verb in ("", method)
+            and len(segments) >= len(want)
+            and all(w in ("*", s) for w, s in zip(want, segments, strict=False))
+        ):
+            return True
+    return False
+
+
 async def require_admin(
+    request: Request,
     user_data: Annotated[tuple[UUID, str], Depends(_get_admin_user_role)],
 ) -> UUID:
     """Require the caller to be a platform admin, reading the admin cookie
-    first so impersonation can't evict the admin session from this tab."""
+    first so impersonation can't evict the admin session from this tab.
+
+    Every admin route depends on this, so it is also where the staff role is
+    enforced. Role and scope are read from the database, not the token, so a
+    revoked admin or a narrowed scope applies on the next request."""
     user_id, role = user_data
     try:
         user_role = UserRole(role)
@@ -148,6 +223,25 @@ async def require_admin(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions",
         )
+    async with AsyncSessionLocal() as session:
+        row = (
+            await session.execute(
+                select(UserModel.role, UserModel.admin_scope).where(
+                    UserModel.id == user_id
+                )
+            )
+        ).first()
+    if row is None or row.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions",
+        )
+    if not admin_scope_allows(row.admin_scope, request.method, request.url.path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your admin role doesn't cover this section.",
+        )
+    request.state.admin_scope = row.admin_scope
     return user_id
 
 
@@ -295,7 +389,7 @@ async def _resolve_principal(request: Request) -> TokenPayload:
         return await _resolve_app_principal(token, request)
 
     try:
-        payload = token_service.verify_token(token)
+        payload = token_service.verify_access_token(token)
     except TokenExpiredError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -426,12 +520,11 @@ async def _resolve_pat_principal(token: str, request: Request) -> TokenPayload:
         tenant_id = UUID(meta["tenant_id"])
         policy = await api_limits.policy_for_tenant(session, tenant_id)
         if not policy.allowed:
+            from src.application.services.api_access import refusal_message
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "API access is not enabled for this store. It is included "
-                    "in the Pro plan, or NUMU can enable it for your account."
-                ),
+                detail=await refusal_message(session, tenant_id),
             )
 
         decision = await api_limits.check_and_count(
@@ -609,22 +702,61 @@ async def _resolve_app_principal(token: str, request: Request) -> TokenPayload:
         )
 
 
-def _token_is_for_another_store(
-    request: Request, payload: CustomerTokenPayload
+async def resolve_store_id_from_host(
+    request: Request,
+    store_repo: StoreRepository,
+) -> UUID | None:
+    """Look up the store from the `x-numu-host` header set by the
+    storefront's proxy. Returns None if the header is missing or the
+    store can't be resolved — the caller decides whether to 400."""
+    host = request.headers.get("x-numu-host") or ""
+    host = host.split(":")[0].lower().strip()
+    if not host:
+        return None
+    # Subdomain pattern: `<sub>.numueg.app` / `<sub>.localhost`.
+    sub: str | None = None
+    if host.endswith(".numueg.app"):
+        sub = host.removesuffix(".numueg.app")
+    elif host.endswith(".localhost"):
+        sub = host.removesuffix(".localhost")
+    if sub:
+        store = await store_repo.get_by_subdomain(sub)
+        if store:
+            return store.id
+    # Custom-domain fallback.
+    try:
+        store = await store_repo.get_by_custom_domain(host)
+        if store:
+            return store.id
+    except Exception:
+        pass
+    return None
+
+
+async def _token_is_for_another_store(
+    request: Request, payload: CustomerTokenPayload, store_repo: StoreRepository
 ) -> bool:
-    """True when a store-scoped route gets a customer token minted for another store.
+    """True when a request for one store carries a customer token minted for another.
 
     A customer token belongs to one store (its `store_id` claim), and store
     ids are public. Without this check a shopper signed in on store A could act
     as a customer on store B's `/storefront/store/{store_id}/…` routes, e.g.
     post a review on B's product. Routes without a `store_id` in the path
-    (`/storefront/me/…`) are keyed by the token's own store and are unaffected.
+    (`/storefront/me/…`, cart) are checked against the storefront host the
+    proxy forwards: the customer cookie is shared across `*.numueg.app`, so
+    store A's theme script could otherwise read a store-B customer's account.
     """
     path_store = request.path_params.get("store_id")
-    return path_store is not None and str(path_store).lower() != str(payload.store_id)
+    if path_store is not None:
+        return str(path_store).lower() != str(payload.store_id)
+    host_store = await resolve_store_id_from_host(request, store_repo)
+    return host_store is not None and host_store != payload.store_id
 
 
-async def get_current_customer_payload(request: Request) -> CustomerTokenPayload:
+async def get_current_customer_payload(
+    request: Request,
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
+) -> CustomerTokenPayload:
     """Get current customer payload from customer_access_token httpOnly cookie."""
     token = request.cookies.get("customer_access_token")
 
@@ -642,7 +774,7 @@ async def get_current_customer_payload(request: Request) -> CustomerTokenPayload
             detail=str(e),
         )
     # Signed in elsewhere is not signed in here.
-    if _token_is_for_another_store(request, payload):
+    if await _token_is_for_another_store(request, payload, store_repo):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -668,6 +800,7 @@ async def get_current_customer(
 async def get_optional_customer(
     request: Request,
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
+    store_repo: Annotated[StoreRepository, Depends(get_store_repository)],
 ) -> Customer | None:
     """Get current customer if authenticated, else None (for guest checkout)."""
     token = request.cookies.get("customer_access_token")
@@ -678,7 +811,7 @@ async def get_optional_customer(
     except (TokenExpiredError, InvalidTokenError):
         return None
     # A shopper signed in on another store is a guest here.
-    if _token_is_for_another_store(request, payload):
+    if await _token_is_for_another_store(request, payload, store_repo):
         return None
     return await customer_repo.get_by_id(payload.customer_id)
 

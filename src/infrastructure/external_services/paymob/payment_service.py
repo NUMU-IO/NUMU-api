@@ -214,6 +214,13 @@ class PaymobPaymentService(IPaymentService):
             currency=currency.upper(),
             status="pending",
             provider=PaymentProvider.PAYMOB,
+            # The Paymob order id: the one transaction callbacks sign.
+            gateway_order_id=str(
+                data.get("intention_order_id")
+                or ((data.get("payment_keys") or [{}])[0]).get("order_id")
+                or ""
+            )
+            or None,
         )
 
     async def confirm_payment(self, payment_intent_id: str) -> PaymentResult:

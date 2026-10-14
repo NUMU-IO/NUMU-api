@@ -48,7 +48,7 @@ async def _maybe_user_id(request: Request) -> str | None:
     if not token:
         return None
     try:
-        payload = token_service.verify_token(token)
+        payload = token_service.verify_access_token(token)
     except (TokenExpiredError, InvalidTokenError):
         return None
     return str(payload.user_id)

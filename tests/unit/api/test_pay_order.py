@@ -28,6 +28,7 @@ def _order(
         payment_status=payment_status,
         currency="EGP",
         total=25000,
+        amount_due_cents=lambda proofs_paid_cents=0: 25000 - proofs_paid_cents,
         payment_id=None,
         metadata={},
         customer_email="sara@example.com",
@@ -44,6 +45,14 @@ def _order(
             email=None,
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_recorded_proofs(monkeypatch):
+    from src.api.v1.routes.storefront import pay
+
+    repo = SimpleNamespace(amount_paid_cents=AsyncMock(return_value=0))
+    monkeypatch.setattr(pay, "PaymentProofRepository", lambda _session: repo)
 
 
 def _store(store_id, settings):
@@ -149,7 +158,9 @@ async def test_post_paymob_initiates_and_stamps_recovery(monkeypatch):
             pass
 
         async def create_payment_intent(self, **_kw):
-            return SimpleNamespace(id="intent_123", client_secret="cs_abc")
+            return SimpleNamespace(
+                id="intent_123", client_secret="cs_abc", gateway_order_id="987"
+            )
 
     monkeypatch.setattr(
         "src.infrastructure.external_services.paymob.payment_service.get_merchant_paymob_credentials",
@@ -174,6 +185,7 @@ async def test_post_paymob_initiates_and_stamps_recovery(monkeypatch):
     # The recovery marker + payment ref were persisted for the callback.
     assert order.metadata["cod_recovery_initiated"] is True
     assert order.payment_id == "intent_123"
+    assert order.metadata["paymob_order_id"] == "987"
     order_repo.update.assert_awaited()
 
 

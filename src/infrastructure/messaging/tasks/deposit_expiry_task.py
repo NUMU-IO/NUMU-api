@@ -21,11 +21,11 @@ per-tenant context even though the scan itself runs under bypass.
 from __future__ import annotations
 
 import asyncio
-import logging
 
+from src.core.logging import get_logger
 from src.infrastructure.messaging.celery_app import celery_app
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _task_loop: asyncio.AbstractEventLoop | None = None
 
@@ -57,10 +57,10 @@ def expire_pending_deposit_orders_task(self):
 
 
 # Unpaid card-gateway checkouts (AWAITING_PAYMENT) are cancelled and restocked
-# after this long. ponytail: a payment that lands after the sweep reopens the
-# order through mark_as_paid without the new-order notifications; the admin
-# reconciliation page shows it. Raise the TTL or release on late payment if
-# gateways start settling slower than this.
+# after this long. ponytail: a payment that lands after the sweep is recorded
+# on the cancelled order and flagged in metadata["payment_after_cancel"] for
+# the merchant to refund or reopen. Raise the TTL if gateways start settling
+# slower than this.
 AWAITING_PAYMENT_TTL_MINUTES = 120
 
 
@@ -69,10 +69,17 @@ async def _sweep() -> dict:
 
     from sqlalchemy import and_, or_, select
 
+    from src.core.entities.instapay import ManualPaymentIntentStatus
     from src.core.entities.order import OrderStatus
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.tenant.order import OrderModel
+    from src.infrastructure.repositories.instapay_intent_repository import (
+        ManualPaymentIntentRepository,
+    )
     from src.infrastructure.repositories.order_repository import OrderRepository
+    from src.infrastructure.repositories.payment_proof_repository import (
+        PaymentProofRepository,
+    )
     from src.infrastructure.tenancy.rls import enable_rls_bypass, narrow_to_tenant
 
     stats = {"scanned": 0, "cancelled": 0, "errors": 0}
@@ -109,6 +116,7 @@ async def _sweep() -> dict:
         stats["scanned"] = len(expired_models)
 
         order_repo = OrderRepository(session)
+        intent_repo = ManualPaymentIntentRepository(session)
 
         for model in expired_models:
             try:
@@ -129,7 +137,28 @@ async def _sweep() -> dict:
                     # gateway webhook arriving just before we got to
                     # it) already moved the order. Nothing to do.
                     continue
-                if not order.can_be_cancelled:
+                if not order.can_be_cancelled or order.is_paid:
+                    continue
+                intent = await intent_repo.get_by_order_id(order.id)
+                if (
+                    intent is not None
+                    and intent.status == ManualPaymentIntentStatus.PROOF_RECEIVED
+                ):
+                    # The customer uploaded a transfer proof that is waiting
+                    # for review; cancelling would drop real money.
+                    continue
+                if order.status == OrderStatus.PENDING_DEPOSIT and (
+                    await PaymentProofRepository(session).has_recorded_payments(
+                        order.id
+                    )
+                ):
+                    # Money is on the order (ORD-251727): the deposit was
+                    # recorded by hand but never confirmed. Leave it for the
+                    # merchant rather than cancel and restock a paid order.
+                    logger.warning(
+                        "pending_deposit_expiry_skipped_recorded_payment",
+                        extra={"order_id": str(order.id)},
+                    )
                     continue
                 order.cancel(
                     reason="COD deposit payment window expired"

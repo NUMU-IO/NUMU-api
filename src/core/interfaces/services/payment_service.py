@@ -58,6 +58,8 @@ class PaymentIntent:
     currency: str
     status: str
     provider: PaymentProvider
+    # The gateway's own order id, when its callbacks sign that rather than ours.
+    gateway_order_id: str | None = None
 
 
 @dataclass

@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.api.dependencies import (
@@ -28,7 +29,10 @@ from src.api.dependencies import (
     get_product_review_repository,
     get_store_repository,
 )
-from src.api.dependencies.auth import get_optional_customer
+from src.api.dependencies.auth import (
+    get_current_customer_payload,
+    get_optional_customer,
+)
 from src.infrastructure.external_services.token_service import token_service
 from src.main import app
 
@@ -68,6 +72,13 @@ class _Stores:
     async def get_by_id(self, store_id):
         if store_id in (STORE_A, STORE_B):
             return SimpleNamespace(id=store_id, tenant_id=uuid4(), settings={})
+        return None
+
+    async def get_by_subdomain(self, sub):
+        store_id = {"a": STORE_A, "b": STORE_B}.get(sub)
+        return SimpleNamespace(id=store_id) if store_id else None
+
+    async def get_by_custom_domain(self, host):
         return None
 
 
@@ -152,6 +163,18 @@ def test_zero_s_04_own_store_coupon_preview_gets_past_auth(client):
     assert response.status_code == 404, response.text[:200]
 
 
+def _request(path_store=None, host=None):
+    return SimpleNamespace(
+        cookies={
+            "customer_access_token": token_service.create_customer_access_token(
+                CUSTOMER_A
+            )
+        },
+        path_params={} if path_store is None else {"store_id": str(path_store)},
+        headers={} if host is None else {"x-numu-host": host},
+    )
+
+
 @pytest.mark.parametrize(
     ("path_store", "expected"),
     [(STORE_A, CUSTOMER_A), (STORE_B, None), (None, CUSTOMER_A)],
@@ -159,13 +182,34 @@ def test_zero_s_04_own_store_coupon_preview_gets_past_auth(client):
 async def test_optional_customer_is_a_guest_on_another_store(path_store, expected):
     # Checkout, payment proofs and promotions read the shopper this way: a
     # token from another store is a guest there, never that store's customer.
-    request = SimpleNamespace(
-        cookies={
-            "customer_access_token": token_service.create_customer_access_token(
-                CUSTOMER_A
-            )
-        },
-        path_params={} if path_store is None else {"store_id": str(path_store)},
-    )
+    request = _request(path_store)
 
-    assert await get_optional_customer(request, _Customers()) is expected
+    assert await get_optional_customer(request, _Customers(), _Stores()) is expected
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("a.numueg.app", CUSTOMER_A),
+        ("b.numueg.app", None),
+        ("x.numueg.app", CUSTOMER_A),
+    ],
+)
+async def test_optional_customer_is_a_guest_on_another_stores_host(host, expected):
+    # The cart has no store in its path; the storefront host names the store.
+    request = _request(host=host)
+
+    assert await get_optional_customer(request, _Customers(), _Stores()) is expected
+
+
+async def test_me_routes_refuse_a_token_from_another_stores_host():
+    # The customer cookie is shared across *.numueg.app, so store B's theme
+    # script can call /storefront/me/* with a store-A shopper's cookie.
+    with pytest.raises(HTTPException) as exc:
+        await get_current_customer_payload(_request(host="b.numueg.app"), _Stores())
+    assert exc.value.status_code == 401
+
+    payload = await get_current_customer_payload(
+        _request(host="a.numueg.app"), _Stores()
+    )
+    assert payload.customer_id == CUSTOMER_A.id

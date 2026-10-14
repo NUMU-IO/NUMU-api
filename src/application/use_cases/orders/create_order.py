@@ -87,7 +87,7 @@ class CreateOrderUseCase:
 
         # Verify customer exists
         customer = await self.customer_repository.get_by_id(dto.customer_id)
-        if not customer:
+        if not customer or customer.store_id != store_id:
             log.warning("order_create_failed", reason="customer_not_found")
             raise EntityNotFoundError("Customer", str(dto.customer_id))
 

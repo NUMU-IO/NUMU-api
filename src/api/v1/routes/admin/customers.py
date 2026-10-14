@@ -8,7 +8,8 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+import phonenumbers
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,11 +19,22 @@ from src.api.dependencies.auth import require_admin
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.schemas.public.common import PaginatedListResponse
+from src.application.services.merchant_visibility import visible
+from src.application.services.network_reputation_service import (
+    extract_phone_hash_from_string,
+)
+from src.core.entities.order import OrderStatus, PaymentStatus
+from src.core.value_objects.phone import PhoneNumber
 from src.infrastructure.database.models.public.tenant import (
     TenantLifecycleState,
     TenantModel,
 )
 from src.infrastructure.database.models.tenant.customer import CustomerModel
+from src.infrastructure.database.models.tenant.network_reputation import (
+    NetworkReputationModel,
+)
+from src.infrastructure.database.models.tenant.order import OrderModel
+from src.infrastructure.database.models.tenant.store import StoreModel
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +65,55 @@ class AdminCustomerListItem(BaseModel):
     extra_data: dict | None = None
     created_at: str
     updated_at: str
+
+
+class LookupCustomer(BaseModel):
+    id: str
+    name: str
+    email: str
+    store_id: str
+    store_name: str
+
+
+class LookupOrder(BaseModel):
+    id: str
+    order_number: str
+    store_name: str
+    status: str
+    payment_status: str
+    payment_method: str | None = None
+    total: int
+    currency: str
+    created_at: str
+
+
+class LookupStats(BaseModel):
+    orders: int
+    stores: int
+    delivered: int
+    returned: int
+    cancelled: int
+    #: Summed across currencies; stores almost never mix them per buyer.
+    paid_total_cents: int
+    return_rate: float | None
+
+
+class LookupNetwork(BaseModel):
+    total_network_orders: int
+    total_network_rtos: int
+    total_successful_deliveries: int
+    total_refunds: int
+    contributing_store_count: int
+    network_risk_score: int | None
+    confidence_level: str
+
+
+class PhoneLookupResponse(BaseModel):
+    phone: str
+    customers: list[LookupCustomer]
+    orders: list[LookupOrder]
+    stats: LookupStats
+    network: LookupNetwork | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -163,4 +224,123 @@ async def list_customers(
             total_pages=(total + limit - 1) // limit if limit > 0 else 0,
         ),
         message="Customers retrieved successfully",
+    )
+
+
+@router.get(
+    "/lookup",
+    response_model=SuccessResponse[PhoneLookupResponse],
+    summary="Look up one phone across every store (admin)",
+    operation_id="admin_lookup_customer_phone",
+)
+async def lookup_phone(
+    _admin_id: Annotated[UUID, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    phone: Annotated[str, Query(min_length=3, max_length=40)],
+):
+    """Every customer row and order behind one phone, across real merchants,
+    plus what the trust network knows about it."""
+    raw = phone.strip()
+    try:
+        e164 = PhoneNumber.parse(raw, "EG").e164
+        national = "0" + phonenumbers.national_significant_number(
+            phonenumbers.parse(e164)
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Not a valid phone number",
+        )
+
+    customers = (
+        await db.execute(
+            select(CustomerModel, StoreModel.name)
+            .join(StoreModel, StoreModel.id == CustomerModel.store_id)
+            .where(
+                # Older rows hold the phone as typed: 2010… or 010….
+                CustomerModel.phone.in_({e164, raw, e164[1:], national}),
+                visible(CustomerModel.tenant_id),
+            )
+        )
+    ).all()
+    theirs = OrderModel.customer_id.in_([c.id for c, _ in customers])
+
+    orders = (
+        await db.execute(
+            select(OrderModel, StoreModel.name)
+            .join(StoreModel, StoreModel.id == OrderModel.store_id)
+            .where(theirs)
+            .order_by(OrderModel.created_at.desc())
+            .limit(100)
+        )
+    ).all()
+    total, delivered, returned, cancelled, paid = (
+        await db.execute(
+            select(
+                func.count(OrderModel.id),
+                func.count().filter(OrderModel.status == OrderStatus.DELIVERED),
+                func.count().filter(OrderModel.status == OrderStatus.RETURNED),
+                func.count().filter(OrderModel.status == OrderStatus.CANCELLED),
+                func.coalesce(
+                    func.sum(OrderModel.total).filter(
+                        OrderModel.payment_status == PaymentStatus.PAID
+                    ),
+                    0,
+                ),
+            ).where(theirs)
+        )
+    ).one()
+
+    network = None
+    phone_hash = extract_phone_hash_from_string(e164)
+    if phone_hash:
+        rep = await db.scalar(
+            select(NetworkReputationModel).where(
+                NetworkReputationModel.phone_hash == phone_hash
+            )
+        )
+        if rep is not None:
+            network = LookupNetwork.model_validate(rep, from_attributes=True)
+
+    return SuccessResponse(
+        data=PhoneLookupResponse(
+            phone=e164,
+            customers=[
+                LookupCustomer(
+                    id=str(c.id),
+                    name=f"{c.first_name} {c.last_name}".strip(),
+                    email=c.email,
+                    store_id=str(c.store_id),
+                    store_name=store_name,
+                )
+                for c, store_name in customers
+            ],
+            orders=[
+                LookupOrder(
+                    id=str(o.id),
+                    order_number=o.order_number,
+                    store_name=store_name,
+                    status=o.status.value,
+                    payment_status=o.payment_status.value,
+                    payment_method=o.payment_method,
+                    total=o.total,
+                    currency=o.currency,
+                    created_at=_ts(o.created_at) or "",
+                )
+                for o, store_name in orders
+            ],
+            stats=LookupStats(
+                orders=total,
+                stores=len({c.store_id for c, _ in customers}),
+                delivered=delivered,
+                returned=returned,
+                cancelled=cancelled,
+                paid_total_cents=int(paid),
+                return_rate=returned / (delivered + returned)
+                if delivered + returned
+                else None,
+            ),
+            network=network,
+        ),
+        message="Phone looked up",
     )

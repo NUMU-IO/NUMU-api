@@ -122,6 +122,12 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                 ]),
                 TenantModel.next_renewal_at.is_not(None),
                 TenantModel.next_renewal_at <= now,
+                # Staff pause (admin merchant_ops): no charge, no dunning.
+                # Text, not a boolean cast: a stray non-boolean value must not
+                # abort the whole sweep. Paused only when the value is true.
+                TenantModel.settings["billing_paused"]
+                .as_string()
+                .is_distinct_from("true"),
             )
             .limit(batch_size)
         )

@@ -14,7 +14,9 @@ uploads use, and a hard cap on how many photos one request may carry.
 
 from __future__ import annotations
 
+from html import escape
 from typing import Annotated
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Path, Request, UploadFile, status
@@ -76,6 +78,16 @@ async def _over_rate_limit(store_id: UUID, ip: str) -> bool:
         return False
 
 
+def _http_url(url: str | None) -> str | None:
+    """The shopper-supplied page url, kept only when it is http(s).
+
+    The hub renders it as a link; a `javascript:` url would run in the
+    merchant's session when clicked.
+    """
+    url = (url or "").strip()[:1024]
+    return url if urlparse(url).scheme.lower() in ("http", "https") else None
+
+
 def _merchant_email_html(
     *,
     store_name: str,
@@ -86,6 +98,11 @@ def _merchant_email_html(
     images: list[str],
     source_url: str | None,
 ) -> str:
+    # Every field but the image urls comes from an anonymous shopper.
+    store_name, name, email, details = map(escape, (store_name, name, email, details))
+    phone = escape(phone) if phone else None
+    source_url = escape(source_url) if source_url else None
+    images = [escape(url) for url in images]
     photos = "".join(
         f'<a href="{url}" style="margin-inline-end:8px">'
         f'<img src="{url}" alt="" width="96" height="96" '
@@ -174,7 +191,7 @@ async def create_product_request(
         details=details.strip(),
         images=urls,
         locale=(locale or "").strip()[:8] or None,
-        source_url=(source_url or "").strip()[:1024] or None,
+        source_url=_http_url(source_url),
         status="new",
     )
     db.add(row)

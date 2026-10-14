@@ -1,6 +1,7 @@
 """Admin authentication backend for SQLAdmin."""
 
 import logging
+from uuid import UUID
 
 from sqladmin.authentication import AuthenticationBackend
 from sqlalchemy import select, text
@@ -58,8 +59,12 @@ class AdminAuth(AuthenticationBackend):
                     logger.warning(f"Invalid password for: {email}")
                     return False
 
-                # Check if user is a super admin
-                if user.role != UserRole.SUPER_ADMIN:
+                # Full super admins only: SQLAdmin is raw table access, so a
+                # staff scope (support/finance/ops) would mean nothing here.
+                if user.role != UserRole.SUPER_ADMIN or user.admin_scope not in (
+                    None,
+                    "all",
+                ):
                     logger.warning(
                         f"User {email} is not a SUPER_ADMIN, role: {user.role}"
                     )
@@ -82,10 +87,29 @@ class AdminAuth(AuthenticationBackend):
         return True
 
     async def authenticate(self, request: Request) -> RedirectResponse | bool:
-        """Check if the request is authenticated."""
+        """Check if the request is authenticated.
+
+        Role and scope are re-read on every request, as ``require_admin``
+        does, so demoting an admin or narrowing their scope ends access here
+        too instead of lasting as long as the session cookie.
+        """
         admin_user_id = request.session.get("admin_user_id")
 
-        if not admin_user_id:
-            return RedirectResponse(request.url_for("admin:login"), status_code=302)
+        if admin_user_id:
+            async with AsyncSessionLocal() as session:
+                row = (
+                    await session.execute(
+                        select(UserModel.role, UserModel.admin_scope).where(
+                            UserModel.id == UUID(admin_user_id)
+                        )
+                    )
+                ).first()
+            if (
+                row is not None
+                and row.role == UserRole.SUPER_ADMIN
+                and row.admin_scope in (None, "all")
+            ):
+                return True
+            request.session.clear()
 
-        return True
+        return RedirectResponse(request.url_for("admin:login"), status_code=302)

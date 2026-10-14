@@ -59,6 +59,7 @@ class TokenService(ITokenService):
         tenant_id: UUID | None = None,
         membership_id: UUID | None = None,
         perm_version: int = 0,
+        impersonated_by: UUID | None = None,
     ) -> str:
         """Create a JWT token.
 
@@ -86,6 +87,8 @@ class TokenService(ITokenService):
             payload["membership_id"] = str(membership_id)
         if perm_version > 0:
             payload["perm_version"] = perm_version
+        if impersonated_by is not None:
+            payload["impersonated_by"] = str(impersonated_by)
         return jwt.encode(payload, self._get_signing_key(), algorithm=self.algorithm)
 
     def create_access_token(
@@ -95,6 +98,7 @@ class TokenService(ITokenService):
         membership_id: UUID | None = None,
         perm_version: int = 0,
         expires_minutes: int | None = None,
+        impersonated_by: UUID | None = None,
     ) -> str:
         """Create an access token for a user.
 
@@ -115,6 +119,7 @@ class TokenService(ITokenService):
             tenant_id=tenant_id,
             membership_id=membership_id,
             perm_version=perm_version,
+            impersonated_by=impersonated_by,
         )
 
     def create_refresh_token(
@@ -177,18 +182,31 @@ class TokenService(ITokenService):
                 email=payload["email"],
                 role=payload["role"],
                 exp=payload["exp"],
-                token_type=payload.get("token_type", "access"),
+                token_type=payload.get("token_type", ""),
                 iat=int(iat),
                 jti=payload.get("jti"),
                 tenant_id=UUID(tenant_id_raw) if tenant_id_raw else None,
                 membership_id=UUID(membership_id_raw) if membership_id_raw else None,
                 perm_version=perm_version,
                 family_id=payload.get("family_id"),
+                impersonated_by=payload.get("impersonated_by"),
             )
         except ExpiredSignatureError:
             raise TokenExpiredError()
         except PyJWTError:
             raise InvalidTokenError()
+
+    def verify_access_token(self, token: str) -> TokenPayload:
+        """``verify_token``, refusing anything but an access token.
+
+        Refresh (30-day), password-reset and email-verification tokens are
+        signed with the same key, so a bare ``verify_token`` let them stand
+        in for a session.
+        """
+        payload = self.verify_token(token)
+        if payload.token_type != "access":
+            raise InvalidTokenError()
+        return payload
 
     def decode_token(self, token: str) -> TokenPayload | None:
         """Decode a token without raising exceptions."""

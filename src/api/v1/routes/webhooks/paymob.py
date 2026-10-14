@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1.routes.webhooks._replay import ReplayKeys, replay_keys
 from src.config import settings
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -103,6 +104,7 @@ async def paymob_callback(
     request: Request,
     db: AsyncSession = Depends(get_admin_db_session),
     hmac: str = Header(None, alias="hmac"),
+    replay: ReplayKeys = Depends(replay_keys),
 ):
     """Handle Paymob payment callback (POST).
 
@@ -138,16 +140,6 @@ async def paymob_callback(
     )
     log.info("webhook_received")
 
-    # ── Replay protection ────────────────────────────────────────────
-    if transaction_id and _cache_service:
-        nonce_key = f"paymob:processed:{transaction_id}"
-        was_set = await _cache_service.set_if_absent(
-            nonce_key, "1", expire=NONCE_TTL_SECONDS
-        )
-        if not was_set:
-            log.warning("webhook_duplicate_rejected")
-            return {"status": "duplicate", "transaction_id": transaction_id}
-
     order_repo = OrderRepository(db)
     store_repo = StoreRepository(db)
 
@@ -165,27 +157,45 @@ async def paymob_callback(
     log = log.bind(order_id=str(order.id), order_number=order.order_number)
 
     # ── Per-merchant HMAC verification ────────────────────────────────
+    # An unsigned or mis-signed callback is refused: it is the only thing
+    # standing between a forged "success=true" body and a free order.
     store = await store_repo.get_by_id(order.store_id)
+    verified_data = None
     if store:
         try:
             creds = await get_merchant_paymob_credentials(store.settings)
             service = PaymobPaymentService(hmac_secret=creds["hmac_secret"])
             verified_data = service.verify_webhook_signature(payload, hmac or "")
-            if not verified_data:
-                # Log warning but don't block — HMAC mismatch may be due to
-                # key misconfiguration. TODO: enforce once merchants confirm keys.
-                log.warning("webhook_signature_invalid_proceeding")
         except HTTPException:
             raise
         except Exception as e:
             log.warning("webhook_hmac_resolution_failed", error=str(e))
-            if not settings.debug:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Could not verify webhook signature",
-                )
     else:
         log.warning("webhook_store_not_found", store_id=str(order.store_id))
+    if not verified_data:
+        log.warning("webhook_signature_invalid_rejected")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not verify webhook signature",
+        )
+    # merchant_order_id sits outside the HMAC and obj.order.id inside it, so
+    # only the latter may pick the order: a genuine callback for one order
+    # re-aimed at another otherwise settles it.
+    if str((order.metadata or {}).get("paymob_order_id")) != str(order_id):
+        log.warning("webhook_paymob_order_mismatch_rejected")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not verify webhook signature",
+        )
+
+    # Replay protection, after verification: marked before it, a junk POST
+    # carrying a real transaction id blocked the genuine callback for a day.
+    if transaction_id and _cache_service:
+        nonce_key = f"paymob:processed:{transaction_id}"
+        was_set = await replay.take(_cache_service, nonce_key, NONCE_TTL_SECONDS)
+        if not was_set:
+            log.warning("webhook_duplicate_rejected")
+            return {"status": "duplicate", "transaction_id": transaction_id}
 
     # Narrow RLS from bypass → tenant-scoped for all subsequent writes
     await narrow_to_tenant(db, order.tenant_id)

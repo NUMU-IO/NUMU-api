@@ -47,7 +47,11 @@ class SyncCatalogUseCase:
             dict with job_id and initial status
         """
         connection = await self.channel_connection_repository.get_by_id(connection_id)
-        if not connection or not connection.catalog_id:
+        if (
+            not connection
+            or connection.store_id != store_id
+            or not connection.catalog_id
+        ):
             raise ValueError("Connection or catalog not found")
 
         from src.infrastructure.external_services.secrets.secrets_manager import (

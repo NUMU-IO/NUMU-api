@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.v1.routes.webhooks._replay import ReplayKeys, replay_keys
 from src.config import settings
 from src.core.logging import get_logger
 from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -93,6 +94,7 @@ def _extract_fields(raw: dict) -> dict:
 async def moyasar_callback(
     request: Request,
     db: AsyncSession = Depends(get_admin_db_session),
+    replay: ReplayKeys = Depends(replay_keys),
 ):
     """Handle a Moyasar payment webhook."""
     payload = await request.body()
@@ -120,9 +122,7 @@ async def moyasar_callback(
     # ── Replay protection ────────────────────────────────────────────
     if payment_id and _cache_service:
         nonce_key = f"moyasar:processed:{payment_id}:{fields['type']}"
-        was_set = await _cache_service.set_if_absent(
-            nonce_key, "1", expire=NONCE_TTL_SECONDS
-        )
+        was_set = await replay.take(_cache_service, nonce_key, NONCE_TTL_SECONDS)
         if not was_set:
             log.warning("webhook_duplicate_rejected")
             return {"status": "duplicate", "payment_id": payment_id}
@@ -337,6 +337,7 @@ async def moyasar_redirect(
         if store and (status or "").lower() == "paid" and not order.is_paid:
             try:
                 from src.infrastructure.external_services.moyasar.payment_service import (  # noqa: E501
+                    _PAID_STATUSES,
                     MoyasarPaymentService,
                     get_merchant_moyasar_credentials,
                 )
@@ -344,8 +345,17 @@ async def moyasar_redirect(
                 creds = await get_merchant_moyasar_credentials(store.settings or {})
                 svc = MoyasarPaymentService(secret_key=creds.get("secret_key"))
                 ref = invoice_id or payment_id
-                result = await svc.confirm_payment(ref) if ref else None
-                if result and result.success:
+                invoice = await svc._get_invoice(ref) if ref else None
+                # Paid is not enough: the browser picks both ids, so a cheap
+                # invoice of the shopper's own could settle an expensive
+                # order. Checkout stamps our order id on the invoice.
+                if (
+                    invoice is not None
+                    and (invoice.get("status") or "").lower() in _PAID_STATUSES
+                    and str((invoice.get("metadata") or {}).get("order_id"))
+                    == str(order.id)
+                    and int(invoice.get("amount") or 0) >= int(order.total or 0)
+                ):
                     await narrow_to_tenant(db, order.tenant_id)
                     old_status = getattr(order.status, "value", str(order.status))
                     order.mark_as_paid(
@@ -399,7 +409,7 @@ async def moyasar_redirect(
                 else:
                     log.info(
                         "redirect_backup_not_confirmed",
-                        reason=getattr(result, "error_message", "no_ref"),
+                        reason=(invoice or {}).get("status") or "no_ref",
                     )
             except Exception as exc:  # noqa: BLE001 — backup is best-effort
                 log.warning("redirect_backup_failed", error=str(exc))

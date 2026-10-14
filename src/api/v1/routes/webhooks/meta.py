@@ -93,21 +93,18 @@ async def receive_webhook(
     raw_body = await request.body()
     meta = await get_meta_platform_credentials(db)
 
-    if meta.app_secret:
-        if not x_hub_signature_256 or not verify_x_hub_signature(
-            raw_body, x_hub_signature_256, app_secret=meta.app_secret
-        ):
-            logger.warning(
-                "meta_webhook_signature_rejected",
-                event_id=event_id,
-                signature_present=bool(x_hub_signature_256),
-            )
-            return PlainTextResponse(
-                content="Invalid signature", status_code=status.HTTP_403_FORBIDDEN
-            )
-    else:
-        # Dev only — prod must configure META_APP_SECRET.
-        logger.warning("meta_webhook_unverified_no_app_secret", event_id=event_id)
+    # No configured secret verifies nothing, so it is refused too.
+    if not x_hub_signature_256 or not verify_x_hub_signature(
+        raw_body, x_hub_signature_256, app_secret=meta.app_secret
+    ):
+        logger.warning(
+            "meta_webhook_signature_rejected",
+            event_id=event_id,
+            signature_present=bool(x_hub_signature_256),
+        )
+        return PlainTextResponse(
+            content="Invalid signature", status_code=status.HTTP_403_FORBIDDEN
+        )
 
     try:
         payload = json.loads(raw_body)
