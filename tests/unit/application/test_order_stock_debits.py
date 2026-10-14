@@ -84,7 +84,9 @@ def _create_order(session, s, *, quantity):
     store_repo.get_by_id.return_value = SimpleNamespace(
         owner_id=owner_id, tenant_id=s.tenant_id
     )
-    use_case = CreateOrderUseCase(order_repo, store_repo, AsyncMock())
+    customer_repo = AsyncMock()
+    customer_repo.get_by_id.return_value = SimpleNamespace(store_id=s.store_id)
+    use_case = CreateOrderUseCase(order_repo, store_repo, customer_repo)
     dto = CreateOrderDTO(
         customer_id=uuid4(),
         line_items=[
