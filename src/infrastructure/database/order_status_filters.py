@@ -52,6 +52,12 @@ NON_REVENUE_STATUSES_LC: tuple[str, ...] = (
     "awaiting_payment",
 )
 
+# Statuses the Meta and TikTok Purchase sweeps never report: a cancelled order
+# (often a fake COD order the merchant killed), a refunded or returned one, and
+# a draft. Unlike booked revenue, RETURNED is out here: a delivery the shopper
+# refused is not a sale for an ad platform to learn from.
+NOT_A_SALE_STATUSES_LC: tuple[str, ...] = ("cancelled", "refunded", "returned", "draft")
+
 
 def status_lc(col):
     """``lower(status::text)`` — case-proof ``orderstatus`` comparison."""

@@ -776,6 +776,10 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
     from src.infrastructure.database.models.tenant.tiktok_event_log import (
         TikTokEventLogModel,
     )
+    from src.infrastructure.database.order_status_filters import (
+        NOT_A_SALE_STATUSES_LC,
+        status_lc,
+    )
     from src.infrastructure.tenancy.rls import enable_rls_bypass
 
     cutoff = datetime.now(UTC) - timedelta(hours=lookback_hours)
@@ -789,6 +793,9 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             .join(StoreModel, StoreModel.id == OrderModel.store_id)
             .where(OrderModel.paid_at.isnot(None))
             .where(OrderModel.paid_at >= cutoff)
+            # Paid is not sold: a refunded order, or a cancelled one whose late
+            # payment `mark_as_paid` records without reviving it, is no Purchase.
+            .where(status_lc(OrderModel.status).notin_(NOT_A_SALE_STATUSES_LC))
             .where(
                 StoreModel.settings["tracking"]["tiktok"]["api_enabled"].as_string()
                 == "true"
@@ -1194,6 +1201,10 @@ async def _find_purchase_gaps() -> list[dict[str, Any]]:
     from src.infrastructure.database.models.tenant.tiktok_event_log import (
         TikTokEventLogModel,
     )
+    from src.infrastructure.database.order_status_filters import (
+        NOT_A_SALE_STATUSES_LC,
+        status_lc,
+    )
     from src.infrastructure.tenancy.rls import enable_rls_bypass
 
     now = datetime.now(UTC)
@@ -1207,6 +1218,8 @@ async def _find_purchase_gaps() -> list[dict[str, Any]]:
                     select(OrderModel.store_id, func.count())
                     .where(OrderModel.created_at >= window_start)
                     .where(OrderModel.created_at < window_end)
+                    # Only orders a Purchase is owed for, as in the sweeps.
+                    .where(status_lc(OrderModel.status).notin_(NOT_A_SALE_STATUSES_LC))
                     .group_by(OrderModel.store_id)
                 )
             ).all()
