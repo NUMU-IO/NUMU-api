@@ -149,7 +149,9 @@ async def test_post_paymob_initiates_and_stamps_recovery(monkeypatch):
             pass
 
         async def create_payment_intent(self, **_kw):
-            return SimpleNamespace(id="intent_123", client_secret="cs_abc")
+            return SimpleNamespace(
+                id="intent_123", client_secret="cs_abc", gateway_order_id="987"
+            )
 
     monkeypatch.setattr(
         "src.infrastructure.external_services.paymob.payment_service.get_merchant_paymob_credentials",
@@ -174,6 +176,7 @@ async def test_post_paymob_initiates_and_stamps_recovery(monkeypatch):
     # The recovery marker + payment ref were persisted for the callback.
     assert order.metadata["cod_recovery_initiated"] is True
     assert order.payment_id == "intent_123"
+    assert order.metadata["paymob_order_id"] == "987"
     order_repo.update.assert_awaited()
 
 

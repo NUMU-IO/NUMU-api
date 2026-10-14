@@ -221,7 +221,7 @@ class MylerzShippingService(IShippingService):
     ) -> dict | None:
         """Verify Mylerz webhook signature."""
         if not self.webhook_secret:
-            return json.loads(payload)
+            return None
         expected = hmac.new(
             self.webhook_secret.encode(),
             payload,

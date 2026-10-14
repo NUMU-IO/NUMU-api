@@ -14,13 +14,14 @@ from src.infrastructure.database.models.public.tenant_membership import (
     TenantMembershipModel,
 )
 from src.infrastructure.messaging.celery_app import celery_app
+from src.infrastructure.messaging.tasks.webhook_tasks import _run_async
 from src.infrastructure.tenancy.rls import enable_rls_bypass
 
 logger = logging.getLogger(__name__)
 
 
 @celery_app.task(name="tasks.expire_temporary_grants")
-async def expire_temporary_grants(grant_id: str | None = None) -> dict:
+def expire_temporary_grants(grant_id: str | None = None) -> dict:
     """Expire temporary access grants that have passed their valid_until time.
 
     Two callers: the every-15-min beat sweep (``grant_id=None`` → every grant
@@ -29,6 +30,10 @@ async def expire_temporary_grants(grant_id: str | None = None) -> dict:
     grant, and still only if it is actually past ``valid_until`` — a grant
     extended after scheduling is left for a later sweep). Idempotent either way.
     """
+    return _run_async(_expire_temporary_grants(grant_id))
+
+
+async def _expire_temporary_grants(grant_id: str | None = None) -> dict:
     async with AsyncSessionLocal() as db:
         await enable_rls_bypass(db)  # cross-tenant platform sweep
         conditions = [
@@ -63,8 +68,12 @@ async def expire_temporary_grants(grant_id: str | None = None) -> dict:
 
 
 @celery_app.task(name="tasks.expire_access_requests")
-async def expire_access_requests() -> dict:
+def expire_access_requests() -> dict:
     """Expire pending access requests that have passed their expiry time."""
+    return _run_async(_expire_access_requests())
+
+
+async def _expire_access_requests() -> dict:
     async with AsyncSessionLocal() as db:
         await enable_rls_bypass(db)  # cross-tenant platform sweep
         from src.infrastructure.database.models.public.access_request import (
@@ -90,8 +99,12 @@ async def expire_access_requests() -> dict:
 
 
 @celery_app.task(name="tasks.cleanup_staff_sessions")
-async def cleanup_staff_sessions() -> dict:
+def cleanup_staff_sessions() -> dict:
     """Clean up old revoked staff sessions."""
+    return _run_async(_cleanup_staff_sessions())
+
+
+async def _cleanup_staff_sessions() -> dict:
     async with AsyncSessionLocal() as db:
         await enable_rls_bypass(db)  # cross-tenant platform sweep
         from src.infrastructure.database.models.public.staff_session import (

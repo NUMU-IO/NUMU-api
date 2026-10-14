@@ -295,8 +295,14 @@ _WEBHOOK_SECRET = CredentialField(
     label_en="Webhook secret",
     label_ar="مفتاح الويب هوك",
     required=False,
-    help_en="Used to verify status callbacks. Leave blank if unused.",
-    help_ar="بيتأكد إن تحديثات الشحن جاية من الشركة فعلاً. سيبه فاضي لو مش مستخدمه.",
+    help_en=(
+        "Required for status callbacks: unverified ones are refused. If the "
+        "carrier cannot sign, add ?token=<this secret> to the webhook URL."
+    ),
+    help_ar=(
+        "مطلوب عشان تحديثات الشحن تتقبل، وأي تحديث مش متأكد منه بيترفض. لو "
+        "الشركة مش بتوقّع التحديثات، ضيف ?token=<المفتاح ده> لرابط الويب هوك."
+    ),
 )
 
 

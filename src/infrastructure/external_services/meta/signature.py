@@ -65,17 +65,17 @@ def verify_x_hub_signature(
     Args:
         payload: Raw request body (bytes or str)
         signature: The X-Hub-Signature-256 header value
-        app_secret: Explicit secret override (skips the settings pair)
+        app_secret: The Facebook app secret (defaults to settings); the
+            Instagram app secret is tried as well either way
 
     Returns:
         True if signature is valid, False otherwise
     """
-    if app_secret:
-        secrets = [app_secret]
-    else:
-        secrets = [
-            s for s in (settings.meta_app_secret, settings.meta_ig_app_secret) if s
-        ]
+    secrets = [
+        s
+        for s in (app_secret or settings.meta_app_secret, settings.meta_ig_app_secret)
+        if s
+    ]
     if not secrets:
         logger.warning("meta_signature_verify_no_secret")
         return False

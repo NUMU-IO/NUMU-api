@@ -2607,7 +2607,7 @@ async def customer_forgot_password(
     customer_repo: Annotated[CustomerRepository, Depends(get_customer_repository)],
 ):
     """Send a 6-digit password reset code to the customer's email."""
-    import random
+    import secrets
 
     from src.core.value_objects.email import Email as EmailVO
     from src.infrastructure.cache.redis_cache import RedisCacheService
@@ -2625,13 +2625,11 @@ async def customer_forgot_password(
 
     customer = await customer_repo.get_by_email(store_id, email_vo)
     if customer and customer.has_account:
-        code = f"{random.randint(0, 999999):06d}"
+        code = f"{secrets.randbelow(1_000_000):06d}"
         cache = RedisCacheService()
-        await cache.set(
-            f"customer_password_reset:{store_id}:{request.email}",
-            code,
-            expire=900,  # 15 minutes
-        )
+        cache_key = f"customer_password_reset:{store_id}:{request.email}"
+        await cache.set(cache_key, code, expire=900)  # 15 minutes
+        await cache.set(f"{cache_key}:attempts", 0, expire=900)
         try:
             from src.core.interfaces.services.email_service import EmailMessage
             from src.infrastructure.external_services.resend.email_templates.transactional import (
@@ -2676,6 +2674,11 @@ async def customer_reset_password(
     cache = RedisCacheService()
     cache_key = f"customer_password_reset:{store_id}:{request.email}"
     stored_code = await cache.get(cache_key)
+    # Five guesses per code, then it is gone: a 6-digit code falls to
+    # guessing within its 15 minutes otherwise.
+    if stored_code and await cache.increment(f"{cache_key}:attempts") > 5:
+        await cache.delete(cache_key)
+        stored_code = None
 
     if not stored_code or stored_code != request.code:
         raise HTTPException(

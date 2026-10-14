@@ -115,7 +115,7 @@ async def _get_admin_user_role(request: Request) -> tuple[UUID, str]:
         )
 
     try:
-        payload = token_service.verify_token(token)
+        payload = token_service.verify_access_token(token)
     except (TokenExpiredError, InvalidTokenError) as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
@@ -295,7 +295,7 @@ async def _resolve_principal(request: Request) -> TokenPayload:
         return await _resolve_app_principal(token, request)
 
     try:
-        payload = token_service.verify_token(token)
+        payload = token_service.verify_access_token(token)
     except TokenExpiredError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

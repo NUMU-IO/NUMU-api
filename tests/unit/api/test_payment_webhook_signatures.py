@@ -125,3 +125,52 @@ def test_fawaterak_verifier_accepts_only_a_real_signature():
     # A refund shape carries no hash and used to pass through unsigned.
     refund = {"transactionId": 1, "status": "approved", "reason": "x"}
     assert svc.verify_webhook_signature(json.dumps(refund).encode(), "") is None
+
+
+class _Reached(Exception):
+    pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "signed", "settles"),
+    [("9", 9, True), ("8", 9, False), (None, 9, False)],
+)
+async def test_paymob_settles_only_the_order_its_signed_order_id_names(
+    monkeypatch, stored, signed, settles
+):
+    # A genuine callback for one order, re-aimed at another through the
+    # unsigned merchant_order_id, used to settle the other order.
+    order = _order()
+    order.metadata = {"paymob_order_id": stored}
+    _wire(monkeypatch, paymob, order)
+
+    async def _creds(_settings):
+        return {"hmac_secret": "real-secret"}
+
+    class _Signed:
+        def __init__(self, **_kwargs):
+            pass
+
+        def verify_webhook_signature(self, payload, _sig):
+            return json.loads(payload)
+
+    async def _narrow(*_args):
+        raise _Reached
+
+    monkeypatch.setattr(paymob, "get_merchant_paymob_credentials", _creds)
+    monkeypatch.setattr(paymob, "PaymobPaymentService", _Signed)
+    monkeypatch.setattr(paymob, "narrow_to_tenant", _narrow)
+    body = {
+        "type": "TRANSACTION",
+        "obj": {
+            "id": 1,
+            "success": True,
+            "order": {"id": signed, "merchant_order_id": str(order.id)},
+        },
+    }
+
+    with pytest.raises((_Reached, HTTPException)) as exc:
+        await paymob.paymob_callback(_Request(body), db=object(), hmac="valid")
+
+    assert (exc.type is _Reached) is settles

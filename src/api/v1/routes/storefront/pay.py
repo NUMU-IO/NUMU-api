@@ -511,6 +511,10 @@ async def _initiate_paymob(
                 },
             },
         )
+        order.metadata = {
+            **(order.metadata or {}),
+            "paymob_order_id": intent.gateway_order_id,
+        }
         await _stamp_recovery_initiated(order, order_repo, intent.id)
     except Exception as e:  # noqa: BLE001 — graceful gateway-down behaviour
         logger.error(f"Recovery Paymob initiation failed: {e}")

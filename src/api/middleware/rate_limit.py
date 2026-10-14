@@ -73,10 +73,13 @@ REFRESH_ENDPOINTS = {
 
 # Store-scoped customer auth routes (/api/v1/storefront/store/{store_id}/auth/…)
 # have a dynamic store id, so an exact-string set can never match them.
-# Mirrors the merchant surface above: login/register.
+# Mirrors the merchant surface above: login/register, plus the reset-code
+# pair, whose 6-digit code is guessable at the generic tier's rate.
 CUSTOMER_AUTH_SUFFIXES = (
     "/auth/login",
     "/auth/register",
+    "/auth/forgot-password",
+    "/auth/reset-password",
 )
 
 # Customer refresh, same reasoning as REFRESH_ENDPOINTS.

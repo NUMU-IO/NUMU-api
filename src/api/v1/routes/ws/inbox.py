@@ -73,7 +73,7 @@ def _verify_token(token: str) -> dict[str, Any] | None:
 
     try:
         service = TokenService()
-        payload = service.verify_token(token)
+        payload = service.verify_access_token(token)
         return {
             "user_id": str(payload.user_id),
             "email": payload.email,

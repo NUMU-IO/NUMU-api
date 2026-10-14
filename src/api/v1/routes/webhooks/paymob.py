@@ -176,6 +176,15 @@ async def paymob_callback(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not verify webhook signature",
         )
+    # merchant_order_id sits outside the HMAC and obj.order.id inside it, so
+    # only the latter may pick the order: a genuine callback for one order
+    # re-aimed at another otherwise settles it.
+    if str((order.metadata or {}).get("paymob_order_id")) != str(order_id):
+        log.warning("webhook_paymob_order_mismatch_rejected")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not verify webhook signature",
+        )
 
     # Replay protection, after verification: marked before it, a junk POST
     # carrying a real transaction id blocked the genuine callback for a day.

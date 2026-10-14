@@ -815,7 +815,9 @@ class ImpersonateResponse(BaseModel):
     # land on `.numueg.app` and clobber both the admin session and any
     # parallel impersonation tab in the same browser.
     access_token: str
-    refresh_token: str
+    # Always None: an owner refresh token would outlive the impersonation by
+    # a month. Kept so older admin builds reading the field don't break.
+    refresh_token: str | None = None
 
 
 @router.post(
@@ -873,8 +875,8 @@ async def impersonate_store(
         owner,
         tenant_id=store.tenant_id,
         expires_minutes=settings.impersonation_token_expire_minutes,
+        impersonated_by=admin_id,
     )
-    refresh = token_service.create_refresh_token(owner, tenant_id=store.tenant_id)
 
     hub_base = settings.merchant_hub_url.rstrip("/")
     # The token is in the URL *fragment*, not the query string: fragments
@@ -888,7 +890,6 @@ async def impersonate_store(
             owner_id=str(owner.id),
             owner_email=str(owner.email),
             access_token=access,
-            refresh_token=refresh,
         ),
         message="Impersonation session established",
     )

@@ -2491,6 +2491,10 @@ async def checkout(
             )
 
             created_order.payment_id = intent.id
+            created_order.metadata = {
+                **(created_order.metadata or {}),
+                "paymob_order_id": intent.gateway_order_id,
+            }
             await order_repo.update(created_order)
 
             paymob_client_secret = intent.client_secret
