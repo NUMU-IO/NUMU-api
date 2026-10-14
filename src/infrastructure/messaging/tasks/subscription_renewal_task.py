@@ -52,6 +52,7 @@ def _run(batch_size: int) -> dict:
 
 
 async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
+    from sqlalchemy import inspect as sa_inspect
     from sqlalchemy import select
 
     from src.application.services.paymob_recurring_billing_service import (
@@ -127,7 +128,11 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
         due = (await session.execute(q)).scalars().all()
 
         for tenant in due:
+            # A rollback for an earlier tenant expired every row: take the id
+            # without a lazy load, then reload.
+            tenant_id = sa_inspect(tenant).identity[0]
             try:
+                await session.refresh(tenant)
                 features = get_plan_features(tenant.plan)
                 cycle = tenant.billing_cycle or "monthly"
                 amount = (
@@ -280,10 +285,14 @@ async def _async_run(batch_size: int) -> dict:  # noqa: PLR0915 - linear flow
                                 "renewal_nudge_enqueue_failed",
                                 extra={"tenant_id": str(tenant.id)},
                             )
+                # Per tenant: a later tenant's DB error must not roll back
+                # (and a task retry re-charge) cards already charged.
+                await session.commit()
             except Exception:
+                await session.rollback()
                 logger.exception(
                     "renewal_unhandled_error",
-                    extra={"tenant_id": str(tenant.id)},
+                    extra={"tenant_id": str(tenant_id)},
                 )
                 failed += 1
 
