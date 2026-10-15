@@ -778,6 +778,7 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
     )
     from src.infrastructure.database.order_status_filters import (
         NOT_A_SALE_STATUSES_LC,
+        placed_at_storefront,
         status_lc,
     )
     from src.infrastructure.tenancy.rls import enable_rls_bypass
@@ -796,6 +797,10 @@ async def _sweep_orphans(lookback_hours: int) -> dict[str, int]:
             # Paid is not sold: a refunded order, or a cancelled one whose late
             # payment `mark_as_paid` records without reviving it, is no Purchase.
             .where(status_lc(OrderModel.status).notin_(NOT_A_SALE_STATUSES_LC))
+            # Storefront checkouts only, as the placement handler: a TikTok
+            # Shop sale is already TikTok's, and a merchant-created order has
+            # no web identity.
+            .where(placed_at_storefront(OrderModel.extra_data))
             .where(
                 StoreModel.settings["tracking"]["tiktok"]["api_enabled"].as_string()
                 == "true"
@@ -1203,6 +1208,7 @@ async def _find_purchase_gaps() -> list[dict[str, Any]]:
     )
     from src.infrastructure.database.order_status_filters import (
         NOT_A_SALE_STATUSES_LC,
+        placed_at_storefront,
         status_lc,
     )
     from src.infrastructure.tenancy.rls import enable_rls_bypass
@@ -1220,6 +1226,7 @@ async def _find_purchase_gaps() -> list[dict[str, Any]]:
                     .where(OrderModel.created_at < window_end)
                     # Only orders a Purchase is owed for, as in the sweeps.
                     .where(status_lc(OrderModel.status).notin_(NOT_A_SALE_STATUSES_LC))
+                    .where(placed_at_storefront(OrderModel.extra_data))
                     .group_by(OrderModel.store_id)
                 )
             ).all()
