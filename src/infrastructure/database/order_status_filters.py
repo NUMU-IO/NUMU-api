@@ -64,6 +64,19 @@ def status_lc(col):
     return func.lower(cast(col, String))
 
 
+def placed_at_storefront(extra_data_col):
+    """WHERE-clause fragment keeping only orders from a storefront checkout.
+
+    Checkout snapshots the shopper's ``user_agent`` on the order, and the
+    placement handler (``tracking_purchase_event_handler``) sends a Purchase
+    only for orders that carry one. Merchant-created and TikTok Shop orders
+    have no web identity, and TikTok already attributes TikTok Shop sales. The
+    Purchase sweeps and the gap alert must apply the same rule, or they report
+    those orders an hour later as website Purchases.
+    """
+    return extra_data_col["user_agent"].as_string() != ""
+
+
 def exclude_non_revenue(col):
     """WHERE-clause fragment keeping only orders that count as revenue.
 

@@ -84,17 +84,23 @@ def _sweep_order_filter(cutoff: datetime) -> Any:
 
     Either way the order must still be a sale: a cancelled (often a fake COD
     order), refunded, returned or draft order is never reported as a Purchase.
+
+    And it must come from a storefront checkout, the same rule the placement
+    handler applies: a merchant-created order became a website Purchase with
+    no browser identity, and a TikTok Shop sale reached the ad platforms twice.
     """
     from sqlalchemy import and_, or_
 
     from src.infrastructure.database.models.tenant.order import OrderModel
     from src.infrastructure.database.order_status_filters import (
         NOT_A_SALE_STATUSES_LC,
+        placed_at_storefront,
         status_lc,
     )
 
     return and_(
         status_lc(OrderModel.status).notin_(NOT_A_SALE_STATUSES_LC),
+        placed_at_storefront(OrderModel.extra_data),
         or_(
             and_(OrderModel.paid_at.isnot(None), OrderModel.paid_at >= cutoff),
             and_(
