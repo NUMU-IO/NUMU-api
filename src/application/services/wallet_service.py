@@ -217,13 +217,17 @@ class WalletService:
     def effective_commission_bps(
         tenant: TenantModel, wallet: MerchantWalletModel | None
     ) -> int:
-        """Per-tenant override wins; otherwise the plan's rate; exempt = 0."""
+        """Per-tenant override wins on commission-bearing plans; otherwise the
+        plan's rate; exempt = 0."""
+        plan_bps = get_plan_features(tenant.plan).commission_bps
+        if plan_bps <= 0:
+            return 0
         if wallet is not None:
             if wallet.status == WalletStatus.EXEMPT.value:
                 return 0
             if wallet.commission_bps_override is not None:
                 return wallet.commission_bps_override
-        return get_plan_features(tenant.plan).commission_bps
+        return plan_bps
 
     async def effective_commission_bps_admin(
         self, tenant: TenantModel, wallet: MerchantWalletModel | None

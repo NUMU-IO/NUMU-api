@@ -207,10 +207,14 @@ def resolve_commission_bps(
 ) -> int:
     """Effective rate: tenant override > admin default > plan rate.
 
-    The admin default only applies to plans that are commission-bearing
-    to begin with (``tenant_plan_bps > 0``) — it can tune the payg rate
-    but can never start charging subscription tenants.
+    Neither the override nor the admin default applies unless the plan is
+    commission-bearing to begin with (``tenant_plan_bps > 0``): they tune
+    the payg rate but can never charge subscription tenants. The override
+    is snapshotted when a tenant picks payg and outlives a later move to a
+    subscription plan.
     """
+    if tenant_plan_bps <= 0:
+        return 0
     if wallet_override_bps is not None:
         return wallet_override_bps
     if tenant_plan_bps > 0 and admin.commission_bps_default is not None:
