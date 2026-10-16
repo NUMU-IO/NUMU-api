@@ -136,6 +136,8 @@ def test_resolve_commission_bps_precedence():
     assert resolve_commission_bps(300, None, mk(250)) == 250
     # ...but can never start charging subscription tenants (plan bps 0).
     assert resolve_commission_bps(0, None, mk(250)) == 0
+    # A payg-era override never follows a tenant onto a subscription plan.
+    assert resolve_commission_bps(0, 300, mk(250)) == 0
     # No admin default -> plan rate.
     assert resolve_commission_bps(300, None, mk(None)) == 300
 

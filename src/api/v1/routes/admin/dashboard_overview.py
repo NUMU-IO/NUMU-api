@@ -95,11 +95,10 @@ class OverviewMetrics(BaseModel):
 class Earnings(BaseModel):
     """What NUMU itself earns, as opposed to what merchants turn over.
 
-    The distinction the tiles have to keep straight: a wallet top-up is the
-    merchant's money sitting on the platform — a liability, not income. It
-    becomes NUMU revenue only when it is consumed as commission. Both are
-    reported, labelled for what they are, and only the earned half is summed
-    into ``recognised_30d``.
+    Revenue is counted on cash received: paid subscription invoices plus
+    wallet top-ups, which land in NUMU's account the moment they are paid.
+    Commission is drawn from that prepaid balance, so it is reported as
+    usage but never added to ``recognised_30d`` a second time.
     """
 
     #: Monthly recurring revenue, annual plans at their monthly equivalent.
@@ -108,15 +107,15 @@ class Earnings(BaseModel):
     mrr_by_plan: dict[str, int]
     #: Paying tenants by plan key, so "paid plans" is a real count.
     plan_counts: dict[str, int]
-    #: Subscription receipts approved in the window.
+    #: Paid subscription invoices in the window, every payment rail.
     subscriptions_collected_30d: int
     #: Net pay-as-you-go commission: charges less reversals.
     payg_commission_30d: int
-    #: Cash the wallets took in. NOT revenue — see the class docstring.
+    #: Cash the wallets took in. Counted as revenue.
     wallet_topups_collected_30d: int
-    #: Merchant money currently held. A liability NUMU owes back in service.
+    #: Prepaid balance not yet drawn as commission; negative means owed to NUMU.
     wallet_float_cents: int
-    #: subscriptions_collected_30d + payg_commission_30d.
+    #: subscriptions_collected_30d + wallet_topups_collected_30d.
     recognised_30d: int
 
 
@@ -621,9 +620,9 @@ async def get_overview(
     )
 
     # ── What NUMU earns ────────────────────────────────────────────────────
-    # Three separate things that are easy to conflate: recurring subscription
-    # revenue, commission actually taken from pay-as-you-go wallets, and
-    # merchant cash sitting in those wallets. Only the first two are income.
+    # Revenue is cash received: paid subscription invoices and wallet
+    # top-ups. Commission is drawn from top-ups already counted, so it is
+    # shown as usage only.
     window_30d = now - timedelta(days=30)
 
     plan_rows = (
@@ -665,12 +664,11 @@ async def get_overview(
     subscriptions_collected = await _scalar(
         db,
         f"""
-        SELECT coalesce(sum(i.amount_cents), 0)
-        FROM public.subscription_payment_proofs p
-        JOIN public.subscription_payment_intents i ON i.id = p.intent_id
-        JOIN public.tenants t ON t.id = p.tenant_id
-        WHERE p.status IN ('approved', 'auto_approved')
-          AND p.review_decision_at >= :since
+        SELECT coalesce(sum(b.amount_cents), 0)
+        FROM public.billing_invoices b
+        JOIN public.tenants t ON t.id = b.tenant_id
+        WHERE b.status = 'paid'
+          AND b.paid_at >= :since
           AND {tenants_visible}
         """,  # nosec B608 - module literals only; values are bound
         since=window_30d,
@@ -722,7 +720,7 @@ async def get_overview(
         payg_commission_30d=int(payg_commission or 0),
         wallet_topups_collected_30d=int(topups_collected or 0),
         wallet_float_cents=int(wallet_float or 0),
-        recognised_30d=int(subscriptions_collected or 0) + int(payg_commission or 0),
+        recognised_30d=int(subscriptions_collected or 0) + int(topups_collected or 0),
     )
 
     data = OverviewResponse(

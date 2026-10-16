@@ -171,9 +171,11 @@ async def test_effective_commission_bps_resolution(test_session):
     # Exempt kills it entirely, override or not.
     wallet.status = "exempt"
     assert service.effective_commission_bps(tenant, wallet) == 0
-    # Subscription plans are always 0.
+    # Subscription plans are always 0, even with a payg-era override.
     tenant.plan = "starter"
     assert service.effective_commission_bps(tenant, None) == 0
+    wallet.status = "active"
+    assert service.effective_commission_bps(tenant, wallet) == 0
 
 
 def test_warning_ladder_levels():
