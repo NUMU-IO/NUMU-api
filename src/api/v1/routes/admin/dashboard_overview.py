@@ -625,6 +625,8 @@ async def get_overview(
     # shown as usage only.
     window_30d = now - timedelta(days=30)
 
+    # A plan NUMU gives away (feature_flags.complimentary_plan) is a real
+    # merchant on that plan but not recurring revenue.
     plan_rows = (
         await db.execute(
             text(
@@ -632,6 +634,7 @@ async def get_overview(
                 SELECT t.plan, coalesce(t.billing_cycle, 'monthly') AS cycle, count(*) AS n
                 FROM public.tenants t
                 WHERE t.lifecycle_state = 'active'
+                  AND coalesce((t.feature_flags->>'complimentary_plan')::boolean, false) IS FALSE
                   AND {tenants_visible}
                 GROUP BY t.plan, coalesce(t.billing_cycle, 'monthly')
                 """  # nosec B608 - module literals only
