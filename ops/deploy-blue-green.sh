@@ -241,6 +241,8 @@ remove_slot() {
 run_local() {
   local image="$1"
   remove_slot local
+  # Runs under opentelemetry-instrument when the image ships it (traces go to
+  # the alloy sidecar via OTEL_* in .env); falls back to plain uvicorn.
   docker run -d \
     --name "$LOCAL_NAME" \
     --restart unless-stopped \
@@ -255,8 +257,7 @@ run_local() {
     --log-opt mode=non-blocking --log-opt max-buffer-size=4m \
     --cpus 2 --memory 1200m \
     -p 8000:8000 \
-    "$image" uvicorn src.main:app --host 0.0.0.0 --port 8000 \
-      --workers 1 --no-access-log >/dev/null
+    "$image" sh -c 'exec $(command -v opentelemetry-instrument) uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 1 --no-access-log' >/dev/null
   wait_local
   # Each deploy leaves the previous image dangling; nothing removed them and
   # the canary host's 20 GB disk filled with ~60 of them (1.1 GB each).
