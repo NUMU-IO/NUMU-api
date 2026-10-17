@@ -58,7 +58,7 @@ class ResponseTimeMiddleware(BaseHTTPMiddleware):
     """
 
     # Default threshold for slow request warnings (milliseconds)
-    DEFAULT_SLOW_THRESHOLD_MS = 500
+    DEFAULT_SLOW_THRESHOLD_MS = 2000
 
     # Paths to exclude from slow request logging (e.g., health checks)
     EXCLUDED_PATHS = {"/health", "/api/v1/public/health", "/api/v1/public/ping"}

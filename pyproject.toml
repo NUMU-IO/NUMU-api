@@ -92,6 +92,17 @@ dependencies = [
     # the "Sessions by device" chart panel on the campaign detail page.
     # Vendored Browserscope regex db, MIT-licensed, ~2M downloads/week.
     "ua-parser>=0.18.0",
+    # Tracing: the api runs under `opentelemetry-instrument`; spans go to the
+    # Alloy sidecar (docker/alloy/config.alloy). Pinned exactly: the 0.x
+    # instrumentation releases must match the 1.x SDK they ship with.
+    "opentelemetry-distro==0.66b1",
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
+    "opentelemetry-instrumentation-fastapi==0.66b1",
+    "opentelemetry-instrumentation-sqlalchemy==0.66b1",
+    "opentelemetry-instrumentation-redis==0.66b1",
+    "opentelemetry-instrumentation-httpx==0.66b1",
+    "opentelemetry-instrumentation-celery==0.66b1",
+    "opentelemetry-instrumentation-botocore==0.66b1",
 ]
 
 [project.optional-dependencies]
@@ -109,6 +120,9 @@ dev = [
     "locust>=2.20.0",  # Load testing
     "aiosqlite>=0.19.0",  # SQLite async for tests
 ]
+
+[project.entry-points.opentelemetry_traces_sampler]
+numu = "src.otel_sampling:numu_sampler"
 
 [build-system]
 requires = ["hatchling"]

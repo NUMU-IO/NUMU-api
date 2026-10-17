@@ -10,6 +10,7 @@ from src.api.middleware.token_activity import record_in_background
 from src.core.logging import (
     bind_request_context,
     clear_request_context,
+    current_trace_id,
     get_logger,
 )
 
@@ -76,6 +77,8 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             process_time_ms = round((time.time() - start_time) * 1000, 2)
 
             response.headers["X-Request-ID"] = request_id
+            if trace_id := current_trace_id():
+                response.headers["X-Trace-Id"] = trace_id
             response.headers["X-Process-Time"] = str(process_time_ms)
             limit = getattr(request.state, "api_limit", None)
             if limit is not None:

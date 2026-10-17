@@ -1,0 +1,143 @@
+// ---------- Metrics: scrape API /metrics -> Grafana Cloud Prometheus ----------
+prometheus.scrape "api" {
+  targets         = [{"__address__" = "numu-api-prod:8000", "service" = "numu-api", "env" = "production"}]
+  metrics_path    = "/metrics"
+  scrape_interval = "15s"
+  bearer_token    = sys.env("METRICS_AUTH_TOKEN")
+  forward_to      = [prometheus.remote_write.grafana.receiver]
+}
+
+prometheus.remote_write "grafana" {
+  endpoint {
+    url = sys.env("GC_PROM_URL")
+    basic_auth {
+      username = sys.env("GC_PROM_USER")
+      password = sys.env("GC_TOKEN")
+    }
+  }
+}
+
+// ---------- Logs: tail numu-* container stdout -> Grafana Cloud Loki ----------
+discovery.docker "local" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "logs" {
+  targets = []
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(numu-.*)"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.local.targets
+  relabel_rules = discovery.relabel.logs.rules
+  labels        = {"env" = "production"}
+  forward_to    = [loki.write.grafana.receiver]
+}
+
+loki.write "grafana" {
+  endpoint {
+    url = sys.env("GC_LOKI_URL")
+    basic_auth {
+      username = sys.env("GC_LOKI_USER")
+      password = sys.env("GC_TOKEN")
+    }
+  }
+}
+
+// ---------- Traces: app OTLP -> trim -> drop asgi send -> batch -> Grafana Cloud Tempo ----------
+otelcol.receiver.otlp "default" {
+  http { endpoint = "0.0.0.0:4318" }
+  output { traces = [otelcol.processor.transform.drop_unneeded_resource_attributes.input] }
+}
+
+otelcol.processor.transform "drop_unneeded_resource_attributes" {
+  error_mode = "ignore"
+  trace_statements {
+    context    = "resource"
+    statements = [
+      "delete_key(attributes, \"process.command_args\")",
+      "delete_key(attributes, \"process.executable.path\")",
+      "delete_key(attributes, \"process.pid\")",
+      "delete_key(attributes, \"process.runtime.description\")",
+      "delete_key(attributes, \"os.description\")",
+    ]
+  }
+  output { traces = [otelcol.processor.filter.drop_asgi_send.input] }
+}
+
+otelcol.processor.filter "drop_asgi_send" {
+  error_mode = "ignore"
+  traces {
+    span = ["attributes[\"asgi.event.type\"] != nil"]
+  }
+  output { traces = [otelcol.processor.tail_sampling.default.input] }
+}
+
+// Tail sampling: keep every error, every trace slower than 2s, every money
+// path the app tagged numu.critical (src/otel_sampling.py), and 1% of the rest.
+// Policies are OR-ed. num_traces bounds memory under the 160m container limit.
+otelcol.processor.tail_sampling "default" {
+  decision_wait = "10s"
+  num_traces    = 5000
+
+  policy {
+    name = "errors"
+    type = "status_code"
+    status_code {
+      status_codes = ["ERROR"]
+    }
+  }
+
+  policy {
+    name = "slow"
+    type = "latency"
+    latency {
+      threshold_ms = 2000
+    }
+  }
+
+  policy {
+    name = "critical-routes"
+    type = "boolean_attribute"
+    boolean_attribute {
+      key   = "numu.critical"
+      value = true
+    }
+  }
+
+  policy {
+    name = "baseline"
+    type = "probabilistic"
+    probabilistic {
+      sampling_percentage = 1
+    }
+  }
+
+  output { traces = [otelcol.processor.batch.default.input] }
+}
+
+otelcol.processor.batch "default" {
+  output { traces = [otelcol.exporter.otlphttp.grafana.input] }
+}
+
+otelcol.auth.basic "grafana" {
+  username = sys.env("GC_OTLP_USER")
+  password = sys.env("GC_TOKEN")
+}
+
+otelcol.exporter.otlphttp "grafana" {
+  client {
+    endpoint = sys.env("GC_OTLP_URL")
+    auth     = otelcol.auth.basic.grafana.handler
+  }
+}

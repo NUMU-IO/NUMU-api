@@ -130,7 +130,7 @@ class EventBus:
 
         self.scheduler(self, event, list(handlers))
 
-        logger.info(
+        logger.debug(
             "event_published",
             event_type=event.event_type,
             event_id=str(event.event_id),
