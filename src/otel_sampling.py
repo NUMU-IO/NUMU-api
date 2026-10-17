@@ -4,7 +4,9 @@ Selected with ``OTEL_TRACES_SAMPLER=numu`` (entry point in pyproject.toml).
 Money paths (checkout, payments, deposits, orders, webhooks) are always
 sampled and tagged ``numu.critical`` so the tail sampler in Alloy keeps them;
 every other root span is sampled at ``OTEL_TRACES_SAMPLER_ARG`` (default 1.0).
-Child spans follow their parent's decision.
+Child spans follow their parent's decision, except that a remote parent that
+chose not to sample (Sentry keeps only 10% of hub sessions) does not override
+the api's own rule.
 
 Lives at the top of ``src`` on purpose: the SDK loads it before instrumentation
 runs, so it must not import any package that builds engines or clients.
@@ -65,4 +67,5 @@ def numu_sampler(arg: str | None) -> Sampler:
         ratio = float(arg) if arg else 1.0
     except ValueError:
         ratio = 1.0
-    return ParentBased(root=RouteSampler(ratio))
+    route = RouteSampler(ratio)
+    return ParentBased(root=route, remote_parent_not_sampled=route)
