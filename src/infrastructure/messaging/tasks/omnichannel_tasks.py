@@ -90,45 +90,6 @@ def backfill_conversations(
     return asyncio.run(_run())
 
 
-@celery_app.task(name="omnichannel.process_inbound")
-def process_inbound_message(message_id: str) -> dict:
-    """Process incoming message - create thread, notifications."""
-    import asyncio
-
-    from src.api.dependencies.repositories import (
-        get_channel_message_repository,
-        get_message_thread_repository,
-    )
-    from src.infrastructure.external_services.notifications import NotificationService
-
-    async def _process():
-        message = await get_channel_message_repository().get_by_id(message_id)
-        if not message:
-            return {"error": "Message not found"}
-
-        thread = await get_message_thread_repository().get_by_id(message.thread_id)
-        if thread:
-            from src.infrastructure.realtime.redis_pubsub import RealtimePublisher
-
-            await RealtimePublisher.publish(
-                channel=f"store:{thread.store_id}:inbox",
-                event="new_message",
-                data={"thread_id": str(thread.id), "message_id": str(message.id)},
-            )
-
-        notify = NotificationService()
-        await notify.send(
-            recipient_id=thread.store_id,
-            title="New message",
-            body="You have a new message",
-            channel="websocket",
-        )
-
-        return {"status": "Processed"}
-
-    return asyncio.run(_process())
-
-
 @celery_app.task(name="omnichannel.sync_catalog")
 def sync_catalog_task(connection_id: str, store_id: str) -> dict:
     """Background catalog sync task."""

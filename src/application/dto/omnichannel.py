@@ -1,8 +1,12 @@
 """Omnichannel DTOs."""
 
+from __future__ import annotations
+
 from uuid import UUID
 
 from pydantic import BaseModel
+
+from src.core.entities.channel_message import ChannelMessage
 
 
 class ConnectMetaDTO(BaseModel):
@@ -197,6 +201,19 @@ class ChannelMessageDTO(BaseModel):
     status: str
     created_at: str
     sender_name: str | None
+
+    @classmethod
+    def from_entity(cls, m: ChannelMessage) -> ChannelMessageDTO:
+        return cls(
+            id=m.id,
+            direction=m.direction.value,
+            type=m.type.value,
+            body=m.body,
+            attachment_url=m.attachment_url,
+            status=m.status.value,
+            created_at=m.created_at.isoformat(),
+            sender_name=m.sender_external_id,
+        )
 
 
 class WhatsAppTemplateDTO(BaseModel):
