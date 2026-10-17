@@ -47,7 +47,7 @@
       "id": 3, "type": "stat", "title": "5xx ratio",
       "gridPos": {"h": 5, "w": 6, "x": 6, "y": 1},
       "datasource": {"type": "prometheus", "uid": "${prom}"},
-      "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total{status=\"5xx\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 1e-9)"}],
+      "targets": [{"refId": "A", "expr": "(sum(rate(http_requests_total{status=\"5xx\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_requests_total[5m])), 1e-9)"}],
       "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 2,
         "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.01}, {"color": "red", "value": 0.02}]}}}
     },
