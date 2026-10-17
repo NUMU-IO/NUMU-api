@@ -62,6 +62,7 @@ async def inbox_websocket(
         pass
     finally:
         await publisher.unsubscribe(channel, pubsub)
+        await publisher.aclose()
 
 
 def _verify_token(token: str) -> dict[str, Any] | None:

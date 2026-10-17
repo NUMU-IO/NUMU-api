@@ -259,7 +259,7 @@ class ThemeV3Service:
                 extra={"store_id": str(store_id), "error": str(exc)},
             )
 
-        logger.info(
+        logger.debug(
             "v3_autosave_saved",
             extra={"store_id": str(store_id), "version_id": str(version.id)},
         )

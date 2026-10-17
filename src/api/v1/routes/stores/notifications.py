@@ -282,7 +282,7 @@ async def stream_notifications(
             if publisher is not None and pubsub is not None:
                 try:
                     await publisher.unsubscribe(notification_channel(store_id), pubsub)
-                    await publisher.redis.aclose()
+                    await publisher.aclose()
                 except Exception:  # noqa: BLE001
                     pass
 

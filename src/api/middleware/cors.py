@@ -30,11 +30,15 @@ DEFAULT_ALLOWED_HEADERS = [
     "X-Request-ID",
     "X-Tenant-Subdomain",
     "X-CSRF-Token",
+    # W3C trace context, so a browser-started trace continues into the API.
+    "traceparent",
+    "tracestate",
 ]
 
 # Headers to expose to the client
 DEFAULT_EXPOSED_HEADERS = [
     "X-Request-ID",
+    "X-Trace-Id",
     "X-Process-Time",
     "X-RateLimit-Limit",
     "X-RateLimit-Remaining",

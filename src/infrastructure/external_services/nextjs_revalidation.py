@@ -201,7 +201,7 @@ async def revalidate_store(
                     response.text[:200],
                 )
                 return False
-            logger.info(
+            logger.debug(
                 "Revalidation succeeded for %s",
                 subdomain,
                 extra={"paths": paths, "tags": tags},
@@ -292,7 +292,7 @@ async def revalidate_store_traced(
             # Storefront didn't echo tags — assume it honored the request.
             summary.tags_revalidated = list(tags or [])
         summary.succeeded = True
-        logger.info(
+        logger.debug(
             "Revalidation succeeded for %s in %dms",
             subdomain,
             summary.duration_ms,

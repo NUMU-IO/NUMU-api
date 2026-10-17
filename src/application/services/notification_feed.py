@@ -223,7 +223,7 @@ async def _publish_realtime(result: EmitResult) -> None:
                 timeout=REALTIME_PUBLISH_TIMEOUT_S,
             )
         finally:
-            await publisher.redis.aclose()
+            await publisher.aclose()
     except Exception as exc:  # noqa: BLE001 — best-effort
         logger.warning(
             "notification_realtime_publish_failed",

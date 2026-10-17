@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from src.application.dto.omnichannel import ChannelMessageDTO
 from src.core.entities.channel_message import (
     ChannelMessage,
     MessageDirection,
@@ -159,17 +160,16 @@ class IngestInboundMessageUseCase:
             raise
 
         if self.realtime_publisher:
+            # Channel and event type must match what /ws/inbox/{store_id}
+            # subscribes to and the hub's Inbox listens for.
             await self.realtime_publisher.publish(
-                channel=f"inbox:{connection.tenant_id}:{connection.store_id}",
+                channel=f"store:{connection.store_id}:inbox",
                 event={
-                    "type": "new_message",
+                    "type": "message.created",
                     "thread_id": str(thread.id),
-                    "message": {
-                        "id": str(message.id),
-                        "body": body,
-                        "attachment_url": attachment_url,
-                        "sender_name": sender_name,
-                    },
+                    "message": ChannelMessageDTO.from_entity(message).model_dump(
+                        mode="json"
+                    ),
                 },
             )
 

@@ -45,18 +45,6 @@ class ListMessagesUseCase:
         )
 
         return {
-            "messages": [
-                ChannelMessageDTO(
-                    id=m.id,
-                    direction=m.direction.value,
-                    type=m.type.value,
-                    body=m.body,
-                    attachment_url=m.attachment_url,
-                    status=m.status.value,
-                    created_at=m.created_at.isoformat(),
-                    sender_name=m.sender_external_id,
-                )
-                for m in messages
-            ],
+            "messages": [ChannelMessageDTO.from_entity(m) for m in messages],
             "next_cursor": None,
         }
