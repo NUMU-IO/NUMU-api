@@ -1,0 +1,127 @@
+{
+  "title": "NUMU API",
+  "uid": "numu-api",
+  "description": "Prod api RED metrics, DB pool and warning/error logs, with deploy markers. Metrics come from the api's /metrics (scraped by Alloy), logs from Alloy's container tail. Import into Grafana Cloud: Dashboards > New > Import. Source: docker/monitoring/grafana/dashboards/numu-api.json.",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "time": {"from": "now-6h", "to": "now"},
+  "refresh": "1m",
+  "tags": ["numu", "api"],
+  "templating": {
+    "list": [
+      {"name": "prom", "label": "Metrics", "type": "datasource", "query": "prometheus", "regex": ".*-prom$"},
+      {"name": "loki", "label": "Logs", "type": "datasource", "query": "loki", "regex": ".*-logs$"}
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "enable": true,
+        "iconColor": "orange",
+        "name": "Deploys",
+        "target": {"type": "tags", "tags": ["deploy"], "limit": 100, "matchAny": false}
+      }
+    ]
+  },
+  "panels": [
+    {"id": 1, "type": "row", "title": "Health", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}},
+    {
+      "id": 2, "type": "stat", "title": "Requests / s",
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total[5m]))"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "decimals": 2}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "5xx ratio",
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "sum(rate(http_requests_total{status=\"5xx\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 1e-9)"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 2,
+        "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.01}, {"color": "red", "value": 0.02}]}}}
+    },
+    {
+      "id": 4, "type": "stat", "title": "p95 latency",
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))"}],
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 2,
+        "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.5}, {"color": "red", "value": 1}]}}}
+    },
+    {
+      "id": 5, "type": "stat", "title": "DB pool in use",
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "max(db_connections_in_use) / clamp_min(max(db_connections_pool_size), 1)"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 0,
+        "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.7}, {"color": "red", "value": 0.9}]}}}
+    },
+    {"id": 6, "type": "row", "title": "Latency and traffic by route", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 6}},
+    {
+      "id": 7, "type": "timeseries", "title": "p95 latency, slowest 10 routes",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "topk(10, histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m]))))", "legendFormat": "{{route}}"}],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["max", "lastNotNull"]}}
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Requests / s, busiest 10 routes",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 7},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "topk(10, sum by (route) (rate(http_requests_total[5m])))", "legendFormat": "{{route}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max"]}}
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "5xx / s by route",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "sum by (route) (rate(http_requests_total{status=\"5xx\"}[5m])) > 0", "legendFormat": "{{route}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}}}
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "4xx / s by route",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "topk(10, sum by (route) (rate(http_requests_total{status=\"4xx\"}[5m])) > 0)", "legendFormat": "{{route}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {"id": 11, "type": "row", "title": "Database pool", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 24}},
+    {
+      "id": 12, "type": "timeseries", "title": "SQLAlchemy pool",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 25},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [
+        {"refId": "A", "expr": "max(db_connections_in_use)", "legendFormat": "in use"},
+        {"refId": "B", "expr": "max(db_connections_pool_size)", "legendFormat": "pool size"},
+        {"refId": "C", "expr": "max(db_connections_overflow)", "legendFormat": "overflow"}
+      ]
+    },
+    {
+      "id": 13, "type": "timeseries", "title": "In-flight requests",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 25},
+      "datasource": {"type": "prometheus", "uid": "${prom}"},
+      "targets": [{"refId": "A", "expr": "sum(http_requests_in_progress)", "legendFormat": "in flight"}]
+    },
+    {"id": 14, "type": "row", "title": "Warnings and errors", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 33}},
+    {
+      "id": 15, "type": "logs", "title": "api warnings and errors (TraceID links to Tempo)",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 34},
+      "datasource": {"type": "loki", "uid": "${loki}"},
+      "targets": [{"refId": "A", "expr": "{service_name=\"numu-api\"} | json | level=~\"warning|error|critical\""}],
+      "options": {"showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true}
+    }
+  ]
+}

@@ -608,6 +608,23 @@ jobs:
             echo "==> EC2 prod deployment complete."
           DEPLOY_SCRIPT
 
+      # Deploy marker on the Grafana "NUMU API" dashboard (annotations tagged
+      # "deploy"), so a latency or error jump lines up with the release.
+      - name: Mark the deploy in Grafana
+        env:
+          GRAFANA_SA_TOKEN: ${{ secrets.GRAFANA_SA_TOKEN }}
+        run: |
+          if [ -z "${GRAFANA_SA_TOKEN:-}" ]; then
+            echo "WARNING: GRAFANA_SA_TOKEN is not configured"
+            exit 0
+          fi
+          payload="$(python3 -c 'import json,sys; print(json.dumps({"tags": ["deploy", "numu-api"], "text": sys.argv[1]}))' \
+            "numu-api ${GITHUB_SHA::7} deployed")"
+          curl -fsS --max-time 10 -H "Authorization: Bearer ${GRAFANA_SA_TOKEN}" \
+            -H 'Content-Type: application/json' --data "$payload" \
+            https://vasttarragon1141.grafana.net/api/annotations >/dev/null \
+            || echo "WARNING: Grafana deploy annotation failed"
+
       - name: Notify Slack when production deployment fails
         if: failure()
         env:
