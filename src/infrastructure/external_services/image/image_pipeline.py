@@ -116,7 +116,7 @@ class ImagePipeline:
                 total_size += variant.file_size
                 uploaded_keys.append(uploaded.key)
 
-                logger.info(
+                logger.debug(
                     "Uploaded variant '%s': %dx%d, %d bytes -> %s",
                     variant.variant_name,
                     variant.width,

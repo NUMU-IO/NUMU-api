@@ -41,6 +41,7 @@ from contextvars import ContextVar
 from typing import Any
 
 import structlog
+from opentelemetry import trace
 from structlog.types import EventDict, Processor
 
 from src.config.settings import settings
@@ -87,6 +88,23 @@ def add_request_context(
         event_dict.setdefault("tenant_id", tenant_id)
     if (user_id := user_id_var.get()) is not None:
         event_dict.setdefault("user_id", user_id)
+    return event_dict
+
+
+def current_trace_id() -> str | None:
+    """W3C trace id of the active span, or None outside a trace."""
+    ctx = trace.get_current_span().get_span_context()
+    return format(ctx.trace_id, "032x") if ctx.is_valid else None
+
+
+def add_trace_context(
+    logger: logging.Logger, method_name: str, event_dict: EventDict
+) -> EventDict:
+    """Add OpenTelemetry trace context so logs link to Tempo traces."""
+    span = trace.get_current_span().get_span_context()
+    if span.is_valid:
+        event_dict.setdefault("trace_id", format(span.trace_id, "032x"))
+        event_dict.setdefault("span_id", format(span.span_id, "016x"))
     return event_dict
 
 
@@ -186,6 +204,7 @@ def configure_logging() -> None:
         structlog.processors.TimeStamper(fmt="iso"),
         add_app_context,
         add_request_context,
+        add_trace_context,
         # AFTER context, BEFORE render: redact secrets from .bind()/context too.
         redact_sensitive_fields,
         structlog.processors.StackInfoRenderer(),

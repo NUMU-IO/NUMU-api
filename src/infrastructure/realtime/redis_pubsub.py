@@ -2,12 +2,15 @@
 
 from typing import Any
 
+import anyio
 import redis.asyncio as redis
 
 from src.config import settings
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+_CLOSE_TIMEOUT_S = 5
 
 
 class RealtimePublisher:
@@ -53,6 +56,19 @@ class RealtimePublisher:
         channel: str,
         pubsub: redis.client.PubSub,
     ) -> None:
-        """Unsubscribe from a channel and close the pubsub connection."""
-        await pubsub.unsubscribe(channel)
-        await pubsub.aclose()
+        """Unsubscribe from a channel and close the pubsub connection.
+
+        Shielded: callers run this in the ``finally`` of an SSE/WebSocket
+        stream the client just left, inside a cancelled anyio scope. Without
+        the shield the cancellation interrupts the close, the connection stays
+        open, and Python warns "coroutine 'AbstractConnection.disconnect' was
+        never awaited".
+        """
+        with anyio.move_on_after(_CLOSE_TIMEOUT_S, shield=True):
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+
+    async def aclose(self) -> None:
+        """Close this publisher's Redis pool (shielded, see ``unsubscribe``)."""
+        with anyio.move_on_after(_CLOSE_TIMEOUT_S, shield=True):
+            await self.redis.aclose()

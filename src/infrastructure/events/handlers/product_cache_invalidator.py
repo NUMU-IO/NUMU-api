@@ -42,7 +42,7 @@ class ProductCacheInvalidator:
         # A newly-created product only changes listing pages (no detail
         # entry can exist for it yet), so a store-wide listing sweep suffices.
         await self._cache.invalidate_store_products(event.store_id)
-        logger.info(
+        logger.debug(
             "product_cache_invalidated",
             reason="created",
             store_id=str(event.store_id),
@@ -54,7 +54,7 @@ class ProductCacheInvalidator:
         # for the store (via the products:store:{id}:* pattern sweep), which
         # also drops any slug-keyed detail entry.
         await self._cache.invalidate_product(event.store_id, event.product_id)
-        logger.info(
+        logger.debug(
             "product_cache_invalidated",
             reason="updated",
             store_id=str(event.store_id),
@@ -81,11 +81,11 @@ class ProductCacheInvalidator:
                     break
         finally:
             self._flushing.discard(store)
-        logger.info("product_cache_invalidated", reason="stock", store_id=str(store))
+        logger.debug("product_cache_invalidated", reason="stock", store_id=str(store))
 
     async def on_deleted(self, event: ProductDeletedEvent) -> None:
         await self._cache.invalidate_product(event.store_id, event.product_id)
-        logger.info(
+        logger.debug(
             "product_cache_invalidated",
             reason="deleted",
             store_id=str(event.store_id),
