@@ -34,13 +34,21 @@ discovery.relabel "logs" {
     regex         = "/(.*)"
     target_label  = "container"
   }
+  // service_name/service_namespace match the traces' resource attributes
+  // (numu-api-prod -> numu-api), so Grafana's built-in "Logs for this span"
+  // and Application Observability find these logs.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*?)(-prod)?"
+    target_label  = "service_name"
+  }
 }
 
 loki.source.docker "containers" {
   host          = "unix:///var/run/docker.sock"
   targets       = discovery.docker.local.targets
   relabel_rules = discovery.relabel.logs.rules
-  labels        = {"env" = "production"}
+  labels        = {"env" = "production", "service_namespace" = "numu"}
   forward_to    = [loki.write.grafana.receiver]
 }
 
