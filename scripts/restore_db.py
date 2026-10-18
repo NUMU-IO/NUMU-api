@@ -19,9 +19,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import boto3
-from botocore.config import Config
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -32,27 +29,12 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from scripts.backup_db import _build_r2_client  # noqa: E402
 from src.config.settings import Settings  # noqa: E402
 
 
 def _get_settings() -> Settings:
     return Settings()
-
-
-def _build_r2_client(settings: Settings):
-    if not all([
-        settings.r2_account_id,
-        settings.r2_access_key_id,
-        settings.r2_secret_access_key,
-    ]):
-        raise RuntimeError("R2 credentials are not configured.")
-    return boto3.client(
-        "s3",
-        endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
-        aws_access_key_id=settings.r2_access_key_id,
-        aws_secret_access_key=settings.r2_secret_access_key,
-        config=Config(signature_version="s3v4"),
-    )
 
 
 def list_backups(settings: Settings) -> list[dict]:

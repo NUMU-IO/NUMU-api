@@ -2477,16 +2477,18 @@ async def _prune_tracking_rows() -> dict[str, int]:
         # owes, and age alone does not make it ours to throw away. Deleting one
         # mid-flight would drop a conversion silently and leave nothing behind
         # to explain the gap. The snapshot table has no lifecycle, so it prunes
-        # on age alone.
-        for model, days, key, extra in (
+        # on age alone — its age column is `captured_at`; it has no `created_at`.
+        for model, age, days, key, extra in (
             (
                 MetaEventLogModel,
+                MetaEventLogModel.created_at,
                 _event_log_retention_days(),
                 "event_log_deleted",
                 MetaEventLogModel.status.in_(TERMINAL_STATUSES),
             ),
             (
                 MetaMatchQualitySnapshotModel,
+                MetaMatchQualitySnapshotModel.captured_at,
                 _MATCH_QUALITY_RETENTION_DAYS,
                 "match_quality_deleted",
                 None,
@@ -2500,7 +2502,7 @@ async def _prune_tracking_rows() -> dict[str, int]:
                 try:
                     # Delete by PK from a LIMITed subquery: one bounded lock
                     # per batch instead of one long lock over the whole scan.
-                    doomed = select(model.id).where(model.created_at < cutoff)
+                    doomed = select(model.id).where(age < cutoff)
                     if extra is not None:
                         doomed = doomed.where(extra)
                     doomed = doomed.limit(batch)

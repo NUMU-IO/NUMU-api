@@ -27,6 +27,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    # pg_dump for tasks.backup_database. Trixie's client is PostgreSQL 17, the
+    # major prod runs (17.6); pg_dump refuses a server newer than itself.
+    postgresql-client \
     # WeasyPrint runtime dependencies (HTML/CSS -> PDF generation)
     # Ref: https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#debian-ubuntu
     libpango-1.0-0 \
