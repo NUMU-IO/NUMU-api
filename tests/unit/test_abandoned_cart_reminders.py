@@ -645,6 +645,33 @@ async def test_a_signed_in_shopper_still_on_the_checkout_page_is_not_reminded_ye
     assert _sent_to(w) == [PHONE]
 
 
+async def test_a_signed_in_reminder_that_failed_to_send_is_tried_again(
+    world, monkeypatch
+):
+    """The sweep queues each cart state once, so the sender itself tries a
+    failed send again half an hour later, as the anonymous pass would."""
+    w = world
+    store = await _store(w)
+    customer = await _customer(w, store)
+    await _checkout(w, store, customer=customer)
+    _cart(w, store, customer)
+    working = WhatsAppMessagingService.send_message
+
+    async def down(service, content):
+        return MessageResult(success=False, status=MessageStatus.FAILED)
+
+    monkeypatch.setattr(WhatsAppMessagingService, "send_message", down)
+    await _beat(w)
+    await _beat(w)  # the sweep does not queue it again
+
+    assert w.whatsapp == []
+    [retry] = w.held
+    assert retry["eta"] == DAY + timedelta(minutes=30)
+    monkeypatch.setattr(WhatsAppMessagingService, "send_message", working)
+    await _morning(w, monkeypatch)  # runs it at its ETA
+    assert _sent_to(w) == [PHONE]
+
+
 async def test_the_manual_nudge_checks_the_template_it_sends(world):
     """It looked up abandoned_cart_v2 while v3 went out: an approved v3 was
     refused, and an approved v2 let an unapproved v3 through."""

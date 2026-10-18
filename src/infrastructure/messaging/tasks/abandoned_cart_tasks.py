@@ -324,9 +324,10 @@ async def _detect_and_notify() -> dict:
                 # Each cart state is handed to the sender once. The budget
                 # was the only guard before, so a cart left alone was queued
                 # again each time it expired: three reminders in 72 h.
-                # ponytail: one attempt per cart state, so a failed send or a
-                # switch turned on later waits for the cart to change; release
-                # the claim in the sender if that loses reminders.
+                # A failed send is tried again by the sender itself.
+                # ponytail: a switch turned on later waits for the cart to
+                # change; release this claim in the sender if that loses
+                # reminders.
                 if not await cache.set_if_absent(
                     f"abandoned_cart_queued:{store_id}:{customer_id}:{updated_at_str}",
                     "1",
@@ -825,6 +826,7 @@ async def _send_notification(customer_id: str, store_id: str) -> dict:
         cache = RedisCacheService() if settings.redis_host else None
         claimed = False
         channel = None
+        tried = False
         try:
             if cache:
                 claimed = await _claim(cache, budget)
@@ -835,6 +837,7 @@ async def _send_notification(customer_id: str, store_id: str) -> dict:
                 store.id, _e164(phone)
             ):
                 try:
+                    tried = True
                     language = _resolve_language(
                         store.settings or {}, store.default_language
                     )
@@ -876,6 +879,7 @@ async def _send_notification(customer_id: str, store_id: str) -> dict:
                 and is_real_email(customer.email)
             ):
                 try:
+                    tried = True
                     await _send_recovery_email(
                         store, checkout, str(customer.email), real_name or None
                     )
@@ -884,6 +888,12 @@ async def _send_notification(customer_id: str, store_id: str) -> dict:
                     logger.warning(f"Email abandoned cart error: {e}")
 
             if channel is None:
+                if tried:  # it failed: again on the sweep's next turn, as for
+                    # anonymous checkouts (each cart state is queued once)
+                    send_abandoned_cart_notification_task.apply_async(
+                        kwargs={"customer_id": customer_id, "store_id": store_id},
+                        eta=_utcnow() + timedelta(minutes=30),
+                    )
                 return {"sent": False, "reason": "no_channel"}
 
             # Never raise after a send: the task would retry and send again.
