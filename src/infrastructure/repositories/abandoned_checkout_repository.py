@@ -210,7 +210,8 @@ class AbandonedCheckoutRepository(IAbandonedCheckoutRepository):
         reminded = or_(
             sub.c.recovery_email_sent_at.isnot(None),
             sub.c.extra_data["wa_auto_nudge_at"].astext.isnot(None),
-            sub.c.extra_data["wa_nudge_at"].astext.isnot(None),
+            # The stamp the manual WhatsApp button writes.
+            sub.c.extra_data["last_whatsapp_notified_at"].astext.isnot(None),
         )
         query = select(
             func.count().filter(~recovered).label("open_count"),

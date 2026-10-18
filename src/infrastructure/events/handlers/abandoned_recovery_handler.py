@@ -21,10 +21,10 @@ common to all of them.
 
 There is no foreign key from an order back to the checkout it came from, so
 attribution is by contact detail: the store's most recent un-recovered checkout
-whose phone or email matches the order's customer. Phones are compared on
-digits only — the same rule the WhatsApp confirm flow uses — because the two
-records are written by different paths and one may carry ``01…`` where the other
-carries ``+201…``.
+whose phone or email matches the order's customer. Phones are compared in
+E.164 (``PhoneNumber``'s normaliser, the one the reminders key on), because the
+two records are written by different paths and one may carry ``01…`` where the
+other carries ``+201…``.
 
 Deliberately conservative. A missed attribution understates the recovery rate;
 a wrong one tells a merchant a cart was recovered when it wasn't, and hides a
@@ -38,15 +38,12 @@ import structlog
 from sqlalchemy import or_, select
 
 from src.core.events.order_events import OrderCreatedEvent
+from src.core.value_objects.phone import PhoneNumber
 from src.infrastructure.database.connection import AsyncSessionLocal
 
 logger = structlog.get_logger(__name__)
 
 __all__ = ["handle_order_created_recovery"]
-
-
-def _digits(value: str | None) -> str:
-    return "".join(ch for ch in (value or "") if ch.isdigit())
 
 
 async def handle_order_created_recovery(event: OrderCreatedEvent) -> None:
@@ -79,11 +76,14 @@ async def handle_order_created_recovery(event: OrderCreatedEvent) -> None:
                 return
 
             # Candidates: this store's un-recovered checkouts for this contact.
+            # A row keeps the phone as typed (01…, +20 10…), so SQL only narrows
+            # on its last digits; the match itself is made in E.164 below.
             conditions = []
             if email:
                 conditions.append(AbandonedCheckoutModel.email == email)
             if phone:
-                conditions.append(AbandonedCheckoutModel.phone == phone)
+                phone = PhoneNumber(value=phone).value
+                conditions.append(AbandonedCheckoutModel.phone.like(f"%{phone[-4:]}"))
             if not conditions:
                 return
 
@@ -97,22 +97,19 @@ async def handle_order_created_recovery(event: OrderCreatedEvent) -> None:
                             or_(*conditions),
                         )
                         .order_by(AbandonedCheckoutModel.last_activity_at.desc())
-                        .limit(5)
+                        .limit(20)
                     )
                 )
                 .scalars()
                 .all()
             )
 
-            # Re-check the phone on digits: the exact-equality filter above is
-            # only a cheap prefilter, and the two records are written by
-            # different paths with different formatting.
             target = None
             for row in rows:
                 if email and row.email and row.email == email:
                     target = row
                     break
-                if phone and row.phone and _digits(row.phone) == _digits(phone):
+                if phone and row.phone and PhoneNumber(value=row.phone).value == phone:
                     target = row
                     break
             if target is None:

@@ -596,7 +596,8 @@ async def sdk_recover_cart(
     variant must still exist, be ACTIVE, belong to this store, and be in
     stock; price is snapshotted live. Anything that no longer qualifies is
     skipped rather than failing the whole restore. Existing items in the
-    session cart are preserved (merge, not replace). ``get_cart_owner``
+    session cart are preserved (merge, not replace); a line the cart already
+    holds is topped up to the saved quantity, never added twice. ``get_cart_owner``
     establishes the ``numu_cart_session`` cookie so the rebuilt cart sticks
     to this browser.
     """
@@ -640,7 +641,14 @@ async def sdk_recover_cart(
         line_sku = product.sku
         line_image = product.images[0] if product.images else None
         variant_name: str | None = None
-        add_qty = want_qty
+        # Restore, don't add: a shopper who taps the reminder in the browser
+        # that still holds the cart (a logged-in shopper always does) would
+        # otherwise get every line doubled.
+        existing = cart.get_item(product_id, variant_id)
+        existing_qty = existing.quantity if existing else 0
+        add_qty = want_qty - existing_qty
+        if add_qty <= 0:
+            continue
 
         if variant_id:
             async with AsyncSessionLocal() as _s:
@@ -662,16 +670,14 @@ async def sdk_recover_cart(
             # Cap to remaining stock net of anything already in the cart —
             # unless the merchant is deliberately overselling, in which case
             # there is no ceiling to cap against.
-            existing = cart.get_item(product_id, variant_id)
-            existing_qty = existing.quantity if existing else 0
             allowed = (
-                want_qty
+                add_qty
                 if product.continue_selling_when_out_of_stock
                 else max(0, variant.inventory_quantity - existing_qty)
             )
             if allowed <= 0:
                 continue
-            add_qty = min(want_qty, allowed)
+            add_qty = min(add_qty, allowed)
 
         cart.add_item(
             CartItem(

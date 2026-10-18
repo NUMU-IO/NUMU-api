@@ -676,13 +676,17 @@ async def notify_whatsapp(
     This is the per-row "Notify via WhatsApp" action. Because the merchant
     explicitly chose to message this customer, it BYPASSES the marketing
     opt-in requirement (and per product decision, opt-out too) — it still
-    respects store credentials and the ``abandoned_cart_v2`` template's
+    respects store credentials and the abandoned-cart template's
     APPROVED status so we never ship a malformed send to Meta.
     """
     from sqlalchemy import select
 
     from src.core.enums.whatsapp import TemplateCategory
-    from src.core.interfaces.services.messaging_service import MessageRecipient
+    from src.core.interfaces.services.messaging_service import (
+        EGYPTIAN_TEMPLATES,
+        MessageRecipient,
+        MessageType,
+    )
     from src.core.services.whatsapp_send_guard import GuardContext, check
     from src.infrastructure.database.models.tenant.whatsapp_template import (
         WhatsAppTemplateModel,
@@ -705,44 +709,48 @@ async def notify_whatsapp(
     phone = checkout.phone
 
     # Per-customer cooldown — shares the 24h key the scheduled abandoned-cart
-    # task sets. abandoned_cart_v2 is a MARKETING template; Meta frequency-caps
+    # task sets. The abandoned-cart template is MARKETING; Meta frequency-caps
     # marketing sends per recipient and silently drops repeats with error
     # 131049 ("not delivered to maintain healthy ecosystem engagement"). So
     # nudging several of one customer's carts would deliver only the first.
     # Gate the manual action on the same key so the merchant gets a clear
     # "already nudged this customer" response instead of firing a send Meta
-    # will drop. Keyed by customer_id when known (shares the auto-task key),
-    # else by phone for guest checkouts (manual-to-manual dedup).
+    # will drop. Keyed by the phone (the same shopper can own an anonymous row
+    # and a logged-in cart), plus customer_id when known; both are the keys
+    # the automatic reminders spend.
     from src.config import settings as _settings
     from src.infrastructure.cache.redis_cache import RedisCacheService
     from src.infrastructure.messaging.tasks.abandoned_cart_tasks import (
         NOTIFICATION_COOLDOWN_KEY,
         NOTIFICATION_COOLDOWN_SECONDS,
+        phone_cooldown_key,
     )
 
+    cooldown_keys = [phone_cooldown_key(store.id, phone)]
     if checkout.customer_id is not None:
-        cooldown_key = NOTIFICATION_COOLDOWN_KEY.format(
-            store_id=store.id, customer_id=checkout.customer_id
+        cooldown_keys.append(
+            NOTIFICATION_COOLDOWN_KEY.format(
+                store_id=store.id, customer_id=checkout.customer_id
+            )
         )
-    else:
-        cooldown_key = f"abandoned_cart_notified:{store.id}:phone:{phone}"
 
     if _settings.redis_host:
         _cache = RedisCacheService()
         try:
-            if await _cache.exists(cooldown_key):
-                logger.info(
-                    "abandoned_cart_whatsapp_cooldown store=%s checkout=%s",
-                    store.id,
-                    checkout_id,
-                )
-                return NotifyWhatsAppResponse(
-                    sent=False, reason="already_notified_recently"
-                )
+            for cooldown_key in cooldown_keys:
+                if await _cache.exists(cooldown_key):
+                    logger.info(
+                        "abandoned_cart_whatsapp_cooldown store=%s checkout=%s",
+                        store.id,
+                        checkout_id,
+                    )
+                    return NotifyWhatsAppResponse(
+                        sent=False, reason="already_notified_recently"
+                    )
         finally:
             await _cache.close()
 
-    # abandoned_cart_v2 is seeded for {"en", "ar"} (NOT en_US). Resolve the
+    # The abandoned-cart template is seeded for {"en", "ar"} (NOT en_US). Resolve the
     # send language to one of those so both the DB template-status lookup
     # and the messaging service's EGYPTIAN_TEMPLATES key match.
     #
@@ -763,13 +771,16 @@ async def notify_whatsapp(
     else:  # auto
         raw_lang = (store.default_language or "ar").lower()
     language = "en" if raw_lang.startswith("en") else "ar"
+    # The template send_abandoned_cart below actually sends. The check used to
+    # name abandoned_cart_v2 while v3 went out, so v2's approval decided.
+    template_name = EGYPTIAN_TEMPLATES[MessageType.ABANDONED_CART][language].name
 
     # Template approval status (FR-029) — guards against a 400 from Meta.
     tmpl_row = (
         await db.execute(
             select(WhatsAppTemplateModel).where(
                 WhatsAppTemplateModel.store_id == store.id,
-                WhatsAppTemplateModel.name == "abandoned_cart_v2",
+                WhatsAppTemplateModel.name == template_name,
                 WhatsAppTemplateModel.language == language,
             )
         )
@@ -783,7 +794,7 @@ async def notify_whatsapp(
 
     ctx = GuardContext(
         phone=phone,
-        template_name="abandoned_cart_v2",
+        template_name=template_name,
         template_category=TemplateCategory.MARKETING,
         template_status=getattr(template_status, "value", template_status),
         store_has_credentials=True,  # resolver always yields a service
@@ -839,9 +850,10 @@ async def notify_whatsapp(
         if _settings.redis_host:
             _cache = RedisCacheService()
             try:
-                await _cache.set(
-                    cooldown_key, "1", expire=NOTIFICATION_COOLDOWN_SECONDS
-                )
+                for cooldown_key in cooldown_keys:
+                    await _cache.set(
+                        cooldown_key, "1", expire=NOTIFICATION_COOLDOWN_SECONDS
+                    )
             finally:
                 await _cache.close()
         # Stamp the row so the UI / cooldown logic can see it was nudged.
@@ -881,7 +893,7 @@ async def notify_whatsapp(
                         metadata={"checkout_id": str(checkout_id)},
                         message_id=result.message_id,
                         direction=MessageDirection.OUTBOUND,
-                        template_name="abandoned_cart_v2",
+                        template_name=template_name,
                         status=MessageStatus.SENT,
                     )
                 )
