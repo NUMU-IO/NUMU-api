@@ -40,9 +40,10 @@ from src.infrastructure.repositories.page_view_repository import PageViewReposit
 
 router = APIRouter(prefix="/{store_id}/dashboard")
 
-# The dashboard refetches these on every mount and range change. A minute of
-# staleness is invisible next to the hub's own 5-minute staleTime.
-DASHBOARD_CACHE_TTL_SECONDS = 60
+# The dashboard refetches these on every mount and range change. Matching the
+# hub's own 5-minute staleTime keeps most visits off the database: a cold load
+# fans out ~6 aggregate queries at once, which stalls the shared-CPU instance.
+DASHBOARD_CACHE_TTL_SECONDS = 300
 
 
 def dashboard_cache_key(store_id: object, name: str, *parts: object) -> str:
