@@ -157,6 +157,9 @@ _max_overflow = (
 # negligible compared to the marketplace build pipeline's overall cost.
 _engine_kwargs: dict = {
     "echo": settings.debug,
+    # A database error's text carries the statement's values (shoppers'
+    # phones, emails, addresses), and handlers log it and Sentry reports it.
+    "hide_parameters": True,
     "connect_args": {
         "server_settings": {
             "statement_timeout": str(settings.db_statement_timeout_ms),
