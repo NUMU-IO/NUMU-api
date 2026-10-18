@@ -401,10 +401,6 @@ celery_app.conf.beat_schedule = {
         "task": "tasks.send_inactive_merchant_nudges",
         "schedule": crontab(hour=9, minute=0),  # Daily at 09:00 UTC (11 AM Cairo)
     },
-    "send-trial-expiry-warnings": {
-        "task": "tasks.send_trial_expiry_warnings",
-        "schedule": crontab(hour=8, minute=0),  # Daily at 08:00 UTC (10 AM Cairo)
-    },
     # ─── Stream 1.5: Demo cleanup (every 2 hours) ────────────────────
     "cleanup-expired-demo-tenants": {
         "task": "tasks.cleanup_expired_demo_tenants",

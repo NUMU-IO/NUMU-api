@@ -1,12 +1,12 @@
 """Celery tasks for scheduled onboarding nudge emails.
 
-These run on a daily beat schedule to catch merchants who:
-1. Created a store but haven't added a product of their own (24h / 3d)
-2. Have trials expiring soon (7d / 3d / 1d warnings)
+This runs on a daily beat schedule to catch merchants who created a store
+but haven't added a product of their own (24h / 3d). Trial expiry warnings
+are not sent from here: ``tasks.send_subscription_expiry_warnings`` already
+sends trial stores a bilingual warning.
 
 Each email is sent at most once, tracked via a Redis key:
-``email_sent:{id}:{event_key}`` (store id for the product nudges, user id
-for the trial warnings).
+``email_sent:{store_id}:{event_key}``.
 """
 
 import asyncio
@@ -59,6 +59,7 @@ def send_inactive_merchant_nudges(self):
     from sqlalchemy import exists, select
 
     from src.core.interfaces.services.email_service import EmailMessage
+    from src.infrastructure.cache.redis_cache import RedisCacheService
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.database.models.public.user import UserModel
     from src.infrastructure.database.models.tenant.product import ProductModel
@@ -66,10 +67,11 @@ def send_inactive_merchant_nudges(self):
     from src.infrastructure.external_services.resend.email_service import (
         ResendEmailService,
     )
-    from src.infrastructure.messaging.redis_client import get_redis_client
 
     async def _process():
-        redis = await get_redis_client()
+        # The client of this task's own loop: a redis.asyncio client belongs to
+        # the loop it was made on.
+        redis = await RedisCacheService()._get_client()
         async with AsyncSessionLocal() as session:
             now = datetime.now(UTC)
 
@@ -141,89 +143,6 @@ def send_inactive_merchant_nudges(self):
         return _run_async(_process())
     except Exception as e:
         logger.error("inactive_nudges_error", error=str(e))
-        raise self.retry(exc=e)
-
-
-@celery_app.task(
-    name="tasks.send_trial_expiry_warnings",
-    bind=True,
-    max_retries=1,
-    default_retry_delay=60,
-)
-def send_trial_expiry_warnings(self):
-    """Find merchants with trials expiring in 7d/3d/1d and send warning emails.
-
-    Runs daily via Celery Beat.
-    """
-    from sqlalchemy import select
-
-    from src.core.interfaces.services.email_service import EmailMessage
-    from src.infrastructure.database.connection import AsyncSessionLocal
-    from src.infrastructure.database.models.public.user import UserModel
-    from src.infrastructure.external_services.resend.email_service import (
-        ResendEmailService,
-    )
-    from src.infrastructure.messaging.redis_client import get_redis_client
-
-    async def _process():
-        redis = await get_redis_client()
-        async with AsyncSessionLocal() as session:
-            now = datetime.now(UTC)
-
-            result = await session.execute(
-                select(UserModel).where(
-                    UserModel.trial_ends_at.is_not(None),
-                    UserModel.trial_ends_at > now,
-                    UserModel.status == "ACTIVE",
-                )
-            )
-
-            users = result.scalars().all()
-            service = ResendEmailService()
-            sent_count = 0
-
-            thresholds = [
-                (7, "trial_7d", "7 days left on your trial"),
-                (3, "trial_3d", "3 days left — upgrade now"),
-                (1, "trial_1d", "Last day of your trial"),
-            ]
-
-            for user in users:
-                days_left = (user.trial_ends_at - now).days
-                user_id = str(user.id)
-
-                for threshold_days, event_key, subject in thresholds:
-                    if days_left == threshold_days:
-                        if not await _was_sent(redis, user_id, event_key):
-                            try:
-                                await service.send_email(
-                                    EmailMessage(
-                                        to=user.email,
-                                        subject=subject,
-                                        html_content=_trial_warning_html(
-                                            name=user.first_name,
-                                            days_left=threshold_days,
-                                        ),
-                                    )
-                                )
-                                await _mark_sent(redis, user_id, event_key)
-                                sent_count += 1
-                            except Exception:
-                                logger.warning(
-                                    "trial_warning_email_failed",
-                                    user_id=user_id,
-                                    # Not ``event=``: structlog's first argument
-                                    # is ``event``, so that kwarg raised TypeError.
-                                    event_key=event_key,
-                                )
-
-            logger.info("trial_warnings_complete", sent=sent_count)
-            return {"sent": sent_count}
-
-    try:
-        return _run_async(_process())
-    except Exception as e:
-        logger.error("trial_warnings_error", error=str(e))
         raise self.retry(exc=e)
 
 
@@ -312,50 +231,3 @@ def _inactive_email(
     </div>
     """
     return c["subject"][i], html
-
-
-def _trial_warning_html(name: str | None, days_left: int) -> str:
-    greeting = f"Hi {name}," if name else "Hi there,"
-    urgency = (
-        "This is your last day!"
-        if days_left <= 1
-        else f"You have {days_left} days left."
-    )
-
-    return f"""
-    <div style="font-family: Inter, Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a2e;">
-        <div style="background: linear-gradient(135deg, #e67e22, #e74c3c); padding: 32px; border-radius: 12px 12px 0 0;">
-            <h1 style="color: white; margin: 0; font-size: 22px;">
-                {"Final day of your trial" if days_left <= 1 else f"{days_left} days left on your trial"}
-            </h1>
-        </div>
-        <div style="padding: 24px; background: #ffffff; border: 1px solid #e9ecef; border-top: none; border-radius: 0 0 12px 12px;">
-            <p>{greeting}</p>
-            <p><strong>{urgency}</strong> Your NUMU trial is coming to an end.
-            Upgrade now to keep your store running and unlock all premium features.</p>
-
-            <div style="background: #f8f9fa; border-radius: 8px; padding: 16px; margin: 20px 0;">
-                <p style="margin: 0 0 8px; font-weight: 600;">What you'll keep with Premium:</p>
-                <ul style="margin: 0; padding-left: 20px; color: #495057; font-size: 14px;">
-                    <li>Unlimited products & orders</li>
-                    <li>Custom domain support</li>
-                    <li>Advanced analytics & health score</li>
-                    <li>Priority support</li>
-                </ul>
-            </div>
-
-            <div style="text-align: center; margin: 24px 0;">
-                <a href="https://merchant.numueg.app/settings"
-                   style="display: inline-block; background: #e67e22; color: white;
-                          padding: 12px 28px; border-radius: 8px; text-decoration: none;
-                          font-weight: 600; font-size: 15px;">
-                    Upgrade Now
-                </a>
-            </div>
-
-            <p style="color: #6c757d; font-size: 13px; margin-top: 30px;">
-                &mdash; The NUMU Team
-            </p>
-        </div>
-    </div>
-    """

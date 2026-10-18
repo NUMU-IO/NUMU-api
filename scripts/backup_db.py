@@ -46,21 +46,32 @@ def _get_settings() -> Settings:
 
 
 def _build_r2_client(settings: Settings):
-    """Build a boto3 S3 client pointed at Cloudflare R2."""
-    if not all([
+    """Build a boto3 S3 client pointed at Cloudflare R2.
+
+    Takes the ``R2_*`` settings, else the ``S3_*`` ones the app's object
+    storage uses: settings.py calls ``R2_*`` legacy aliases, and
+    ``.env.example`` configures production R2 through ``S3_*`` alone.
+    """
+    if all([
         settings.r2_account_id,
         settings.r2_access_key_id,
         settings.r2_secret_access_key,
     ]):
+        endpoint = f"https://{settings.r2_account_id}.r2.cloudflarestorage.com"
+        key_id, secret = settings.r2_access_key_id, settings.r2_secret_access_key
+    else:
+        endpoint = settings.s3_endpoint_url
+        key_id, secret = settings.s3_access_key_id, settings.s3_secret_access_key
+    if not all([endpoint, key_id, secret]):
         raise RuntimeError(
-            "R2 credentials are not configured. "
-            "Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY."
+            "R2 credentials are not configured. Set R2_ACCOUNT_ID, "
+            "R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY, or the S3_* equivalents."
         )
     return boto3.client(
         "s3",
-        endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
-        aws_access_key_id=settings.r2_access_key_id,
-        aws_secret_access_key=settings.r2_secret_access_key,
+        endpoint_url=endpoint,
+        aws_access_key_id=key_id,
+        aws_secret_access_key=secret,
         config=Config(signature_version="s3v4"),
     )
 

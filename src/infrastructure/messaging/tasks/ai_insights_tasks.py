@@ -40,14 +40,18 @@ def generate_ai_insights_task(self):
 
 
 async def _generate_insights_for_all_stores():
+    from sqlalchemy import func, literal, update
+    from sqlalchemy.dialects.postgresql import JSONB
+
     from src.application.services.ai_insights_service import generate_insights
-    from src.infrastructure.database.connection import async_session_factory
+    from src.infrastructure.database.connection import AsyncSessionLocal
+    from src.infrastructure.database.models.tenant.store import StoreModel
     from src.infrastructure.repositories.analytics_rollup_repository import (
         AnalyticsRollupRepository,
     )
     from src.infrastructure.repositories.store_repository import StoreRepository
 
-    async with async_session_factory() as session:
+    async with AsyncSessionLocal() as session:
         store_repo = StoreRepository(session)
         rollup_repo = AnalyticsRollupRepository(session)
 
@@ -80,23 +84,34 @@ async def _generate_insights_for_all_stores():
                     rollups, store_currency=currency, lang="en"
                 )
 
-                # Cache in store.settings
-                current_settings = dict(store.settings) if store.settings else {}
-                current_settings["ai_insights"] = result_ar
-                current_settings["ai_insights_en"] = result_en
-                store.settings = current_settings
-                await store_repo.update(store)
+                # Cache in store.settings: merge only these two keys, in SQL,
+                # and commit per store. Writing back the store read at the start
+                # of the run would revert any store edit saved while the run is
+                # on, and one transaction for the whole run would keep every
+                # updated store row locked until the end.
+                patch = {"ai_insights": result_ar, "ai_insights_en": result_en}
+                await session.execute(
+                    update(StoreModel)
+                    .where(StoreModel.id == store.id)
+                    .values(
+                        settings=func.coalesce(
+                            StoreModel.settings, literal({}, type_=JSONB)
+                        ).op("||")(literal(patch, type_=JSONB))
+                    )
+                )
+                await session.commit()
 
                 generated += 1
             except Exception as e:
+                # A failed statement aborts the transaction; without this every
+                # later store would fail too.
+                await session.rollback()
                 logger.warning(
                     "store_insights_failed",
                     store_id=str(store.id),
                     error=str(e),
                 )
                 failed += 1
-
-        await session.commit()
 
         logger.info(
             "ai_insights_completed",
