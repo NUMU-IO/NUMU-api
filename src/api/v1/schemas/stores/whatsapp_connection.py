@@ -22,7 +22,8 @@ class NotificationSettings(BaseModel):
     payment_received: bool = True
     shipping_update: bool = True
     delivery_confirmation: bool = True
-    abandoned_cart: bool = True
+    # OFF, as the reminders read it: a missing key must not show as on.
+    abandoned_cart: bool = False
     marketing: bool = False
     # COD "tap to confirm" flow (backend-031, order_confirmation_request_v1).
     # Opt-in, so it defaults OFF. When ON, COD orders get the active confirm

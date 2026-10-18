@@ -18,14 +18,6 @@ SRC = Path(__file__).resolve().parents[2] / "src"
 # Broken before this test existed, and left for the owner because fixing them
 # changes live behaviour. Do not add to this list: fix the import.
 KNOWN_BROKEN = {
-    # tasks.send_abandoned_cart_notification fails on every run. Fixing it starts
-    # abandoned-cart emails to shoppers (the email fallback ignores the
-    # merchant's WhatsApp toggle), hub notifications and checkout.abandoned
-    # webhooks for logged-in customers' carts.
-    (
-        "src/infrastructure/messaging/tasks/abandoned_cart_tasks.py",
-        "no module src.infrastructure.database.models.public.customer",
-    ),
     # build_external_theme (the legacy GitHub theme build) fails at its last
     # step; fixing it writes theme_settings on live stores again.
     (
