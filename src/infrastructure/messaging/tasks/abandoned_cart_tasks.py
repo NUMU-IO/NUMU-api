@@ -41,7 +41,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from src.application.services.entitlement_service import EntitlementService
+from src.application.services.entitlement_service import EntitlementService, aware
 from src.application.services.notification_feed import (
     emit_notification_standalone,
 )
@@ -246,7 +246,7 @@ async def _detect_and_notify() -> dict:
     cache = RedisCacheService() if settings.redis_host else None
     client = await cart_repo._get_client()
 
-    now = datetime.now(UTC)
+    now = _utcnow()
     threshold = now - timedelta(hours=ABANDONED_CART_THRESHOLD_HOURS)
     max_age = now - timedelta(hours=ABANDONED_CART_MAX_AGE_HOURS)
 
@@ -553,7 +553,7 @@ async def _remind_anonymous(session, cache, store, row) -> str:
         sent = True
         # Merchant-visible marker on the row itself.
         extra = dict(row.extra_data or {})
-        extra["wa_auto_nudge_at"] = datetime.now(UTC).isoformat()
+        extra["wa_auto_nudge_at"] = _utcnow().isoformat()
         row.extra_data = extra
         await session.commit()
         await _log_whatsapp(session, store, phone, row.id, result)
@@ -594,6 +594,9 @@ async def _send_held_reminder(checkout_id: str) -> dict:
         row = await session.get(AbandonedCheckoutModel, UUID(checkout_id))
         if row is None or row.recovered_at is not None:
             return {"outcome": "recovered"}
+        now, last = _utcnow(), aware(row.last_activity_at)
+        if last < now - timedelta(hours=ABANDONED_CART_MAX_AGE_HOURS):
+            return {"outcome": "expired"}
         if await _ordered_since(
             session, row.store_id, row.last_activity_at, phone=str(row.phone)
         ):
@@ -601,6 +604,12 @@ async def _send_held_reminder(checkout_id: str) -> dict:
         store = await session.get(StoreModel, row.store_id)
         cache = RedisCacheService() if settings.redis_host else None
         try:
+            if last > now - timedelta(hours=ABANDONED_CART_THRESHOLD_HOURS):
+                # Back since the sweep held it: the sweep reminds them once
+                # they have been away an hour again.
+                if cache:
+                    await cache.delete(_held_key(row.id))
+                return {"outcome": "shopper_active"}
             return {"outcome": await _remind_anonymous(session, cache, store, row)}
         finally:
             if cache:
@@ -719,7 +728,7 @@ async def _send_notification(customer_id: str, store_id: str) -> dict:
         ]
         if customer.phone:
             who.append(AbandonedCheckoutModel.phone == customer.phone)
-        oldest = datetime.now(UTC) - timedelta(hours=ABANDONED_CART_MAX_AGE_HOURS)
+        oldest = _utcnow() - timedelta(hours=ABANDONED_CART_MAX_AGE_HOURS)
         checkout = (
             await session.execute(
                 select(AbandonedCheckoutModel)
@@ -744,6 +753,18 @@ async def _send_notification(customer_id: str, store_id: str) -> dict:
             phone=phone,
         ):
             return {"sent": False, "reason": "converted"}
+        quiet_from = aware(checkout.last_activity_at) + timedelta(
+            hours=ABANDONED_CART_THRESHOLD_HOURS
+        )
+        if quiet_from > _utcnow():
+            # The Redis cart can be hours old while the checkout page is still
+            # open (cart/track moves the row, not the cart): run again once
+            # the checkout has been quiet an hour.
+            send_abandoned_cart_notification_task.apply_async(
+                kwargs={"customer_id": customer_id, "store_id": store_id},
+                eta=quiet_from,
+            )
+            return {"sent": False, "reason": "shopper_active"}
 
         real_name = f"{customer.first_name or ''} {customer.last_name or ''}".strip()
         items_count = sum(
@@ -868,11 +889,11 @@ async def _send_notification(customer_id: str, store_id: str) -> dict:
             # Never raise after a send: the task would retry and send again.
             try:
                 if channel == "email":
-                    checkout.recovery_email_sent_at = datetime.now(UTC)
+                    checkout.recovery_email_sent_at = _utcnow()
                 else:
                     checkout.extra_data = {
                         **(checkout.extra_data or {}),
-                        "wa_auto_nudge_at": datetime.now(UTC).isoformat(),
+                        "wa_auto_nudge_at": _utcnow().isoformat(),
                     }
                 await session.commit()
             except Exception:

@@ -191,7 +191,7 @@ async def _customer(w, store, *, phone=PHONE, email=None, accepts_marketing=Fals
 
 
 async def _checkout(w, store, *, customer=None, phone=PHONE, hours_ago=2, **fields):
-    at = datetime.now(UTC) - timedelta(hours=hours_ago)
+    at = tasks._utcnow() - timedelta(hours=hours_ago)
     row = AbandonedCheckoutModel(
         id=uuid4(),
         tenant_id=store.tenant_id,
@@ -224,7 +224,7 @@ def _cart(w, store, customer, *, hours_ago=2):
         "store_id": str(store.id),
         "items": [{"product_id": str(uuid4()), "quantity": 2, "unit_price": 50_000}],
         "currency": "EGP",
-        "updated_at": (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat(),
+        "updated_at": (tasks._utcnow() - timedelta(hours=hours_ago)).isoformat(),
     })
 
 
@@ -256,7 +256,7 @@ async def _order(w, store, customer):
         order_number=f"ORD-{uuid4().hex[:6]}",
         status="pending",
         total=100_000,
-        created_at=datetime.now(UTC),
+        created_at=tasks._utcnow(),
         shipping_address={},
         line_items=[],
     )
@@ -594,6 +594,55 @@ async def test_a_held_reminder_is_checked_again_in_the_morning(
     await _morning(w, monkeypatch)
 
     assert w.whatsapp == [] and w.emails == []
+
+
+@pytest.mark.parametrize("overnight", ["came_back", "aged_out"])
+async def test_a_held_reminder_checks_the_1_to_72_hour_window_again(
+    world, monkeypatch, overnight
+):
+    """Rule 1 holds when the reminder runs, not only when the sweep held it:
+    a shopper back at 08:59 is reminded an hour after leaving again, and a
+    checkout that passed 72 h overnight is not reminded."""
+    w = world
+    monkeypatch.setattr(tasks, "_utcnow", lambda: NIGHT)
+    store = await _store(w)
+    row = await _checkout(w, store, hours_ago=71.5 if overnight == "aged_out" else 2)
+    await _beat(w)
+    assert len(w.held) == 1
+    if overnight == "came_back":
+        row.last_activity_at = datetime(2026, 10, 19, 8, 59, tzinfo=CAIRO).astimezone(
+            UTC
+        )
+        await w.db.flush()
+
+    await _morning(w, monkeypatch)
+    assert w.whatsapp == []
+
+    if overnight == "came_back":
+        later = datetime(2026, 10, 19, 10, 30, tzinfo=CAIRO).astimezone(UTC)
+        monkeypatch.setattr(tasks, "_utcnow", lambda: later)
+        await _beat(w)
+        assert _sent_to(w) == [PHONE]
+
+
+async def test_a_signed_in_shopper_still_on_the_checkout_page_is_not_reminded_yet(
+    world, monkeypatch
+):
+    """The Redis cart is 3 h old, but the checkout moved 12 minutes ago: the
+    reminder runs when the checkout has been quiet an hour."""
+    w = world
+    store = await _store(w)
+    customer = await _customer(w, store)
+    row = await _checkout(w, store, customer=customer, hours_ago=0.2)
+    _cart(w, store, customer, hours_ago=3)
+
+    await _beat(w)
+
+    assert w.whatsapp == [] and w.notes == []
+    [later] = w.held
+    assert later["eta"] == row.last_activity_at + timedelta(hours=1)
+    await _morning(w, monkeypatch)  # runs it at its ETA
+    assert _sent_to(w) == [PHONE]
 
 
 async def test_the_manual_nudge_checks_the_template_it_sends(world):
