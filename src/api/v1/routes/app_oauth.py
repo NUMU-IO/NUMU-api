@@ -36,6 +36,7 @@ from src.api.dependencies.auth import get_current_user_id
 from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.api.v1.routes.app_reviews import rating_summaries
+from src.api.v1.routes.stores.apps import _revalidate_app_settings
 from src.application.services.app_billing import app_price, quote_for, trial_available
 from src.application.services.app_manifest import app_subscriptions
 from src.application.services.app_tokens import (
@@ -459,6 +460,11 @@ async def token(body: TokenRequest, db: Annotated[AsyncSession, Depends(get_db)]
         )
     await db.flush()
     logger.info("oauth_token_issued", app=app.slug, store_id=str(installation.store_id))
+    # The install is live now: the store payload's installed_apps changes.
+    # Committed first, so a storefront read cannot cache the old payload.
+    store = await db.get(StoreModel, installation.store_id)
+    await db.commit()
+    await _revalidate_app_settings(store)
     return SuccessResponse(
         data=TokenResponse(
             access_token=raw, scopes=code.scopes, store_id=installation.store_id

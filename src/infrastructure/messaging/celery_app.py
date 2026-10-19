@@ -4,7 +4,12 @@ import logging
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import after_setup_logger, after_setup_task_logger, worker_init
+from celery.signals import (
+    after_setup_logger,
+    after_setup_task_logger,
+    task_postrun,
+    worker_init,
+)
 from kombu import Queue
 
 from src.config import settings
@@ -730,3 +735,13 @@ def _wire_event_bus(**_kwargs) -> None:
     from src.infrastructure.events.setup import create_event_bus
 
     create_event_bus()
+
+
+@task_postrun.connect
+def _finish_event_handlers(**_kwargs) -> None:
+    """A task's committed changes start their handlers on the task's own
+    event loop, which stops when the task returns; finish them now, or they
+    wait for the next task on that loop (the carrier poll: 30 minutes)."""
+    from src.core.events.base import finish_pending_handlers
+
+    finish_pending_handlers()

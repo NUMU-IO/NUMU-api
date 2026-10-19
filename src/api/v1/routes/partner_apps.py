@@ -40,7 +40,11 @@ from src.api.dependencies.partners import (
 )
 from src.api.dependencies.services import get_storage_service
 from src.api.responses import SuccessResponse
-from src.api.v1.routes.stores.apps import AppCatalogEntry, _listing
+from src.api.v1.routes.stores.apps import (
+    AppCatalogEntry,
+    _listing,
+    _revalidate_app_settings,
+)
 from src.application.services.app_manifest import (
     APP_SCOPES,
     APP_WEBHOOK_EVENTS,
@@ -938,6 +942,10 @@ async def dev_install(
     )
     # Reinstalled inside the retention window: the app's data stays.
     await cancel_purge(db, store.id, app.id)
+    # The store payload's installed_apps changes; committed first, as on the
+    # merchant's own install.
+    await db.commit()
+    await _revalidate_app_settings(store)
     return SuccessResponse(
         data={"store_id": str(store.id), "slug": app.slug},
         message="Installed on your dev store",

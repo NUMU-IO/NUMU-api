@@ -1,6 +1,6 @@
-"""Bosta and J&T callbacks announce order changes through the dashboard's
-post-transition path: one ``OrderStatusChangedEvent`` per real change,
-nothing on a replay, no downgrade, unknown statuses ignored."""
+"""Bosta, J&T and Mylerz callbacks announce order changes through the
+dashboard's post-transition path: one ``OrderStatusChangedEvent`` per real
+change, nothing on a replay, no downgrade, unknown statuses ignored."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from src.api.v1.routes.webhooks import bosta, jt, shipping
+from src.api.v1.routes.webhooks import bosta, jt, mylerz, shipping
 from src.application.services import shipment_status_sync
 from src.application.use_cases.orders.update_order_status import (
     UpdateOrderStatusUseCase,
@@ -127,7 +127,7 @@ def world(monkeypatch):
     async def noop(*args, **kwargs):
         return None
 
-    for module in (bosta, jt):
+    for module in (bosta, jt, mylerz):
         monkeypatch.setattr(module, "OrderRepository", orders)
         monkeypatch.setattr(module, "ShipmentRepository", shipments)
         monkeypatch.setattr(module, "narrow_to_tenant", noop)
@@ -314,6 +314,57 @@ async def test_jt_unknown_scan_is_ignored(world):
     world.order = _order(OrderStatus.SHIPPED)
     world.shipment = _shipment()
     await _jt("Brand new scan")
+    assert world.bus.events == []
+
+
+# ─── Mylerz ────────────────────────────────────────────────────────
+# Found by the Order Tracking app's Phase A (2026-10-18): Mylerz moved orders
+# without announcing them, so its shoppers got no shipped/delivered WhatsApp
+# and merchants no order webhooks.
+
+
+async def _mylerz(state: str):
+    raw = json.dumps({"Barcode": TRACKING, "Status": state}).encode()
+    await mylerz.mylerz_callback(_request(raw, {}, {"token": BOSTA_SECRET}), _Session())
+
+
+async def test_mylerz_delivered_announces_once_and_replay_is_silent(world):
+    world.order = _order(OrderStatus.SHIPPED)
+    world.shipment = _shipment()
+    await _mylerz("DELIVERED")
+    assert world.order.status == OrderStatus.DELIVERED
+    assert _statuses(world) == [("shipped", "delivered")]
+
+    await _mylerz("DELIVERED")
+    assert _statuses(world) == [("shipped", "delivered")], "a replay re-sends nothing"
+
+
+async def test_mylerz_pickup_ships_a_confirmed_order_in_one_event(world):
+    world.order = _order(OrderStatus.CONFIRMED)
+    world.shipment = _shipment(ShipmentStatus.CREATED)
+    await _mylerz("PICKED_UP")
+    assert world.order.status == OrderStatus.SHIPPED
+    assert _statuses(world) == [("confirmed", "shipped")]
+
+
+async def test_mylerz_return_and_cancel_are_announced(world):
+    world.order = _order(OrderStatus.SHIPPED)
+    world.shipment = _shipment()
+    await _mylerz("RETURNED")
+    assert _statuses(world) == [("shipped", "returned")]
+
+    world.order = _order(OrderStatus.CONFIRMED)
+    world.shipment = _shipment(ShipmentStatus.CREATED)
+    world.bus.events.clear()
+    await _mylerz("CANCELLED")
+    assert _statuses(world) == [("confirmed", "cancelled")]
+
+
+async def test_mylerz_out_for_delivery_moves_no_order(world):
+    world.order = _order(OrderStatus.SHIPPED)
+    world.shipment = _shipment()
+    await _mylerz("OUT_FOR_DELIVERY")
+    assert world.shipment.status == ShipmentStatus.OUT_FOR_DELIVERY
     assert world.bus.events == []
 
 

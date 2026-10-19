@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.v1.routes.webhooks.shipping import verify_carrier_webhook
 from src.application.services.carrier_registry import get_spec
 from src.application.services.funnel_emit_service import emit_order_delivered
+from src.application.services.shipment_status_sync import announce_order_transition
 from src.core.entities.order import OrderStatus
 from src.core.entities.shipment import ShipmentStatus
 from src.core.logging import get_logger
@@ -179,6 +180,10 @@ async def mylerz_callback(
     if tenant_id:
         await narrow_to_tenant(session, tenant_id)
 
+    # Every branch that moves the order announces it (OrderStatusChangedEvent:
+    # the shopper's WhatsApp, merchant webhooks), as Bosta's webhook does.
+    old_status = order.status if order else None
+
     # Process based on delivery state
     if state == "DELIVERED":
         log.info("delivery_completed")
@@ -237,6 +242,9 @@ async def mylerz_callback(
         await _update_shipment_status(
             shipment, shipment_repo, state, log, cod_amount=cod_amount
         )
+        await announce_order_transition(
+            session, order, old_status, reason="Delivered by Mylerz"
+        )
 
         try:
             await session.commit()
@@ -261,6 +269,9 @@ async def mylerz_callback(
                 log.error("pickup_order_update_failed", error=str(e))
 
         await _update_shipment_status(shipment, shipment_repo, state, log)
+        await announce_order_transition(
+            session, order, old_status, reason="Picked up by Mylerz"
+        )
 
         try:
             await session.commit()
@@ -304,6 +315,9 @@ async def mylerz_callback(
             )
 
         await _update_shipment_status(shipment, shipment_repo, state, log)
+        await announce_order_transition(
+            session, order, old_status, reason="Returned by carrier (Mylerz)"
+        )
 
         try:
             await session.commit()
@@ -387,6 +401,9 @@ async def mylerz_callback(
                 log.error("cancel_order_update_failed", error=str(e))
 
         await _update_shipment_status(shipment, shipment_repo, state, log)
+        await announce_order_transition(
+            session, order, old_status, reason="Cancelled via Mylerz"
+        )
 
         try:
             await session.commit()
