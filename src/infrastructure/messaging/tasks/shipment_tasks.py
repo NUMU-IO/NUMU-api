@@ -26,6 +26,7 @@ async def _sync_shipments() -> dict:
         service_for_carrier,
     )
     from src.application.services.partner_carriers import is_app_carrier
+    from src.application.services.shipment_status_sync import apply_carrier_status
     from src.core.entities.shipment import ShipmentStatus
     from src.infrastructure.database.connection import AsyncSessionLocal
     from src.infrastructure.repositories.shipment_repository import ShipmentRepository
@@ -87,11 +88,13 @@ async def _sync_shipments() -> dict:
                     # Map tracking status to ShipmentStatus
                     status_map = {
                         "pending": ShipmentStatus.CREATED,
+                        "picked_up": ShipmentStatus.PICKED_UP,
                         "in_transit": ShipmentStatus.IN_TRANSIT,
                         "out_for_delivery": ShipmentStatus.OUT_FOR_DELIVERY,
                         "delivered": ShipmentStatus.DELIVERED,
                         "returned": ShipmentStatus.RETURNED,
                         "cancelled": ShipmentStatus.CANCELLED,
+                        "failed": ShipmentStatus.FAILED,
                     }
                     new_status = status_map.get(tracking.status) or map_carrier_status(
                         carrier, tracking.status
@@ -101,17 +104,16 @@ async def _sync_shipments() -> dict:
                         if hasattr(shipment.status, "value")
                         else shipment.status
                     ):
-                        shipment.update_status(
-                            new_status,
-                            f"Synced from {carrier} API: {tracking.status}",
+                        # The webhooks' transition: a failure counts an
+                        # attempt, a pickup or delivery stamps its time.
+                        await apply_carrier_status(
+                            shipment=shipment,
+                            shipment_repo=shipment_repo,
+                            carrier=carrier,
+                            raw_status=tracking.status,
+                            description=f"Synced from {carrier} API: {tracking.status}",
+                            status=new_status,
                         )
-
-                        if new_status == ShipmentStatus.DELIVERED:
-                            shipment.delivered_at = datetime.now(UTC)
-                        elif new_status == ShipmentStatus.PICKED_UP:
-                            shipment.shipped_at = datetime.now(UTC)
-
-                        await shipment_repo.update(shipment)
                         updated += 1
 
                 except Exception as e:

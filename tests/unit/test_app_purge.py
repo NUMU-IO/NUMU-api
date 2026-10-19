@@ -117,10 +117,12 @@ async def test_a_dev_reinstall_cancels_the_pending_purge(monkeypatch):
     monkeypatch.setattr(partner_apps, "_own_app", AsyncMock(return_value=app))
     cancel = AsyncMock()
     monkeypatch.setattr(partner_apps, "cancel_purge", cancel)
+    monkeypatch.setattr(partner_apps, "_revalidate_app_settings", AsyncMock())
     db = SimpleNamespace(
         execute=AsyncMock(
             return_value=SimpleNamespace(scalar_one_or_none=lambda: store)
-        )
+        ),
+        commit=AsyncMock(),  # the install is committed before the cache bust
     )
 
     await partner_apps.dev_install(

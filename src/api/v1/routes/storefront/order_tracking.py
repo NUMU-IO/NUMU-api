@@ -322,7 +322,7 @@ async def _build_tracking_response(
             shipments = await shipment_repo.get_by_order(order.id)
             forward = [s for s in shipments if s.shipment_type == "forward"]
             if forward:
-                latest = forward[-1]
+                latest = forward[0]  # get_by_order is newest first
                 shipment_view = TrackingShipment(
                     **public_shipment(
                         latest,

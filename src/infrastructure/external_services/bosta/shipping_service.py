@@ -370,14 +370,18 @@ class BostaShippingService(IShippingService):
 
             # Map Bosta states to standard statuses
             bosta_state = delivery.get("state", {}).get("value", "")
+            # The same states as the carrier registry's Bosta map: a state
+            # missing here came back "unknown" and the poll never applied it.
             status_map = {
                 "PENDING_PICKUP": "pending",
-                "PICKED_UP": "in_transit",
+                "PICKED_UP": "picked_up",
                 "IN_WAREHOUSE": "in_transit",
+                "IN_TRANSIT": "in_transit",
                 "OUT_FOR_DELIVERY": "out_for_delivery",
                 "DELIVERED": "delivered",
                 "RETURNED": "returned",
                 "CANCELLED": "cancelled",
+                "DELIVERY_FAILED": "failed",
             }
             status = status_map.get(bosta_state, "unknown")
 

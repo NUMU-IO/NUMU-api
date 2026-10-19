@@ -8,6 +8,7 @@ Provides a simple in-process event bus that:
 """
 
 import asyncio
+import time
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
@@ -58,6 +59,34 @@ def _handler_concurrency() -> int:
         return max(1, int(raw))
     except ValueError:
         return DEFAULT_HANDLER_CONCURRENCY
+
+
+def finish_pending_handlers(timeout: float = 120.0) -> int:
+    """Run to the end the handler tasks waiting on an idle event loop.
+
+    A Celery task runs its coroutine with ``loop.run_until_complete`` and
+    stops the loop when the coroutine returns, so the handlers its commits
+    started (``commit_watch``, ``bus.publish``) were left suspended there:
+    they resumed only when the next task reused that loop (the carrier poll's
+    is reused 30 minutes later), by when their connection was gone. Called
+    after every task (``celery_app``); returns how many finished.
+    """
+    # ponytail: assumes Celery's prefork pool (one task at a time per process,
+    # as deployed); a threads pool would need each thread to drain its own loop.
+    deadline = time.monotonic() + timeout
+    finished = 0
+    while (left := deadline - time.monotonic()) > 0:
+        by_loop: dict[asyncio.AbstractEventLoop, list[asyncio.Task[None]]] = {}
+        for task in list(_inflight):
+            loop = task.get_loop()
+            if not task.done() and not loop.is_closed() and not loop.is_running():
+                by_loop.setdefault(loop, []).append(task)
+        if not by_loop:
+            break
+        for loop, tasks in by_loop.items():
+            done, _pending = loop.run_until_complete(asyncio.wait(tasks, timeout=left))
+            finished += len(done)
+    return finished
 
 
 def _schedule_immediately(
