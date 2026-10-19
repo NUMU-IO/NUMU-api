@@ -85,11 +85,14 @@ async def test_whatsapp_check_sends_the_trimmed_token_in_the_header(monkeypatch)
         "AsyncClient",
         lambda **kw: real(transport=httpx.MockTransport(answer), **kw),
     )
-    await cv.WhatsAppValidator().validate({
+    credentials = {
         "access_token": "EAABtok\n",
         "phone_number_id": "1",
         "business_account_id": "2",
-    })
+    }
+    await cv.WhatsAppValidator().validate(credentials)
+    # configure_credentials stores this dict, so it must hold the trimmed token.
+    assert credentials["access_token"] == "EAABtok"
     assert len(seen) == 2
     assert all(r.headers["Authorization"] == "Bearer EAABtok" for r in seen)
     assert not any("EAABtok" in str(r.url) for r in seen)

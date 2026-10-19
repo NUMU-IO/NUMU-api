@@ -46,7 +46,11 @@ class WhatsAppValidator(GatewayValidator):
         if not structure_result.is_valid:
             return structure_result
 
-        access_token = credentials["access_token"].strip()
+        # Pasted tokens bring a trailing newline along, which httpx refuses
+        # in a header. Write the trimmed token back: configure_credentials
+        # encrypts and stores this same dict once validation passes.
+        credentials["access_token"] = str(credentials["access_token"]).strip()
+        access_token = credentials["access_token"]
         phone_number_id = credentials["phone_number_id"]
         business_account_id = credentials["business_account_id"]
 
