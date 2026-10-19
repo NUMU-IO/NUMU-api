@@ -135,9 +135,10 @@ class MetaOAuthClient:
         """
         client = self._client or httpx.AsyncClient(timeout=15.0)
         try:
-            resp = await client.get(
+            # POST keeps the app secret and the code out of the URL.
+            resp = await client.post(
                 f"https://graph.facebook.com/{self.api_version}/oauth/access_token",
-                params={
+                data={
                     "client_id": self.app_id,
                     "client_secret": self.app_secret,
                     "redirect_uri": redirect_uri,
@@ -159,9 +160,9 @@ class MetaOAuthClient:
         """
         client = self._client or httpx.AsyncClient(timeout=15.0)
         try:
-            resp = await client.get(
+            resp = await client.post(
                 f"https://graph.facebook.com/{self.api_version}/oauth/access_token",
-                params={
+                data={
                     "grant_type": "fb_exchange_token",
                     "client_id": self.app_id,
                     "client_secret": self.app_secret,
@@ -183,12 +184,14 @@ class MetaOAuthClient:
         one entry, the route handler auto-selects it (the common case).
         """
         client = self._client or httpx.AsyncClient(timeout=15.0)
+        auth = {"Authorization": f"Bearer {access_token}"}
         try:
             # Resolve the business the user belongs to first — pixels &
             # catalogs are owned by businesses, not users.
             businesses_resp = await client.get(
                 f"https://graph.facebook.com/{self.api_version}/me/businesses",
-                params={"access_token": access_token, "fields": "id,name"},
+                params={"fields": "id,name"},
+                headers=auth,
             )
             businesses = _parse_data_response(businesses_resp)
             business_id = str(businesses[0]["id"]) if businesses else None
@@ -198,19 +201,22 @@ class MetaOAuthClient:
             if business_id:
                 pixels_resp = await client.get(
                     f"https://graph.facebook.com/{self.api_version}/{business_id}/adspixels",
-                    params={"access_token": access_token, "fields": "id,name"},
+                    params={"fields": "id,name"},
+                    headers=auth,
                 )
                 pixels = _parse_data_response(pixels_resp)
 
                 catalogs_resp = await client.get(
                     f"https://graph.facebook.com/{self.api_version}/{business_id}/owned_product_catalogs",
-                    params={"access_token": access_token, "fields": "id,name"},
+                    params={"fields": "id,name"},
+                    headers=auth,
                 )
                 catalogs = _parse_data_response(catalogs_resp)
 
             pages_resp = await client.get(
                 f"https://graph.facebook.com/{self.api_version}/me/accounts",
-                params={"access_token": access_token, "fields": "id,name"},
+                params={"fields": "id,name"},
+                headers=auth,
             )
             pages = _parse_data_response(pages_resp)
 
@@ -242,7 +248,7 @@ class MetaOAuthClient:
         try:
             resp = await client.delete(
                 f"https://graph.facebook.com/{self.api_version}/me/permissions",
-                params={"access_token": access_token},
+                headers={"Authorization": f"Bearer {access_token}"},
             )
             if resp.status_code >= 400:
                 logger.warning(

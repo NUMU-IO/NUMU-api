@@ -999,7 +999,7 @@ async def _send_event(
         with httpx.Client(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
             resp = client.post(
                 url,
-                params={"access_token": access_token},
+                headers={"Authorization": f"Bearer {access_token}"},
                 json=capi_payload,
             )
         response_status = resp.status_code
@@ -1824,7 +1824,9 @@ async def _post_capi_batch(
 
     try:
         with httpx.Client(timeout=httpx.Timeout(30.0, connect=5.0)) as client:
-            resp = client.post(url, params={"access_token": access_token}, json=payload)
+            resp = client.post(
+                url, headers={"Authorization": f"Bearer {access_token}"}, json=payload
+            )
     except (httpx.NetworkError, httpx.TimeoutException) as exc:
         return 0, None, None, None, f"{type(exc).__name__}: {exc}"
 

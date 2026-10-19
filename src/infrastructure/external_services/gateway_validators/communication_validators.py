@@ -56,9 +56,9 @@ class WhatsAppValidator(GatewayValidator):
                 phone_response = await client.get(
                     f"{self.GRAPH_API_URL}/{phone_number_id}",
                     params={
-                        "access_token": access_token,
                         "fields": "display_phone_number,verified_name,quality_rating",
                     },
+                    headers={"Authorization": f"Bearer {access_token}"},
                 )
 
                 if phone_response.status_code == 401:
@@ -91,9 +91,9 @@ class WhatsAppValidator(GatewayValidator):
                 business_response = await client.get(
                     f"{self.GRAPH_API_URL}/{business_account_id}",
                     params={
-                        "access_token": access_token,
                         "fields": "name,id",
                     },
+                    headers={"Authorization": f"Bearer {access_token}"},
                 )
 
                 if business_response.status_code != 200:

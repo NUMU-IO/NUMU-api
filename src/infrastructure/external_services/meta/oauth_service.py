@@ -102,7 +102,8 @@ class MetaOAuthService:
             raise ValueError("Redirect URI not configured")
 
         url = f"https://graph.facebook.com/{self.api_version}/oauth/access_token"
-        params = {
+        # POST keeps the app secret and the code out of the URL.
+        form = {
             "client_id": self.app_id,
             "client_secret": self.app_secret,
             "redirect_uri": redirect,
@@ -111,7 +112,7 @@ class MetaOAuthService:
 
         logger.info("meta_oauth_token_exchange", redirect_uri=redirect)
 
-        response = await self._client.get(url, params=params)
+        response = await self._client.post(url, data=form)
         response.raise_for_status()
         data = response.json()
 
@@ -135,7 +136,7 @@ class MetaOAuthService:
     ) -> dict[str, Any]:
         """Exchange short-lived token for long-lived token (60 days)."""
         url = f"https://graph.facebook.com/{self.api_version}/oauth/access_token"
-        params = {
+        form = {
             "grant_type": "fb_exchange_token",
             "client_id": self.app_id,
             "client_secret": self.app_secret,
@@ -144,7 +145,7 @@ class MetaOAuthService:
 
         logger.info("meta_oauth_long_lived_exchange")
 
-        response = await self._client.get(url, params=params)
+        response = await self._client.post(url, data=form)
         response.raise_for_status()
         data = response.json()
 
@@ -163,7 +164,6 @@ class MetaOAuthService:
         """Get Facebook Pages for the user."""
         url = f"https://graph.facebook.com/{self.api_version}/me/accounts"
         params = {
-            "access_token": access_token,
             # NOTE: `perms` was removed from the Page node ages ago (`tasks`
             # replaced it); requesting it 400s the whole call on v25.0.
             "fields": "id,name,access_token,tasks",
@@ -171,7 +171,9 @@ class MetaOAuthService:
 
         logger.debug("meta_get_pages")
 
-        response = await self._client.get(url, params=params)
+        response = await self._client.get(
+            url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+        )
         response.raise_for_status()
         data = response.json()
         result: list[dict[str, Any]] = data.get("data", [])
@@ -185,13 +187,14 @@ class MetaOAuthService:
         """Get Instagram Business account linked to a Facebook Page."""
         url = f"https://graph.facebook.com/{self.api_version}/{page_id}"
         params = {
-            "access_token": page_access_token,
             "fields": "instagram_business_account",
         }
 
         logger.debug("meta_get_instagram_account", page_id=page_id)
 
-        response = await self._client.get(url, params=params)
+        response = await self._client.get(
+            url, params=params, headers={"Authorization": f"Bearer {page_access_token}"}
+        )
         response.raise_for_status()
         data = response.json()
 
@@ -209,13 +212,14 @@ class MetaOAuthService:
         """Get Instagram Business account profile."""
         url = f"https://graph.facebook.com/{self.api_version}/{ig_account_id}"
         params = {
-            "access_token": access_token,
             "fields": "id,username,name,profile_picture_url,biography",
         }
 
         logger.debug("meta_get_instagram_profile", ig_id=ig_account_id)
 
-        response = await self._client.get(url, params=params)
+        response = await self._client.get(
+            url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+        )
         response.raise_for_status()
         result_dict: dict[str, Any] = response.json()
         return result_dict
@@ -227,13 +231,14 @@ class MetaOAuthService:
         """Get WhatsApp Business Accounts."""
         url = f"https://graph.facebook.com/{self.api_version}/me/businesses"
         params = {
-            "access_token": access_token,
             "fields": "id,name,whatsapp_business_accounts{id,phone_code_hash,verified_name,quality_score}",
         }
 
         logger.debug("meta_get_whatsapp_accounts")
 
-        response = await self._client.get(url, params=params)
+        response = await self._client.get(
+            url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+        )
         response.raise_for_status()
         data = response.json()
 
@@ -254,13 +259,14 @@ class MetaOAuthService:
         """Get phone numbers for a WhatsApp Business Account."""
         url = f"https://graph.facebook.com/{self.api_version}/{waba_id}/phone_numbers"
         params = {
-            "access_token": access_token,
             "fields": "id,display_name,verified,code_verification_status,quality_rating",
         }
 
         logger.debug("meta_get_whatsapp_phones", waba_id=waba_id)
 
-        response = await self._client.get(url, params=params)
+        response = await self._client.get(
+            url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+        )
         response.raise_for_status()
         data = response.json()
         result: list[dict[str, Any]] = data.get("data", [])
@@ -306,11 +312,11 @@ class MetaOAuthService:
         stops the delivery at the source; the status flip alone is not enough.
         """
         url = f"https://graph.facebook.com/{self.api_version}/{page_id}/subscribed_apps"
-        params = {"access_token": page_access_token}
-
         logger.info("meta_unsubscribe_page_webhook", page_id=page_id)
 
-        response = await self._client.delete(url, params=params)
+        response = await self._client.delete(
+            url, headers={"Authorization": f"Bearer {page_access_token}"}
+        )
         if response.status_code == 200:
             return True
         logger.warning(

@@ -91,7 +91,7 @@ def capi_harness(monkeypatch):
         def __exit__(self, *a):
             return False
 
-        def post(self, url, *, params, json):
+        def post(self, url, *, headers, json):
             harness["posted"] = json
             return response_mock
 

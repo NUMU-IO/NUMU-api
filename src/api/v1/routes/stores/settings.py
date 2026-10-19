@@ -4807,7 +4807,8 @@ async def verify_meta_tracking_connection(
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 url,
-                params={"fields": "name,is_active", "access_token": token},
+                params={"fields": "name,is_active"},
+                headers={"Authorization": f"Bearer {token}"},
             )
         body = resp.json() if resp.content else {}
     except Exception as exc:

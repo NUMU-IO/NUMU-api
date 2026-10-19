@@ -225,7 +225,6 @@ async def poll_match_quality(
 
         GET https://graph.facebook.com/{ver}/dataset_quality
             ?dataset_id={pixel_id}
-            &access_token={token}
             &fields=web{event_name,
                         event_match_quality{composite_score,
                                             match_key_feedback{identifier,coverage},
@@ -242,7 +241,8 @@ async def poll_match_quality(
     **Token.** Needs a long-lived *system user* token with ``ads_read`` plus
     one of ``ads_management`` / ``business_management``. A store's CAPI token
     frequently does NOT carry those scopes — the call then 400s and we log and
-    return empty rather than pretending the store has no data.
+    return empty rather than pretending the store has no data. The token rides
+    in the ``Authorization: Bearer`` header, never the URL.
     """
     import httpx
 
@@ -262,11 +262,8 @@ async def poll_match_quality(
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 url,
-                params={
-                    "dataset_id": pixel_id,
-                    "access_token": access_token,
-                    "fields": fields,
-                },
+                params={"dataset_id": pixel_id, "fields": fields},
+                headers={"Authorization": f"Bearer {access_token}"},
             )
         if resp.status_code >= 400:
             logger.warning(

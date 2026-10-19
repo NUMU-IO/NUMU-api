@@ -168,10 +168,11 @@ class MetaSocialService:
             return self._mock_token(platform)
 
         async with httpx.AsyncClient(timeout=15) as client:
-            # Step 2a: code → short-lived token
-            resp = await client.get(
+            # Step 2a: code → short-lived token. Both exchanges POST so the
+            # app secret and the tokens stay out of the URL.
+            resp = await client.post(
                 f"{self._graph_url}/oauth/access_token",
-                params={
+                data={
                     "client_id": self.app_id,
                     "client_secret": self.app_secret,
                     "code": code,
@@ -186,9 +187,9 @@ class MetaSocialService:
             short_token: str = resp.json()["access_token"]
 
             # Step 2b: short-lived → long-lived token
-            resp = await client.get(
+            resp = await client.post(
                 f"{self._graph_url}/oauth/access_token",
-                params={
+                data={
                     "grant_type": "fb_exchange_token",
                     "client_id": self.app_id,
                     "client_secret": self.app_secret,
@@ -233,9 +234,9 @@ class MetaSocialService:
         resp = await client.get(
             f"{self._graph_url}/me/accounts",
             params={
-                "access_token": access_token,
                 "fields": "id,name,instagram_business_account",
             },
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()
         pages = resp.json().get("data", [])
@@ -259,9 +260,9 @@ class MetaSocialService:
         resp = await client.get(
             f"{self._graph_url}/{ig_account_id}",
             params={
-                "access_token": access_token,
                 "fields": "id,username,followers_count,media_count",
             },
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -280,9 +281,9 @@ class MetaSocialService:
         resp = await client.get(
             f"{self._graph_url}/me/accounts",
             params={
-                "access_token": access_token,
                 "fields": "id,name,followers_count,fan_count",
             },
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()
         pages = resp.json().get("data", [])
@@ -344,9 +345,9 @@ class MetaSocialService:
         resp = await client.get(
             f"{self._graph_url}/me/accounts",
             params={
-                "access_token": access_token,
                 "fields": "instagram_business_account",
             },
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()
         pages = resp.json().get("data", [])
@@ -363,7 +364,6 @@ class MetaSocialService:
 
         # Fetch media
         params = {
-            "access_token": access_token,
             "fields": "id,caption,media_url,thumbnail_url,media_type,like_count,comments_count,timestamp",
             "limit": str(min(limit, 100)),  # API max is 100 per page
         }
@@ -373,6 +373,7 @@ class MetaSocialService:
         resp = await client.get(
             f"{self._graph_url}/{ig_account_id}/media",
             params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -428,7 +429,8 @@ class MetaSocialService:
         # Get page ID and page access token
         resp = await client.get(
             f"{self._graph_url}/me/accounts",
-            params={"access_token": access_token, "fields": "id,access_token"},
+            params={"fields": "id,access_token"},
+            headers={"Authorization": f"Bearer {access_token}"},
         )
         resp.raise_for_status()
         pages = resp.json().get("data", [])
@@ -442,7 +444,6 @@ class MetaSocialService:
 
         # Fetch posts
         params = {
-            "access_token": page_token,
             "fields": "id,message,full_picture,created_time,likes.summary(true),comments.summary(true)",
             "limit": min(limit, 100),
         }
@@ -452,6 +453,7 @@ class MetaSocialService:
         resp = await client.get(
             f"{self._graph_url}/{page_id}/posts",
             params=params,
+            headers={"Authorization": f"Bearer {page_token}"},
         )
         resp.raise_for_status()
         data = resp.json()

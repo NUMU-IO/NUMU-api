@@ -47,7 +47,7 @@ def captured_meta_post(monkeypatch):
     """Patch the full meta_capi._send_event collaborator graph so we
     can capture the httpx POST without standing up a real DB.
 
-    Returns a dict that gets populated with ``url``, ``params``, and
+    Returns a dict that gets populated with ``url``, ``headers``, and
     ``json`` on the first ``httpx.Client.post`` call.
     """
     captured: dict = {}
@@ -70,9 +70,9 @@ def captured_meta_post(monkeypatch):
         def __exit__(self, *args):
             return False
 
-        def post(self, url, *, params, json):
+        def post(self, url, *, headers, json):
             captured["url"] = url
-            captured["params"] = params
+            captured["headers"] = headers
             captured["json"] = json
             return response_mock
 
@@ -311,5 +311,8 @@ class TestCAPIPipelineHashing:
         assert url.endswith(f"/{PIXEL_ID}/events")
         # API version defaults to v21.0 unless overridden in settings.
         assert "/v" in url
-        # Access token MUST be in the query params, not body — per Meta spec.
-        assert captured_meta_post["params"]["access_token"] == "test-access-token-EAAB"
+        # The token rides in the Authorization header, never the URL.
+        assert captured_meta_post["headers"] == {
+            "Authorization": "Bearer test-access-token-EAAB"
+        }
+        assert "test-access-token-EAAB" not in url

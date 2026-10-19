@@ -72,7 +72,6 @@ class MetaGraphClient:
         """Make a GET request to the Graph API."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         params = params or {}
-        params["access_token"] = self.access_token
 
         logger.debug(
             "meta_api_request",
@@ -116,7 +115,6 @@ class MetaGraphClient:
     ) -> dict[str, Any]:
         """Make a DELETE request to the Graph API."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        params = {"access_token": self.access_token}
 
         logger.debug(
             "meta_api_request",
@@ -124,9 +122,7 @@ class MetaGraphClient:
             endpoint=endpoint,
         )
 
-        response = await self._client.delete(
-            url, headers=self._get_headers(), params=params, **kwargs
-        )
+        response = await self._client.delete(url, headers=self._get_headers(), **kwargs)
         return self._handle_response(response, endpoint=endpoint)
 
     def _handle_response(

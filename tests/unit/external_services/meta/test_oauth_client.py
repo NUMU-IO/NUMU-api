@@ -184,7 +184,7 @@ class TestParseDataResponse:
 
 @pytest.mark.asyncio
 async def test_exchange_code_for_token_passes_correct_params():
-    """The token-exchange request sends the documented Meta params."""
+    """The token exchange POSTs the documented Meta params in the body, not the URL."""
     captured: dict = {}
 
     class _StubClient:
@@ -197,9 +197,10 @@ async def test_exchange_code_for_token_passes_correct_params():
         async def aclose(self):
             return None
 
-        async def get(self, url, params=None, **_):
+        async def post(self, url, data=None, **kwargs):
             captured["url"] = url
-            captured["params"] = params
+            captured["data"] = data
+            captured["kwargs"] = kwargs
             import json
 
             return httpx.Response(
@@ -212,7 +213,7 @@ async def test_exchange_code_for_token_passes_correct_params():
             )
 
     stub = MagicMock(wraps=_StubClient())
-    stub.get = _StubClient().get  # type: ignore[method-assign]
+    stub.post = _StubClient().post  # type: ignore[method-assign]
     stub.aclose = _StubClient().aclose  # type: ignore[method-assign]
 
     client = MetaOAuthClient(
@@ -222,8 +223,9 @@ async def test_exchange_code_for_token_passes_correct_params():
         code="code123", redirect_uri="https://x/cb"
     )
     assert tokens.access_token == "T"
-    assert captured["params"]["client_id"] == "A"
-    assert captured["params"]["client_secret"] == "S"
-    assert captured["params"]["redirect_uri"] == "https://x/cb"
-    assert captured["params"]["code"] == "code123"
+    assert captured["data"]["client_id"] == "A"
+    assert captured["data"]["client_secret"] == "S"
+    assert captured["data"]["redirect_uri"] == "https://x/cb"
+    assert captured["data"]["code"] == "code123"
+    assert "params" not in captured["kwargs"]  # nothing secret in the URL
     assert "/v21.0/oauth/access_token" in captured["url"]

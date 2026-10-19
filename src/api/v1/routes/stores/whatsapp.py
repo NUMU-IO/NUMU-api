@@ -184,9 +184,10 @@ async def complete_signup(
     try:
         async with httpx.AsyncClient() as client:
             # Step 1: Exchange code for user access token
-            token_resp = await client.get(
+            # POST keeps the app secret and the code out of the URL.
+            token_resp = await client.post(
                 f"{graph_api_base}/oauth/access_token",
-                params={
+                data={
                     "client_id": meta.app_id,
                     "client_secret": meta.app_secret,
                     "code": request.code,
@@ -205,10 +206,10 @@ async def complete_signup(
             # Step 2: Debug token to get WABA and phone info
             debug_resp = await client.get(
                 f"{graph_api_base}/debug_token",
-                params={
-                    "input_token": access_token,
-                    "access_token": f"{meta.app_id}|{meta.app_secret}",
-                },
+                # debug_token takes no POST, so input_token stays in the query
+                # (logs redact it); the app token goes in the header.
+                params={"input_token": access_token},
+                headers={"Authorization": f"Bearer {meta.app_id}|{meta.app_secret}"},
                 timeout=30.0,
             )
             if debug_resp.status_code != 200:

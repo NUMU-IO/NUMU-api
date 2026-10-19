@@ -219,14 +219,12 @@ class WhatsAppClient:
     async def download_media(self, media_id: str) -> dict[str, Any]:
         """Get media download URL."""
         endpoint = f"{media_id}"
-        params = {"access_token": self.access_token}
 
         logger.debug("whatsapp_get_media", media_id=media_id)
 
         response = await self._client.get(
             f"{self.base_url}/{endpoint}",
             headers=self._get_headers(),
-            params=params,
         )
         response.raise_for_status()
         result: dict[str, Any] = response.json()
