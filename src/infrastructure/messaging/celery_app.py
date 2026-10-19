@@ -32,6 +32,10 @@ _NOISY_CELERY_LOGGERS = (
     "celery.worker.strategy",  # "Task received" per task
     "celery.pool",
     "celery.beat",
+    # Every request's full URL at INFO, Meta's access_token included. The API
+    # pins these two in configure_logging(); the worker never calls it.
+    "httpx",
+    "httpcore",
 )
 
 
