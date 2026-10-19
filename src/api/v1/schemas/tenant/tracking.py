@@ -275,6 +275,19 @@ class SaveMetaTrackingRequest(BaseModel):
             raise ValueError(META_TEST_EVENT_CODE_ERROR)
         return v
 
+    @field_validator("capi_access_token", mode="before")
+    @classmethod
+    def _validate_capi_access_token(cls, v: object) -> object:
+        # Strip before the length check: a pasted token brings a trailing
+        # newline along, and the token travels in an Authorization header,
+        # where httpx refuses line breaks and trailing spaces.
+        if not isinstance(v, str):
+            return v
+        v = v.strip()
+        if any(ch.isspace() for ch in v):
+            raise ValueError("capi_access_token must be the token itself (no spaces)")
+        return v
+
 
 class MetaTrackingResponse(BaseModel):
     """Shape returned by GET, PUT, DELETE on the meta-tracking endpoints.

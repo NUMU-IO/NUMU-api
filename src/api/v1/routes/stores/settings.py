@@ -4782,7 +4782,7 @@ async def verify_meta_tracking_connection(
             decrypted = await sm.decrypt(
                 cred.credentials_encrypted, cred.encryption_key_id
             )
-            token = decrypted.get("access_token") or ""
+            token = (decrypted.get("access_token") or "").strip()
         except Exception:
             logger.warning("meta_verify_token_decrypt_failed store_id=%s", store.id)
     if not token:

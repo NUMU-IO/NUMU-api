@@ -46,7 +46,7 @@ class WhatsAppValidator(GatewayValidator):
         if not structure_result.is_valid:
             return structure_result
 
-        access_token = credentials["access_token"]
+        access_token = credentials["access_token"].strip()
         phone_number_id = credentials["phone_number_id"]
         business_account_id = credentials["business_account_id"]
 

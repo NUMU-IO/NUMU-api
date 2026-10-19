@@ -944,7 +944,7 @@ async def _send_event(
             decrypted = await secrets.decrypt(
                 cred.credentials_encrypted, cred.encryption_key_id
             )
-            access_token = decrypted["access_token"]
+            access_token = decrypted["access_token"].strip()
         except Exception:  # noqa: BLE001
             logger.exception("meta_capi_decrypt_failed", store_id=store_id)
             sentry_sdk.set_tag("meta_capi.status_class", "decrypt")
@@ -2389,8 +2389,8 @@ async def _decrypt_capi_token(session: Any, store: Any) -> str | None:
         decrypted = await secrets.decrypt(
             cred.credentials_encrypted, cred.encryption_key_id
         )
-        token = decrypted.get("access_token")
-        return str(token) if token else None
+        token = str(decrypted.get("access_token") or "").strip()
+        return token or None
     except Exception:  # noqa: BLE001
         logger.warning("meta_match_quality_token_unavailable", store_id=str(store.id))
         return None

@@ -127,10 +127,11 @@ def captured_meta_post(monkeypatch):
     monkeypatch.setattr(rls_module, "enable_rls_bypass", AsyncMock())
     monkeypatch.setattr(rls_module, "narrow_to_tenant", AsyncMock())
 
-    # secrets.decrypt returns the access token dict
+    # secrets.decrypt returns the access token dict, stored as pasted with a
+    # trailing newline: the Authorization header must carry it stripped.
     fake_secrets_mgr = MagicMock()
     fake_secrets_mgr.decrypt = AsyncMock(
-        return_value={"access_token": "test-access-token-EAAB"}
+        return_value={"access_token": "test-access-token-EAAB\n"}
     )
     monkeypatch.setattr(secrets_module, "get_secrets_manager", lambda: fake_secrets_mgr)
 
@@ -316,3 +317,20 @@ class TestCAPIPipelineHashing:
             "Authorization": "Bearer test-access-token-EAAB"
         }
         assert "test-access-token-EAAB" not in url
+
+
+async def test_decrypt_capi_token_strips_a_pasted_newline(monkeypatch):
+    """Tokens saved before the save-time trim still end in a newline."""
+    import src.infrastructure.external_services.secrets as secrets_module
+    import src.infrastructure.messaging.tasks.meta_capi as meta_capi_module
+
+    secrets = MagicMock()
+    secrets.decrypt = AsyncMock(return_value={"access_token": "tok-EAAB\n"})
+    monkeypatch.setattr(secrets_module, "get_secrets_manager", lambda: secrets)
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = MagicMock()
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+    store = SimpleNamespace(tenant_id=uuid4(), id=uuid4())
+
+    assert await meta_capi_module._decrypt_capi_token(session, store) == "tok-EAAB"

@@ -64,3 +64,73 @@ def test_no_meta_request_puts_a_secret_in_its_url():
             rel = path.relative_to(SRC.parent).as_posix()
             leaks += [f"{rel}:{n}" for n in sorted(_secret_params(ast.parse(text)))]
     assert leaks == []
+
+
+async def test_whatsapp_check_sends_the_trimmed_token_in_the_header(monkeypatch):
+    import httpx
+
+    from src.infrastructure.external_services.gateway_validators import (
+        communication_validators as cv,
+    )
+
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"id": "1", "name": "n"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        cv.httpx,
+        "AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(answer), **kw),
+    )
+    await cv.WhatsAppValidator().validate({
+        "access_token": "EAABtok\n",
+        "phone_number_id": "1",
+        "business_account_id": "2",
+    })
+    assert len(seen) == 2
+    assert all(r.headers["Authorization"] == "Bearer EAABtok" for r in seen)
+    assert not any("EAABtok" in str(r.url) for r in seen)
+
+
+async def test_verify_connection_sends_the_trimmed_token_in_the_header(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+
+    import httpx
+
+    import src.infrastructure.external_services.secrets.secrets_manager as sm
+    from src.api.v1.routes.stores import settings as routes
+
+    seen: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"name": "Store", "is_active": True})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(answer), **kw),
+    )
+    monkeypatch.setattr(
+        routes, "_meta_cfg", lambda _store: {"pixel_id": "1737914750690516"}
+    )
+    cred = SimpleNamespace(
+        is_active=True, credentials_encrypted="x", encryption_key_id="k"
+    )
+    monkeypatch.setattr(routes, "_get_capi_credential", AsyncMock(return_value=cred))
+    secrets = MagicMock()
+    secrets.decrypt = AsyncMock(return_value={"access_token": "EAABtok\n"})
+    monkeypatch.setattr(sm, "get_secrets_manager", lambda: secrets)
+
+    store = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    await routes.verify_meta_tracking_connection(store=store, db=AsyncMock())
+
+    assert len(seen) == 1
+    assert seen[0].headers["Authorization"] == "Bearer EAABtok"
+    assert "EAABtok" not in str(seen[0].url)
