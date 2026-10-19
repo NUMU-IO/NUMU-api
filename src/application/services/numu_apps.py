@@ -164,10 +164,17 @@ async def _purge_back_in_stock(db: AsyncSession, store_id: UUID) -> None:
     await purge_store(db, store_id)
 
 
+async def _purge_order_tracking(db: AsyncSession, store_id: UUID) -> None:
+    from src.infrastructure.repositories.order_tracking_repository import purge_store
+
+    await purge_store(db, store_id)
+
+
 PURGERS = {
     "inbox": _purge_inbox,
     "whatsapp": _purge_whatsapp,
     "back-in-stock": _purge_back_in_stock,
+    "order-tracking": _purge_order_tracking,
 }
 
 

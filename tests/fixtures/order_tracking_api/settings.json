@@ -1,0 +1,7 @@
+{
+  "out_for_delivery_enabled": true,
+  "failed_enabled": true,
+  "daily_cap": 300,
+  "show_items": true,
+  "show_contact": true
+}

@@ -1,0 +1,369 @@
+{
+  "items": [
+    {
+      "order_id": "01bb99ff-bd74-4e71-8a17-0642d8c7f2a7",
+      "order_number": "1008422",
+      "status": "out_for_delivery",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "387375d2-a1a5-410f-93cf-94eb5e64003c",
+      "order_number": "1058042",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "3dd37589-c421-405c-9b09-293a73d12ef8",
+      "order_number": "1051022",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "4276a308-7799-453d-80a3-94b1b5fc9ef9",
+      "order_number": "1041939",
+      "status": "in_transit",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": null,
+      "eta": {
+        "min": "2026-10-19",
+        "max": "2026-10-22"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "6c7b9e97-7871-4a60-a694-207a0173f595",
+      "order_number": "1046068",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "782104d5-8f7d-4ef9-b63b-3002e09895a1",
+      "order_number": "1061488",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "7b14b715-0bc5-4c1a-a56c-b7bcc2ba63e1",
+      "order_number": "1057635",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "a8aff983-90f6-4222-9c85-40800387d019",
+      "order_number": "1072891",
+      "status": "picked_up",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "b37fece7-619e-4652-81d5-b66b2cbaf6a2",
+      "order_number": "1049839",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "c07aab06-46bf-4c4f-ae60-5490000c8b09",
+      "order_number": "1004084",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "c1d39890-d8a5-42b7-89b4-ffd5ccda428e",
+      "order_number": "1011798",
+      "status": "returned",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 1,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "c854ec68-13eb-4307-a280-5e6e7fc3edd2",
+      "order_number": "1079619",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "d0abda6c-092e-4b83-a3c2-1a71076d1b87",
+      "order_number": "1056370",
+      "status": "in_transit",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-10",
+        "max": "2026-10-11"
+      },
+      "delayed": true,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "d94beb48-78df-456c-a964-754dea482a14",
+      "order_number": "1055174",
+      "status": "delivered",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 0,
+      "updated_at": "2026-10-18T18:11:55+00:00"
+    },
+    {
+      "order_id": "02744ae6-001f-4337-ae3d-eaf556bbe8a0",
+      "order_number": "1017446",
+      "status": "failed",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 1,
+      "updated_at": "2026-10-18T18:11:54+00:00"
+    },
+    {
+      "order_id": "19d8839d-9597-4ab2-b0d9-9c540503ef72",
+      "order_number": "1055674",
+      "status": "failed",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "manual",
+        "name_ar": "مندوب خاص",
+        "name_en": "My own courier"
+      },
+      "eta": {
+        "min": "2026-10-18",
+        "max": "2026-10-19"
+      },
+      "delayed": false,
+      "attempts": 1,
+      "updated_at": "2026-10-18T18:11:54+00:00"
+    }
+  ],
+  "total": 16
+}

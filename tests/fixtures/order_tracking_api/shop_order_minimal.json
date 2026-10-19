@@ -1,0 +1,56 @@
+{
+  "order_number": "1095942",
+  "status": "out_for_delivery",
+  "steps": [
+    {
+      "key": "confirmed",
+      "state": "done",
+      "at": "2026-10-17T19:11:58.531461+00:00"
+    },
+    {
+      "key": "picked_up",
+      "state": "done",
+      "at": "2026-10-18T18:09:58.537461+00:00"
+    },
+    {
+      "key": "in_transit",
+      "state": "done",
+      "at": "2026-10-18T18:10:58.537461+00:00"
+    },
+    {
+      "key": "out_for_delivery",
+      "state": "current",
+      "at": "2026-10-18T18:11:58.537461+00:00"
+    },
+    {
+      "key": "delivered",
+      "state": "ahead",
+      "at": null
+    }
+  ],
+  "attempt": null,
+  "eta": {
+    "min": "2026-10-18",
+    "max": "2026-10-19"
+  },
+  "delayed": false,
+  "delivered_at": null,
+  "carrier": {
+    "key": "bosta",
+    "name_ar": "بوسطة",
+    "name_en": "Bosta"
+  },
+  "tracking_number": "BST72d141",
+  "tracking_url": "https://bosta.co/tracking-shipment/?tracking_number=BST72d141",
+  "area": {
+    "governorate_ar": "القاهرة",
+    "governorate_en": "Cairo",
+    "city": "مدينة نصر"
+  },
+  "retry": {
+    "open": false,
+    "sent": false
+  },
+  "show_items": false,
+  "show_contact": false
+}

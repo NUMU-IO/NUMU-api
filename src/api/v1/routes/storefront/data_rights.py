@@ -163,6 +163,24 @@ async def _back_in_stock_export(
         return []
 
 
+async def _order_tracking_export(
+    order_repo: OrderRepository, customer: Customer
+) -> dict[str, Any]:
+    """The Order Tracking app's rows for this shopper's orders: parcels (area
+    and expected dates), retry requests and message records. Best-effort."""
+    try:
+        from src.infrastructure.repositories import order_tracking_repository as trk
+
+        db = order_repo.session
+        return await trk.export_for(
+            db,
+            customer.store_id,
+            await trk.customer_order_ids(db, customer.store_id, customer.id),
+        )
+    except Exception:
+        return {}
+
+
 async def _delivery_checks_export(
     order_repo: OrderRepository, customer_id: UUID
 ) -> list[dict[str, Any]]:
@@ -257,6 +275,10 @@ async def data_export(
             ),
             # Back in Stock app: the products this shopper waits for.
             "back_in_stock": await _back_in_stock_export(order_repo, current_customer),
+            # Order Tracking app: what it keeps about this shopper's orders.
+            "order_tracking": await _order_tracking_export(
+                order_repo, current_customer
+            ),
         },
     )
 
@@ -301,6 +323,8 @@ async def delete_account(
         "Anonymous"
       - Back in Stock app sign-ups under the customer's email or phone
         in this store are deleted (no legal retention requirement)
+      - The Order Tracking app's rows for the customer's orders (parcel
+        areas, retry requests, message records) are deleted
       - Auth cookies cleared so the next request lands as a guest
 
     What does NOT happen:
@@ -364,6 +388,20 @@ async def delete_account(
     try:
         await bis_repo.delete_for(
             customer_repo.session, current_customer.store_id, bis_contacts
+        )
+    except Exception:
+        pass
+
+    # 2d. Order Tracking app: its rows for the shopper's orders go entirely
+    #     (the orders themselves stay, as above).
+    try:
+        from src.infrastructure.repositories import order_tracking_repository as trk
+
+        db = customer_repo.session
+        await trk.delete_for(
+            db,
+            current_customer.store_id,
+            await trk.customer_order_ids(db, current_customer.store_id, deleted_id),
         )
     except Exception:
         pass

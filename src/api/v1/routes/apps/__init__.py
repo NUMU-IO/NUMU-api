@@ -10,6 +10,8 @@ it holds, so no route can be added without it. Include each app's router in
 from fastapi import APIRouter
 
 from src.api.v1.routes.apps.back_in_stock import router as back_in_stock_router
+from src.api.v1.routes.apps.order_tracking import router as order_tracking_router
 
 router = APIRouter(prefix="/apps")
 router.include_router(back_in_stock_router)
+router.include_router(order_tracking_router)

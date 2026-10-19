@@ -48,8 +48,11 @@ def _value(v: Any) -> str:
     return str(getattr(v, "value", v))
 
 
-async def whatsapp_state(db: AsyncSession, store: Any) -> dict[str, Any]:
-    """What the merchant's status screen shows, read in process."""
+async def whatsapp_state(
+    db: AsyncSession, store: Any, template: str = bis.TEMPLATE_NAME
+) -> dict[str, Any]:
+    """What the merchant's status screen shows, read in process, for one
+    system template (Order Tracking passes its own)."""
     settings = store.settings or {}
     cred = (
         (
@@ -74,7 +77,7 @@ async def whatsapp_state(db: AsyncSession, store: Any) -> dict[str, Any]:
                 WhatsAppTemplateModel.category,
             ).where(
                 WhatsAppTemplateModel.store_id == store.id,
-                WhatsAppTemplateModel.name == bis.TEMPLATE_NAME,
+                WhatsAppTemplateModel.name == template,
             )
         )
     ).all()

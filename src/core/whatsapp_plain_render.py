@@ -60,28 +60,6 @@ __all__ = [
 # template's meaning and parameter order; if exact parity matters, replace it
 # with the live body text pulled from the WABA template list.
 _PLAIN_ONLY_TEMPLATES: list[dict[str, Any]] = [
-    {
-        "name": "out_for_delivery_en",
-        "language": "en",
-        # {{1}} customer_name, {{2}} order_number — must match the component
-        # parameter order in EGYPTIAN_TEMPLATES[OUT_FOR_DELIVERY]["en"].
-        "body": (
-            "Hi {{1}} 👋 Your order {{2}} is *out for delivery* today. 🚚\n\n"
-            "Our courier will reach you shortly — please keep your phone nearby."
-        ),
-        "footer": "Thank you for shopping with us.",
-        "buttons": [],
-    },
-    {
-        "name": "out_for_delivery_ar",
-        "language": "ar",
-        "body": (
-            "أهلاً يا {{1}} 👋 طلبك {{2}} *خرج للتوصيل* النهاردة. 🚚\n\n"
-            "المندوب هيوصلك قريب — خلي تليفونك جنبك من فضلك."
-        ),
-        "footer": "شكراً لتسوقك معنا.",
-        "buttons": [],
-    },
     # Checkout-identity OTP. GOWA-only in v1 (Meta needs an approved AUTH
     # template with the special OTP component). {{1}} code, {{2}} store name —
     # order must match EGYPTIAN_TEMPLATES[OTP_VERIFICATION]. The code leads so

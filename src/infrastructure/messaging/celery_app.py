@@ -158,6 +158,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.theme_marketplace_tasks",
         # Back in Stock app: restock checks, paced sends, attribution.
         "src.infrastructure.messaging.tasks.back_in_stock_app_tasks",
+        # Order Tracking app: reconcile, message sweep, sends.
+        "src.infrastructure.messaging.tasks.order_tracking_tasks",
         # Phase 4.4 — smart-collection membership sweep.
         "src.infrastructure.messaging.tasks.smart_collection_tasks",
         # Phase 5.8 — beat scheduler heartbeat for /health/detailed.
@@ -340,6 +342,17 @@ celery_app.conf.beat_schedule = {
     "apps-back-in-stock-retention": {
         "task": "apps.back_in_stock.retention",
         "schedule": crontab(minute=40, hour=3),
+    },
+    # Order Tracking app (docs/Plans/APPS/02-order-tracking): the message
+    # sweep behind the shipment events, and the daily reconcile + retention.
+    # Both find nothing until a store installs the app.
+    "apps-order-tracking-sweep": {
+        "task": "apps.order_tracking.sweep",
+        "schedule": crontab(minute="5-59/10"),
+    },
+    "apps-order-tracking-reconcile": {
+        "task": "apps.order_tracking.reconcile",
+        "schedule": crontab(minute=50, hour=3),
     },
     # Phase 5.8 — beat heartbeat. Every minute, write the current
     # unix timestamp to Redis so /health/detailed can flag stale beat

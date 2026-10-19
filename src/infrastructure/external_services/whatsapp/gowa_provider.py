@@ -564,9 +564,9 @@ class GowaProvider(WhatsAppMessagingService):
             logger.exception("gowa_conversation_upsert_failed")
 
     # Convenience wrappers (send_order_confirmation, send_abandoned_cart,
-    # send_ship_digest, send_delivery_check, send_out_for_delivery,
-    # send_payment_received, send_order_confirmation_request,
-    # send_shipping_notification, send_delivery_notification) are INHERITED.
+    # send_ship_digest, send_delivery_check, send_payment_received,
+    # send_order_confirmation_request, send_shipping_notification,
+    # send_delivery_notification) are INHERITED.
     # They all build a MessageContent and call `send_message`, which is
     # overridden above, so they route to GOWA unchanged.
 
