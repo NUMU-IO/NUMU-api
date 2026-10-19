@@ -204,7 +204,15 @@ def _redact_value(key: str, value: Any) -> Any:
         return [_redact_value(key, item) for item in value]
     if key.lower() in SENSITIVE_LOG_KEYS:
         return REDACTION_MARKER
+    if isinstance(value, str):  # an httpx error's text carries the full URL
+        return redact_url_secrets(value)
     return value
+
+
+def redact_secrets(value: Any) -> Any:
+    """``value`` (a Sentry event, any JSON-like structure) with sensitive keys'
+    values and secret query values replaced throughout."""
+    return _redact_value("", value)
 
 
 def redact_sensitive_fields(
@@ -212,6 +220,20 @@ def redact_sensitive_fields(
 ) -> EventDict:
     """Redact sensitive field values anywhere they appear in the event dict."""
     return {k: _redact_value(k, v) for k, v in event_dict.items()}
+
+
+class RedactUrlSecrets(logging.Filter):
+    """The same for handlers that are not ours (the Celery worker's): the
+    message and the traceback, with secret query values replaced."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = redact_url_secrets(record.getMessage())
+        record.args = ()
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = redact_url_secrets(record.exc_text)
+        return True
 
 
 def configure_logging() -> None:
@@ -244,10 +266,11 @@ def configure_logging() -> None:
         add_app_context,
         add_request_context,
         add_trace_context,
-        # AFTER context, BEFORE render: redact secrets from .bind()/context too.
-        redact_sensitive_fields,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        # AFTER context and the rendered traceback, BEFORE render: redact
+        # secrets from .bind()/context and from exception text too.
+        redact_sensitive_fields,
     ]
 
     structlog.configure(

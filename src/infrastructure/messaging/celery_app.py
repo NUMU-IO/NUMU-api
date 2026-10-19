@@ -13,6 +13,7 @@ from celery.signals import (
 from kombu import Queue
 
 from src.config import settings
+from src.core.logging import RedactUrlSecrets
 
 # Create Celery app
 celery_app = Celery(
@@ -39,16 +40,24 @@ _NOISY_CELERY_LOGGERS = (
 )
 
 
-@after_setup_logger.connect
-def _quiet_celery_loggers(**_kwargs) -> None:
+def _quiet(logger: logging.Logger | None) -> None:
     for name in _NOISY_CELERY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
+    # An httpx error's text carries the request's full URL, Meta tokens
+    # included, into tracebacks and messages: redact on every handler.
+    for handler in (logger or logging.getLogger()).handlers:
+        if not any(isinstance(f, RedactUrlSecrets) for f in handler.filters):
+            handler.addFilter(RedactUrlSecrets())
+
+
+@after_setup_logger.connect
+def _quiet_celery_loggers(logger=None, **_kwargs) -> None:
+    _quiet(logger)
 
 
 @after_setup_task_logger.connect
-def _quiet_celery_task_loggers(**_kwargs) -> None:
-    for name in _NOISY_CELERY_LOGGERS:
-        logging.getLogger(name).setLevel(logging.WARNING)
+def _quiet_celery_task_loggers(logger=None, **_kwargs) -> None:
+    _quiet(logger)
 
 
 # Celery configuration

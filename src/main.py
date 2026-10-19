@@ -36,7 +36,7 @@ from src.api.v1.routes import api_router
 from src.api.v1.routes.app_links import router as app_links_router
 from src.api.v1.routes.order_redirect import router as order_redirect_router
 from src.config import settings
-from src.core.logging import configure_logging, get_logger, redact_url_secrets
+from src.core.logging import configure_logging, get_logger, redact_secrets
 from src.infrastructure.database import AsyncSessionLocal, engine
 
 # Configure structured logging
@@ -72,8 +72,8 @@ def init_sentry() -> None:
             SqlalchemyIntegration(),
         ],
         before_send=_filter_sentry_events,
-        before_breadcrumb=_redact_breadcrumb,
-        before_send_transaction=_redact_transaction,
+        before_breadcrumb=_scrub,
+        before_send_transaction=_scrub,
     )
     logger.info(
         "sentry_initialized",
@@ -87,29 +87,15 @@ def _filter_sentry_events(event: dict, _hint: dict) -> dict | None:
     # Ignore health check errors
     if "request" in event and event["request"].get("url", "").endswith("/health"):
         return None
-    _redact_urls(event.get("request"), "url", "query_string")
-    return event
+    return _scrub(event, _hint)
 
 
-def _redact_urls(item: dict | None, *keys: str) -> None:
-    """Secret query values out of the URLs Sentry records: the httpx
-    integration keeps each request's query string, where Meta puts its
-    access_token, and an incoming request can carry tokens in its own."""
-    for key in keys:
-        if item and isinstance(item.get(key), str):
-            item[key] = redact_url_secrets(item[key])
-
-
-def _redact_breadcrumb(crumb: dict, _hint: dict) -> dict:
-    _redact_urls(crumb.get("data"), "url", "http.query")
-    return crumb
-
-
-def _redact_transaction(event: dict, _hint: dict) -> dict:
-    for span in event.get("spans") or []:
-        _redact_urls(span.get("data"), "url", "http.query")
-    _redact_urls(event.get("request"), "url", "query_string")
-    return event
+def _scrub(event: dict, _hint: dict) -> dict:
+    """Secrets out of everything Sentry records. Meta takes its access_token
+    (and its OAuth exchange client_secret) in the query string, so request
+    URLs, httpx breadcrumbs and spans, an HTTPStatusError's message and frame
+    variables can all carry one."""
+    return redact_secrets(event)
 
 
 @asynccontextmanager
