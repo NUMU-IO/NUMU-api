@@ -825,6 +825,27 @@ async def test_out_for_delivery_goes_out_once_with_its_four_parameters(
 
 
 @pytest.mark.parametrize(
+    "closed", [OrderStatus.CANCELLED, OrderStatus.RETURNED, OrderStatus.REFUNDED]
+)
+async def test_a_waiting_message_is_dropped_once_the_order_closes(
+    world, monkeypatch, closed
+):
+    """The merchant closes the order while the message waits; the shipment stays."""
+    service = _whatsapp(monkeypatch)
+    x = await world.build()
+    o = await world.order(x)
+    s = await world.ship(x, o, status="out_for_delivery", steps=("out_for_delivery",))
+    await handler.on_shipment_status_changed(_changed(s, "in_transit"))
+    [message] = await _messages(world.db, x.store.id)
+
+    o.status = closed
+    await world.db.flush()
+
+    assert await tasks.send(message.id) == {"status": svc.SKIPPED, "reason": "stale"}
+    service.send_message.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
     ("setup", "reason"),
     [
         ("switch_off", "switch_off"),

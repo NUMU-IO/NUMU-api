@@ -184,12 +184,17 @@ async def _skip_reason(db: Any, message: Message, now: datetime) -> str | None:
         return "late"
     status = svc.KINDS[message.kind][0]
     shipment = await repo.latest_shipment(db, message.order_id)
+    order = await repo.order(db, message.order_id)
     if (
         shipment is None
-        or shipment.status != status
+        or order is None
+        # A cancelled, returned or refunded order wins over the carrier's
+        # last word: the merchant may close it while the message waits for
+        # the morning, and the shipment row never hears of it.
+        or svc.parcel_status(shipment.status, order.status) != status
         or svc.entries(shipment.status_history, status) != message.attempt
     ):
-        return "stale"  # the parcel moved on since
+        return "stale"  # the parcel or the order moved on since
     return None
 
 
