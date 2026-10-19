@@ -36,6 +36,7 @@ explicit lines stay correlatable.
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from contextvars import ContextVar
 from typing import Any
@@ -156,6 +157,44 @@ SENSITIVE_LOG_KEYS: frozenset[str] = frozenset({
 })
 REDACTION_MARKER: str = "***REDACTED***"
 
+# Third-party URLs can carry credentials in the query string: Meta's Graph API
+# takes `access_token` there, and its OAuth exchange `client_secret`.
+SECRET_QUERY_PARAMS: frozenset[str] = SENSITIVE_LOG_KEYS | {
+    "fb_exchange_token",
+    "input_token",
+    "appsecret_proof",
+    "code",
+}
+_SECRET_QUERY = re.compile(
+    r"(^|[?&])("
+    + "|".join(map(re.escape, sorted(SECRET_QUERY_PARAMS)))
+    + r")=[^&#\s]*",
+    re.IGNORECASE,
+)
+
+
+def redact_url_secrets(text: str) -> str:
+    """``text`` (a URL or a bare query string) with secret parameter values
+    replaced, wherever a URL is recorded: worker logs, traces, Sentry.
+
+    ponytail: redacts at the sinks; the root fix is sending Meta tokens in
+    the Authorization header instead of the query string (graph_client,
+    oauth_client, oauth_service, social_service, whatsapp_client).
+    """
+    return _SECRET_QUERY.sub(lambda m: f"{m[1]}{m[2]}={REDACTION_MARKER}", text)
+
+
+def _redact_secrets_in_traces() -> None:
+    """OpenTelemetry's httpx and ASGI spans record each request's full URL,
+    and its own redaction list knows only AWS and Google signatures."""
+    try:
+        from opentelemetry.util import http as otel_http
+    except ImportError:  # tracing not installed
+        return
+    otel_http.PARAMS_TO_REDACT.extend(
+        p for p in sorted(SECRET_QUERY_PARAMS) if p not in otel_http.PARAMS_TO_REDACT
+    )
+
 
 def _redact_value(key: str, value: Any) -> Any:
     """Recurse into the value and redact wherever a sensitive key appears."""
@@ -165,7 +204,15 @@ def _redact_value(key: str, value: Any) -> Any:
         return [_redact_value(key, item) for item in value]
     if key.lower() in SENSITIVE_LOG_KEYS:
         return REDACTION_MARKER
+    if isinstance(value, str):  # an httpx error's text carries the full URL
+        return redact_url_secrets(value)
     return value
+
+
+def redact_secrets(value: Any) -> Any:
+    """``value`` (a Sentry event, any JSON-like structure) with sensitive keys'
+    values and secret query values replaced throughout."""
+    return _redact_value("", value)
 
 
 def redact_sensitive_fields(
@@ -173,6 +220,20 @@ def redact_sensitive_fields(
 ) -> EventDict:
     """Redact sensitive field values anywhere they appear in the event dict."""
     return {k: _redact_value(k, v) for k, v in event_dict.items()}
+
+
+class RedactUrlSecrets(logging.Filter):
+    """The same for handlers that are not ours (the Celery worker's): the
+    message and the traceback, with secret query values replaced."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = redact_url_secrets(record.getMessage())
+        record.args = ()
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = redact_url_secrets(record.exc_text)
+        return True
 
 
 def configure_logging() -> None:
@@ -205,10 +266,11 @@ def configure_logging() -> None:
         add_app_context,
         add_request_context,
         add_trace_context,
-        # AFTER context, BEFORE render: redact secrets from .bind()/context too.
-        redact_sensitive_fields,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        # AFTER context and the rendered traceback, BEFORE render: redact
+        # secrets from .bind()/context and from exception text too.
+        redact_sensitive_fields,
     ]
 
     structlog.configure(
@@ -254,6 +316,8 @@ def configure_logging() -> None:
         "urllib3",
     ):
         logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+    _redact_secrets_in_traces()
 
 
 # =============================================================================

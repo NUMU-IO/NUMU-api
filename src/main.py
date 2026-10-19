@@ -36,7 +36,7 @@ from src.api.v1.routes import api_router
 from src.api.v1.routes.app_links import router as app_links_router
 from src.api.v1.routes.order_redirect import router as order_redirect_router
 from src.config import settings
-from src.core.logging import configure_logging, get_logger
+from src.core.logging import configure_logging, get_logger, redact_secrets
 from src.infrastructure.database import AsyncSessionLocal, engine
 
 # Configure structured logging
@@ -72,6 +72,8 @@ def init_sentry() -> None:
             SqlalchemyIntegration(),
         ],
         before_send=_filter_sentry_events,
+        before_breadcrumb=_scrub,
+        before_send_transaction=_scrub,
     )
     logger.info(
         "sentry_initialized",
@@ -85,7 +87,15 @@ def _filter_sentry_events(event: dict, _hint: dict) -> dict | None:
     # Ignore health check errors
     if "request" in event and event["request"].get("url", "").endswith("/health"):
         return None
-    return event
+    return _scrub(event, _hint)
+
+
+def _scrub(event: dict, _hint: dict) -> dict:
+    """Secrets out of everything Sentry records. Meta takes its access_token
+    (and its OAuth exchange client_secret) in the query string, so request
+    URLs, httpx breadcrumbs and spans, an HTTPStatusError's message and frame
+    variables can all carry one."""
+    return redact_secrets(event)
 
 
 @asynccontextmanager
