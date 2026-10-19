@@ -30,6 +30,11 @@ from src.api.dependencies.database import get_db
 from src.api.responses import SuccessResponse
 from src.application.services.merchant_visibility import LIVE_SQL, VISIBLE_SQL
 from src.core.entities.plan import PLAN_LIMITS
+from src.core.utils.store_timezone import (
+    DEFAULT_STORE_TIMEZONE,
+    local_date,
+    local_day_bounds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +201,13 @@ async def get_overview(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     now = datetime.now(UTC)
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Days are Cairo calendar days. UTC midnight is 02:00-03:00 in Cairo, so
+    # orders placed just after local midnight used to count as yesterday's.
+    today = local_date(now, DEFAULT_STORE_TIMEZONE)
+    day_start, _ = local_day_bounds(today, DEFAULT_STORE_TIMEZONE)
+    yesterday_start, _ = local_day_bounds(
+        today - timedelta(days=1), DEFAULT_STORE_TIMEZONE
+    )
 
     # Every number and queue here counts live merchants only: not internal,
     # not demo, not suspended (see merchant_visibility).
@@ -234,13 +245,13 @@ async def get_overview(
                     SELECT count(t.id)
                     FROM generate_series(0, 6) AS g(d)
                     LEFT JOIN public.tenants t
-                      ON date_trunc('day', t.created_at) = date_trunc('day', CAST(:now AS timestamptz) - (g.d || ' days')::interval)
+                      ON (t.created_at AT TIME ZONE :tz)::date = CAST(:today AS date) - g.d
                      AND t.is_active IS TRUE AND t.is_internal IS FALSE
                      AND t.lifecycle_state <> 'demo'
                     GROUP BY g.d ORDER BY g.d DESC
                     """
                 ),
-                {"now": now},
+                {"today": today, "tz": DEFAULT_STORE_TIMEZONE},
             )
         ).scalars()
     ]
@@ -270,8 +281,8 @@ async def get_overview(
         SELECT count(*) FROM public.orders o
         WHERE o.created_at >= :prev AND o.created_at < :cut AND {orders_live}
         """,  # nosec B608 - interpolates module literals only; values are bound
-        prev=day_start - timedelta(days=1),
-        cut=day_start - timedelta(days=1) + (now - day_start),
+        prev=yesterday_start,
+        cut=yesterday_start + (now - day_start),
     )
     value_today = await _scalar(
         db,
@@ -288,8 +299,8 @@ async def get_overview(
         WHERE o.created_at >= :prev AND o.created_at < :cut
           AND o.payment_status = 'PAID' AND {orders_live}
         """,  # nosec B608 - interpolates module literals only; values are bound
-        prev=day_start - timedelta(days=1),
-        cut=day_start - timedelta(days=1) + (now - day_start),
+        prev=yesterday_start,
+        cut=yesterday_start + (now - day_start),
     )
 
     # ── Orders per day, zero-filled so the axis is a real fortnight ────────
@@ -299,7 +310,8 @@ async def get_overview(
     # — it read as "nothing is happening" on a day that was ordinary. Days
     # carry enough volume per bucket to show a trend, which is the only
     # question this chart answers.
-    chart_start = day_start - timedelta(days=ORDERS_CHART_DAYS - 1)
+    first_day = today - timedelta(days=ORDERS_CHART_DAYS - 1)
+    chart_start, _ = local_day_bounds(first_day, DEFAULT_STORE_TIMEZONE)
     daily = (
         await db.execute(
             text(
@@ -309,20 +321,23 @@ async def get_overview(
                        coalesce(sum(o.total), 0) AS value
                 FROM generate_series(0, :days - 1) AS g(d)
                 LEFT JOIN public.orders o
-                  ON o.created_at >= CAST(:start AS timestamptz)
-                                     + (g.d || ' days')::interval
-                 AND o.created_at <  CAST(:start AS timestamptz)
-                                     + ((g.d + 1) || ' days')::interval
+                  ON o.created_at >= :start
+                 AND (o.created_at AT TIME ZONE :tz)::date = CAST(:first_day AS date) + g.d
                  AND {orders_live}
                 GROUP BY g.d ORDER BY g.d
                 """  # nosec B608 - interpolates module literals only; values are bound
             ),
-            {"start": chart_start, "days": ORDERS_CHART_DAYS},
+            {
+                "start": chart_start,
+                "first_day": first_day,
+                "tz": DEFAULT_STORE_TIMEZONE,
+                "days": ORDERS_CHART_DAYS,
+            },
         )
     ).all()
     orders_per_hour = [
         Bucket(
-            label=(chart_start + timedelta(days=int(offset))).strftime("%d %b"),
+            label=(first_day + timedelta(days=int(offset))).strftime("%d %b"),
             value=float(count),
         )
         for offset, count, _ in daily
