@@ -534,3 +534,26 @@ class TestDomainVerificationToken:
         # printable token Meta might mint has to survive, whatever its shape.
         for shape in ("ABC-def_123", "0123456789", "aB3" * 10, "z"):
             assert self._req(shape).domain_verification_token == shape
+
+
+class TestCapiAccessToken:
+    """The token travels in an Authorization header, where httpx refuses line
+    breaks and trailing spaces. A pasted token is trimmed on save; whitespace
+    inside it can only be a broken paste, so it is a 422."""
+
+    @staticmethod
+    def _req(token):
+        return SaveMetaTrackingRequest(
+            pixel_id="1737914750690516",
+            pixel_enabled=True,
+            capi_enabled=True,
+            capi_access_token=token,
+        )
+
+    def test_a_pasted_newline_is_trimmed(self):
+        token = "EAAB" + "x" * 40
+        assert self._req(f" {token}\n").capi_access_token == token
+
+    def test_whitespace_inside_the_token_is_rejected(self):
+        with pytest.raises(ValidationError):
+            self._req("EAAB" + "x" * 20 + "\n" + "y" * 20)

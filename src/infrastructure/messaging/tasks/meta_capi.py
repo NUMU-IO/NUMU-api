@@ -944,7 +944,7 @@ async def _send_event(
             decrypted = await secrets.decrypt(
                 cred.credentials_encrypted, cred.encryption_key_id
             )
-            access_token = decrypted["access_token"]
+            access_token = decrypted["access_token"].strip()
         except Exception:  # noqa: BLE001
             logger.exception("meta_capi_decrypt_failed", store_id=store_id)
             sentry_sdk.set_tag("meta_capi.status_class", "decrypt")
@@ -999,7 +999,7 @@ async def _send_event(
         with httpx.Client(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
             resp = client.post(
                 url,
-                params={"access_token": access_token},
+                headers={"Authorization": f"Bearer {access_token}"},
                 json=capi_payload,
             )
         response_status = resp.status_code
@@ -1824,7 +1824,9 @@ async def _post_capi_batch(
 
     try:
         with httpx.Client(timeout=httpx.Timeout(30.0, connect=5.0)) as client:
-            resp = client.post(url, params={"access_token": access_token}, json=payload)
+            resp = client.post(
+                url, headers={"Authorization": f"Bearer {access_token}"}, json=payload
+            )
     except (httpx.NetworkError, httpx.TimeoutException) as exc:
         return 0, None, None, None, f"{type(exc).__name__}: {exc}"
 
@@ -2387,8 +2389,8 @@ async def _decrypt_capi_token(session: Any, store: Any) -> str | None:
         decrypted = await secrets.decrypt(
             cred.credentials_encrypted, cred.encryption_key_id
         )
-        token = decrypted.get("access_token")
-        return str(token) if token else None
+        token = str(decrypted.get("access_token") or "").strip()
+        return token or None
     except Exception:  # noqa: BLE001
         logger.warning("meta_match_quality_token_unavailable", store_id=str(store.id))
         return None

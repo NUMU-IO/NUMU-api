@@ -4782,7 +4782,7 @@ async def verify_meta_tracking_connection(
             decrypted = await sm.decrypt(
                 cred.credentials_encrypted, cred.encryption_key_id
             )
-            token = decrypted.get("access_token") or ""
+            token = (decrypted.get("access_token") or "").strip()
         except Exception:
             logger.warning("meta_verify_token_decrypt_failed store_id=%s", store.id)
     if not token:
@@ -4807,7 +4807,8 @@ async def verify_meta_tracking_connection(
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 url,
-                params={"fields": "name,is_active", "access_token": token},
+                params={"fields": "name,is_active"},
+                headers={"Authorization": f"Bearer {token}"},
             )
         body = resp.json() if resp.content else {}
     except Exception as exc:
