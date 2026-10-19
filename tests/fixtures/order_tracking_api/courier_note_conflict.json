@@ -1,0 +1,4 @@
+{
+  "code": "already_sent",
+  "detail": "This request already went to the courier."
+}

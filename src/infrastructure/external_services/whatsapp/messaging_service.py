@@ -734,30 +734,6 @@ class WhatsAppMessagingService(IMessagingService):
         )
         return await self.send_message(content)
 
-    async def send_out_for_delivery(
-        self,
-        recipient: MessageRecipient,
-        order_number: str,
-    ) -> MessageResult:
-        """Send out for delivery notification.
-
-        Args:
-            recipient: Customer contact info
-            order_number: Order reference number
-
-        Returns:
-            MessageResult
-        """
-        content = MessageContent(
-            type=MessageType.OUT_FOR_DELIVERY,
-            recipient=recipient,
-            template_params={
-                "customer_name": recipient.name or "Customer",
-                "order_number": order_number,
-            },
-        )
-        return await self.send_message(content)
-
     async def send_delivery_notification(
         self,
         recipient: MessageRecipient,

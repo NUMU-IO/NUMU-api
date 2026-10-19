@@ -1,0 +1,72 @@
+{
+  "order_number": "1036685",
+  "status": "cancelled",
+  "steps": [
+    {
+      "key": "confirmed",
+      "state": "done",
+      "at": "2026-10-17T19:11:58.562460+00:00"
+    },
+    {
+      "key": "cancelled",
+      "state": "current",
+      "at": null
+    },
+    {
+      "key": "picked_up",
+      "state": "ahead",
+      "at": null
+    },
+    {
+      "key": "in_transit",
+      "state": "ahead",
+      "at": null
+    },
+    {
+      "key": "out_for_delivery",
+      "state": "ahead",
+      "at": null
+    },
+    {
+      "key": "delivered",
+      "state": "ahead",
+      "at": null
+    }
+  ],
+  "attempt": null,
+  "eta": {
+    "min": "2026-10-19",
+    "max": "2026-10-22"
+  },
+  "delayed": false,
+  "delivered_at": null,
+  "carrier": null,
+  "tracking_number": null,
+  "tracking_url": null,
+  "area": {
+    "governorate_ar": "القاهرة",
+    "governorate_en": "Cairo",
+    "city": "مدينة نصر"
+  },
+  "retry": {
+    "open": false,
+    "sent": false
+  },
+  "show_items": true,
+  "show_contact": true,
+  "items": [
+    {
+      "name": "تيشيرت قطن",
+      "variant": "M",
+      "quantity": 1
+    }
+  ],
+  "total": {
+    "amount": 125000,
+    "currency": "EGP"
+  },
+  "contact": {
+    "whatsapp": "0101 234 5678",
+    "phone": "0223456789"
+  }
+}

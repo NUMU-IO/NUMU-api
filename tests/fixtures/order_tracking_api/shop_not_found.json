@@ -1,0 +1,7 @@
+{
+  "success": false,
+  "error": {
+    "code": "HTTP_ERROR",
+    "message": "not found"
+  }
+}

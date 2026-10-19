@@ -1,0 +1,36 @@
+{
+  "whatsapp": {
+    "usable": false,
+    "access_reason": "not_requested",
+    "mode": "shared",
+    "transport": "meta"
+  },
+  "out_for_delivery": {
+    "enabled": true,
+    "template": {
+      "ar": "APPROVED",
+      "en": "PENDING"
+    },
+    "rejected_reason": null
+  },
+  "delivery_failed": {
+    "enabled": true,
+    "template": {
+      "ar": "APPROVED",
+      "en": "REJECTED"
+    },
+    "rejected_reason": "The link must not be the only content."
+  },
+  "sent_30d": 3,
+  "skipped_30d": 3,
+  "skip_reasons": {
+    "cap": 1,
+    "no_access": 2
+  },
+  "daily_cap": 300,
+  "language": "ar",
+  "preview": {
+    "out_for_delivery": "أهلاً منى، طلبك رقم 1042 من Vionne خارج للتوصيل النهارده. خلّي موبايلك جنبك عشان المندوب هيكلّمك.\n\nتقدر تتابع طلبك من تحت.\n\nتابع طلبك: https://numueg.app/o/s-610998b1/…",
+    "delivery_failed": "أهلاً منى، المندوب ماقدرش يوصّل طلبك رقم 1042 من Vionne النهارده.\n\nاختار ميعاد يناسبك من تحت، ولو عايز تكلّم المتجر ردّ على الرسالة دي.\n\nاختار ميعاد: https://numueg.app/o/s-610998b1/…"
+  }
+}

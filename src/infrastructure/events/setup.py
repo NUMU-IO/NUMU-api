@@ -123,6 +123,15 @@ from src.infrastructure.events.handlers.order_activity_handler import (
     handle_order_paid_activity,
     handle_order_status_changed_activity,
 )
+from src.infrastructure.events.handlers.order_tracking_handler import (
+    on_order_status_changed as order_tracking_on_order_status_changed,
+)
+from src.infrastructure.events.handlers.order_tracking_handler import (
+    on_shipment_created as order_tracking_on_shipment_created,
+)
+from src.infrastructure.events.handlers.order_tracking_handler import (
+    on_shipment_status_changed as order_tracking_on_shipment_status_changed,
+)
 from src.infrastructure.events.handlers.otp_trust_handler import (
     handle_otp_verified_trust_signal,
 )
@@ -338,6 +347,10 @@ def create_event_bus() -> EventBus:
     bus.subscribe(InventoryLevelChangedEvent, back_in_stock_on_inventory_changed)
     bus.subscribe(ProductDeletedEvent, back_in_stock_on_product_deleted)
     bus.subscribe(OrderCreatedEvent, back_in_stock_on_order_created)
+    # Order Tracking app: gated per store on each handler's first query.
+    bus.subscribe(ShipmentCreatedEvent, order_tracking_on_shipment_created)
+    bus.subscribe(ShipmentStatusChangedEvent, order_tracking_on_shipment_status_changed)
+    bus.subscribe(OrderStatusChangedEvent, order_tracking_on_order_status_changed)
     install_commit_watch(bus)
 
     # Recovery flow (backend-021): risk-finalised → spawn flow; flow-started →

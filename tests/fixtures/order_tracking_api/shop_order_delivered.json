@@ -1,0 +1,71 @@
+{
+  "order_number": "1040103",
+  "status": "delivered",
+  "steps": [
+    {
+      "key": "confirmed",
+      "state": "done",
+      "at": "2026-10-17T19:11:58.549463+00:00"
+    },
+    {
+      "key": "picked_up",
+      "state": "done",
+      "at": "2026-10-18T18:08:58.554460+00:00"
+    },
+    {
+      "key": "in_transit",
+      "state": "done",
+      "at": "2026-10-18T18:09:58.554460+00:00"
+    },
+    {
+      "key": "out_for_delivery",
+      "state": "done",
+      "at": "2026-10-18T18:10:58.554460+00:00"
+    },
+    {
+      "key": "delivered",
+      "state": "current",
+      "at": "2026-10-18T18:11:58.554460+00:00"
+    }
+  ],
+  "attempt": null,
+  "eta": {
+    "min": "2026-10-18",
+    "max": "2026-10-19"
+  },
+  "delayed": false,
+  "delivered_at": "2026-10-18T18:11:58.554460+00:00",
+  "carrier": {
+    "key": "bosta",
+    "name_ar": "بوسطة",
+    "name_en": "Bosta"
+  },
+  "tracking_number": "BST88aae7",
+  "tracking_url": "https://bosta.co/tracking-shipment/?tracking_number=BST88aae7",
+  "area": {
+    "governorate_ar": "القاهرة",
+    "governorate_en": "Cairo",
+    "city": "مدينة نصر"
+  },
+  "retry": {
+    "open": false,
+    "sent": false
+  },
+  "show_items": true,
+  "show_contact": true,
+  "items": [
+    {
+      "name": "تيشيرت قطن",
+      "variant": "M",
+      "quantity": 1
+    }
+  ],
+  "total": {
+    "amount": 125000,
+    "currency": "EGP"
+  },
+  "contact": {
+    "whatsapp": "0101 234 5678",
+    "phone": "0223456789"
+  }
+}

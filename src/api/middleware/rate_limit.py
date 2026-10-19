@@ -192,6 +192,16 @@ def _is_back_in_stock_subscribe(path: str) -> bool:
     )
 
 
+def _is_order_tracking_retry(path: str) -> bool:
+    """Order Tracking app "Try again": anonymous, every hit can write a
+    request and an order comment. A shopper sends one per failed delivery."""
+    return (
+        path.startswith("/api/v1/storefront/store/")
+        and "/apps/order-tracking/orders/" in path
+        and path.endswith("/retry")
+    )
+
+
 def _is_whatsapp_byo_connect(path: str) -> bool:
     """backend-030 / TASK-SEC-003 — BYO connect hits Meta with 3 reads
     per attempt. A merchant (or attacker with a leaked admin token)
@@ -718,6 +728,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         elif _is_back_in_stock_subscribe(path):
             # 10/IP/min, the same reasoning as the newsletter.
             tier = "back_in_stock"
+            limit = 10
+        elif _is_order_tracking_retry(path):
+            # 10/shopper/min: the host relay carries the shopper's IP, and
+            # the route itself allows one request per order per 12 hours.
+            tier = "order_tracking_retry"
             limit = 10
         elif _is_whatsapp_byo_connect(path):
             # backend-030 / TASK-SEC-003 — each BYO connect attempt hits

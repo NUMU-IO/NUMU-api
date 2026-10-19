@@ -1,0 +1,29 @@
+{
+  "backfill": {
+    "done": 16,
+    "total": 16,
+    "finished": true
+  },
+  "store": {
+    "name": "Vionne",
+    "host": "s-610998b1.numueg.app"
+  },
+  "sample_tracking_url": "https://s-610998b1.numueg.app/track/01bb99ff-bd74-4e71-8a17-0642d8c7f2a7",
+  "whatsapp": {
+    "mode": "shared",
+    "transport": "meta",
+    "access": false,
+    "access_reason": "not_requested",
+    "usable": false,
+    "templates": {
+      "out_for_delivery": {
+        "ar": "APPROVED",
+        "en": "PENDING"
+      },
+      "delivery_failed": {
+        "ar": "APPROVED",
+        "en": "REJECTED"
+      }
+    }
+  }
+}

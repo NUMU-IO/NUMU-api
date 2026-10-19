@@ -1,0 +1,33 @@
+{
+  "days": 30,
+  "min_parcels": 10,
+  "avg_delivery_days": 2.9,
+  "success_rate": 0.9,
+  "failed_attempt_rate": 0.25,
+  "areas": [
+    {
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": null
+      },
+      "parcels": 16,
+      "delivered_rate": 0.56,
+      "returned_rate": 0.06,
+      "avg_days": 2.9
+    }
+  ],
+  "carriers": [
+    {
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "parcels": 14,
+      "delivered_rate": 0.64,
+      "avg_days": 2.9
+    }
+  ]
+}

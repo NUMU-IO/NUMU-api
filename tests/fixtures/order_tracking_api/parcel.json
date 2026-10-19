@@ -1,0 +1,52 @@
+{
+  "order_id": "02744ae6-001f-4337-ae3d-eaf556bbe8a0",
+  "order_number": "1017446",
+  "status": "failed",
+  "area": {
+    "governorate_code": "EG-C",
+    "governorate_ar": "القاهرة",
+    "governorate_en": "Cairo",
+    "city": "مدينة نصر"
+  },
+  "carrier": {
+    "key": "bosta",
+    "name_ar": "بوسطة",
+    "name_en": "Bosta"
+  },
+  "tracking_number": "BST4aa39b",
+  "tracking_url": "https://bosta.co/tracking-shipment/?tracking_number=BST4aa39b",
+  "eta": {
+    "min": "2026-10-18",
+    "max": "2026-10-19"
+  },
+  "delayed": false,
+  "attempts": 1,
+  "steps": [
+    {
+      "key": "confirmed",
+      "at": "2026-10-17T19:11:54.939500+00:00"
+    },
+    {
+      "key": "picked_up",
+      "at": "2026-10-18T18:09:54.947496+00:00"
+    },
+    {
+      "key": "out_for_delivery",
+      "at": "2026-10-18T18:10:54.947496+00:00"
+    },
+    {
+      "key": "failed",
+      "at": "2026-10-18T18:11:54.947496+00:00"
+    }
+  ],
+  "retry": {
+    "id": "6c947cd1-f60b-4f6a-a95d-cf489ba5f431",
+    "day": "2026-10-19",
+    "window": "afternoon",
+    "note": "جنب الصيدلية",
+    "created_at": "2026-10-18T18:11:55+00:00",
+    "handled_at": null,
+    "courier_notified_at": null
+  },
+  "can_courier_note": true
+}

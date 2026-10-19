@@ -1,0 +1,8 @@
+{
+  "success": false,
+  "error": "Too many requests. Please slow down.",
+  "code": "RATE_LIMIT_EXCEEDED",
+  "details": {
+    "retry_after": 60
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "counts": {
+    "in_transit": 3,
+    "out_for_delivery": 1,
+    "delivered_today": 1,
+    "delayed": 1,
+    "failed": 2,
+    "returned": 1
+  },
+  "queue": [
+    {
+      "order_id": "02744ae6-001f-4337-ae3d-eaf556bbe8a0",
+      "order_number": "1017446",
+      "reason": "retry_request",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "status": "failed",
+      "attempt": 1,
+      "days_late": null,
+      "retry": {
+        "id": "6c947cd1-f60b-4f6a-a95d-cf489ba5f431",
+        "day": "2026-10-19",
+        "window": "afternoon",
+        "note": "جنب الصيدلية",
+        "created_at": "2026-10-18T18:11:55+00:00"
+      },
+      "can_courier_note": true
+    },
+    {
+      "order_id": "19d8839d-9597-4ab2-b0d9-9c540503ef72",
+      "order_number": "1055674",
+      "reason": "failed",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "manual",
+        "name_ar": "مندوب خاص",
+        "name_en": "My own courier"
+      },
+      "status": "failed",
+      "attempt": 1,
+      "days_late": null,
+      "retry": null,
+      "can_courier_note": false
+    },
+    {
+      "order_id": "d0abda6c-092e-4b83-a3c2-1a71076d1b87",
+      "order_number": "1056370",
+      "reason": "delayed",
+      "area": {
+        "governorate_code": "EG-C",
+        "governorate_ar": "القاهرة",
+        "governorate_en": "Cairo",
+        "city": "مدينة نصر"
+      },
+      "carrier": {
+        "key": "bosta",
+        "name_ar": "بوسطة",
+        "name_en": "Bosta"
+      },
+      "status": "in_transit",
+      "attempt": 0,
+      "days_late": 7,
+      "retry": null,
+      "can_courier_note": false
+    }
+  ]
+}

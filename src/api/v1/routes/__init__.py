@@ -217,6 +217,9 @@ from src.api.v1.routes.storefront import (
 from src.api.v1.routes.storefront.apps_back_in_stock import (
     router as storefront_back_in_stock_router,
 )
+from src.api.v1.routes.storefront.apps_order_tracking import (
+    router as storefront_order_tracking_app_router,
+)
 from src.api.v1.routes.storefront.cart_sdk_aliases import (
     router as storefront_cart_sdk_router,
 )
@@ -397,6 +400,12 @@ api_router.include_router(
 # registers its numueg.app/a/back-in-stock/... link resolver.
 api_router.include_router(
     storefront_back_in_stock_router,
+    prefix="/storefront/store/{store_id}",
+)
+
+# Storefront - Order Tracking app (the host /track page's view and "Try again").
+api_router.include_router(
+    storefront_order_tracking_app_router,
     prefix="/storefront/store/{store_id}",
 )
 

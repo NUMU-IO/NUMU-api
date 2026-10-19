@@ -9,10 +9,9 @@ from uuid import UUID
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.application.services import app_install_gate
 from src.application.services import back_in_stock as bis
-from src.application.services.app_install_gate import live_installs
 from src.core.entities.product import ProductStatus
-from src.infrastructure.database.models.public.app import AppModel
 from src.infrastructure.database.models.tenant.back_in_stock import (
     BackInStockSettingsModel,
     BackInStockWaiterModel,
@@ -26,8 +25,7 @@ Waiter = BackInStockWaiterModel
 
 async def is_live(db: AsyncSession, store_id: UUID) -> bool:
     """The install gate: the app is live on this store (APP-STANDARD § 4.1)."""
-    stmt = await live_installs(db, store_id)
-    return (await db.execute(stmt.where(AppModel.slug == bis.SLUG))).first() is not None
+    return await app_install_gate.is_live(db, store_id, bis.SLUG)
 
 
 async def settings_row(

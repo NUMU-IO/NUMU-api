@@ -521,4 +521,88 @@ RICH_TEMPLATES: list[dict] = [
         ],
         "body_examples": ["تيشيرت قطن — أسود / L", "متجر القاهرة"],
     },
+    # Order Tracking app «مشوار» (docs/Plans/APPS/02-order-tracking): the
+    # courier is on the way today, or could not deliver. 3 vars + a Track URL
+    # button to the store's own /track/<id>, like order_shipped_v3. UTILITY,
+    # no quick replies (an unknown payload would confirm a COD order).
+    {
+        "name": "app_order_tracking_out_for_delivery_v1",
+        "language": "en",
+        "category": "UTILITY",
+        "body": (
+            "Hi {{1}}, your order {{2}} from {{3}} is out for delivery today. "
+            "Keep your phone close; the courier will call you.\n\n"
+            "You can follow it below."
+        ),
+        "footer": None,
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "Track your order",
+                "url": _TRACK_URL,
+                "example": ["https://numueg.app/o/cairo-style/abc123"],
+            }
+        ],
+        "body_examples": ["Mona", "1042", "Cairo Style"],
+    },
+    {
+        "name": "app_order_tracking_out_for_delivery_v1",
+        "language": "ar",
+        "category": "UTILITY",
+        "body": (
+            "أهلاً {{1}}، طلبك رقم {{2}} من {{3}} خارج للتوصيل النهارده. "
+            "خلّي موبايلك جنبك عشان المندوب هيكلّمك.\n\n"
+            "تقدر تتابع طلبك من تحت."
+        ),
+        "footer": None,
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "تابع طلبك",
+                "url": _TRACK_URL,
+                "example": ["https://numueg.app/o/cairo-style/abc123"],
+            }
+        ],
+        "body_examples": ["منى", "1042", "متجر القاهرة"],
+    },
+    {
+        "name": "app_order_tracking_delivery_failed_v1",
+        "language": "en",
+        "category": "UTILITY",
+        "body": (
+            "Hi {{1}}, the courier couldn't deliver your order {{2}} from {{3}} "
+            "today.\n\nPick a time that suits you below, or reply to this "
+            "message to talk to the store."
+        ),
+        "footer": None,
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "Pick a time",
+                "url": _TRACK_URL,
+                "example": ["https://numueg.app/o/cairo-style/abc123"],
+            }
+        ],
+        "body_examples": ["Mona", "1042", "Cairo Style"],
+    },
+    {
+        "name": "app_order_tracking_delivery_failed_v1",
+        "language": "ar",
+        "category": "UTILITY",
+        "body": (
+            "أهلاً {{1}}، المندوب ماقدرش يوصّل طلبك رقم {{2}} من {{3}} "
+            "النهارده.\n\nاختار ميعاد يناسبك من تحت، ولو عايز تكلّم المتجر "
+            "ردّ على الرسالة دي."
+        ),
+        "footer": None,
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "اختار ميعاد",
+                "url": _TRACK_URL,
+                "example": ["https://numueg.app/o/cairo-style/abc123"],
+            }
+        ],
+        "body_examples": ["منى", "1042", "متجر القاهرة"],
+    },
 ]

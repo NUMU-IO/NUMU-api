@@ -102,6 +102,8 @@ DEFAULT_ALLOWED_TYPES: frozenset[str] = frozenset({
     str(MessageType.OTP_VERIFICATION),
     # Back in Stock app: the shopper asked for exactly this one message.
     str(MessageType.BACK_IN_STOCK_ALERT),
+    # Order Tracking app: the courier could not deliver the shopper's order.
+    str(MessageType.DELIVERY_FAILED),
     # Higher risk than the rest — see the note above.
     str(MessageType.ABANDONED_CART),
     str(MessageType.COD_RECOVERY_OFFER),

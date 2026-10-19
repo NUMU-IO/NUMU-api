@@ -310,27 +310,48 @@ EGYPTIAN_TEMPLATES = {
             ],
         ),
     },
+    # Order Tracking app (docs/Plans/APPS/02-order-tracking): body {{1}} first
+    # name, {{2}} order number, {{3}} store; the Track button's suffix is
+    # "<subdomain>/<order_id>" on https://numueg.app/o/{{1}}.
     MessageType.OUT_FOR_DELIVERY: {
-        # No Meta template submitted yet — sends to this type will fail at
-        # the API layer with a template-not-found error until one is
-        # submitted. Kept here so MessageType.OUT_FOR_DELIVERY remains a
-        # valid lookup key for code that already references it.
-        "en": MessageTemplate(
+        lang: MessageTemplate(
             type=MessageType.OUT_FOR_DELIVERY,
-            name="out_for_delivery_en",
-            language="en",
+            name="app_order_tracking_out_for_delivery_v1",
+            language=lang,
             components=[
-                {"type": "body", "parameters": ["customer_name", "order_number"]},
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "order_number", "store_name"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["order_id"],
+                },
             ],
-        ),
-        "ar": MessageTemplate(
-            type=MessageType.OUT_FOR_DELIVERY,
-            name="out_for_delivery_ar",
-            language="ar",
+        )
+        for lang in ("en", "ar")
+    },
+    MessageType.DELIVERY_FAILED: {
+        lang: MessageTemplate(
+            type=MessageType.DELIVERY_FAILED,
+            name="app_order_tracking_delivery_failed_v1",
+            language=lang,
             components=[
-                {"type": "body", "parameters": ["customer_name", "order_number"]},
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "order_number", "store_name"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["order_id"],
+                },
             ],
-        ),
+        )
+        for lang in ("en", "ar")
     },
     MessageType.ORDER_DELIVERED: {
         "en": MessageTemplate(

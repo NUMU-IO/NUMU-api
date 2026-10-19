@@ -53,3 +53,9 @@ async def live_installs(db: AsyncSession, store_id: UUID) -> Select:
     if not await partner_apps_enabled(db):
         stmt = stmt.where(AppModel.developer_id.is_(None))
     return stmt
+
+
+async def is_live(db: AsyncSession, store_id: UUID, slug: str) -> bool:
+    """The gate an app's handlers, tasks and storefront routes check first."""
+    stmt = await live_installs(db, store_id)
+    return (await db.execute(stmt.where(AppModel.slug == slug))).first() is not None
