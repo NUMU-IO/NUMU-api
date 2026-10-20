@@ -1,5 +1,5 @@
 {
-  "sdk_version": "0.19.0",
+  "sdk_version": "0.19.1",
   "sections": {
     "lib-before-after": {
       "type": "lib-before-after",
@@ -3803,7 +3803,7 @@
       "presets": [
         {
           "name": "Product reviews",
-          "category": "product",
+          "category": "product-detail",
           "locales": {
             "en": {
               "name": "Product reviews"
