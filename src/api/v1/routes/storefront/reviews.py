@@ -21,7 +21,10 @@ from src.api.dependencies import (
 )
 from src.api.dependencies.auth import get_current_customer_payload
 from src.api.responses import SuccessResponse
-from src.application.services.review_moderation import decide_review_visibility
+from src.application.services.review_moderation import (
+    decide_review_visibility,
+    public_reviewer_name,
+)
 from src.core.entities.product_review import ProductReview
 from src.core.exceptions import EntityNotFoundError
 from src.core.interfaces.services.token_service import CustomerTokenPayload
@@ -182,11 +185,7 @@ async def create_product_review(
             detail="You've already reviewed this product",
         )
 
-    reviewer_name = (customer.full_name or "").strip() or (
-        customer.email.value
-        if hasattr(customer.email, "value")
-        else str(customer.email)
-    )
+    reviewer_name = public_reviewer_name(customer.full_name, store.default_language)
 
     # Apply the merchant's moderation policy (auto / manual / auto_with_filter).
     # Pre-Phase-3 we hardcoded is_approved=True, which let spam through

@@ -181,6 +181,25 @@ async def _order_tracking_export(
         return {}
 
 
+async def _reviews_export(
+    order_repo: OrderRepository, customer: Customer
+) -> list[dict[str, Any]]:
+    """The Reviews app's request records for this shopper's orders (the
+    reviews themselves are in ``reviews``). Best-effort."""
+    try:
+        from src.infrastructure.repositories import order_tracking_repository as trk
+        from src.infrastructure.repositories import reviews_repository as rev
+
+        db = order_repo.session
+        return await rev.export_for(
+            db,
+            customer.store_id,
+            await trk.customer_order_ids(db, customer.store_id, customer.id),
+        )
+    except Exception:
+        return []
+
+
 async def _delivery_checks_export(
     order_repo: OrderRepository, customer_id: UUID
 ) -> list[dict[str, Any]]:
@@ -250,13 +269,7 @@ async def data_export(
     orders = await order_repo.get_by_customer(
         customer_id=current_customer.id, limit=200
     )
-    # Reviews repo doesn't expose a customer-listed query; the typical
-    # path is per-product. For the export we'd want per-customer,
-    # which requires a small SQL query. We surface an empty list for
-    # v1 so the export shape is stable; the per-customer fetch lands
-    # alongside the merchant hub's "moderate by reviewer" feature.
-    _ = review_repo
-    reviews: list[Any] = []
+    reviews = await review_repo.list_for_customer(current_customer.id)
 
     bundle = CustomerDataExportResponse(
         customer=_customer_to_dict(current_customer),
@@ -279,6 +292,8 @@ async def data_export(
             "order_tracking": await _order_tracking_export(
                 order_repo, current_customer
             ),
+            # Reviews app: when each review request went out and was used.
+            "review_requests": await _reviews_export(order_repo, current_customer),
         },
     )
 
@@ -320,11 +335,13 @@ async def delete_account(
         as the (anonymized) row. Order line PII (shipping address)
         was already snapshotted on the order at checkout time.
       - Reviews remain visible but reviewer_name is replaced with
-        "Anonymous"
+        «عميل» / "Customer" in the store's language
       - Back in Stock app sign-ups under the customer's email or phone
         in this store are deleted (no legal retention requirement)
       - The Order Tracking app's rows for the customer's orders (parcel
         areas, retry requests, message records) are deleted
+      - The Reviews app's request records for the customer's orders are
+        deleted
       - Auth cookies cleared so the next request lands as a guest
 
     What does NOT happen:
@@ -336,6 +353,9 @@ async def delete_account(
     storefront can show "your data has been removed; orders kept
     until <date>".
     """
+    # Each best-effort step below runs in its own savepoint: in Postgres a
+    # failed statement aborts the whole transaction, so swallowing the error
+    # alone would roll the entire deletion back when the request commits.
     deleted_id = current_customer.id
     placeholder_email = f"deleted-{deleted_id}@numu.local"
     # Read before step 1 wipes them: the Back in Stock rows are keyed by them.
@@ -365,7 +385,8 @@ async def delete_account(
     addresses = await address_repo.get_by_customer(deleted_id)
     for addr in addresses:
         try:
-            await address_repo.delete(addr.id)
+            async with customer_repo.session.begin_nested():
+                await address_repo.delete(addr.id)
         except Exception:
             # Best-effort — don't bail on a single delete failure.
             pass
@@ -374,35 +395,76 @@ async def delete_account(
     #     customer's delivery-check rows and cancel pending pings —
     #     erasure path R-13.3. Best-effort like the address sweep.
     try:
-        from src.infrastructure.repositories.whatsapp_delivery_check_repository import (
-            WhatsAppDeliveryCheckRepository,
-        )
+        async with customer_repo.session.begin_nested():
+            from src.infrastructure.repositories.whatsapp_delivery_check_repository import (
+                WhatsAppDeliveryCheckRepository,
+            )
 
-        await WhatsAppDeliveryCheckRepository(
-            customer_repo.session
-        ).anonymize_for_customer(deleted_id)
+            await WhatsAppDeliveryCheckRepository(
+                customer_repo.session
+            ).anonymize_for_customer(deleted_id)
     except Exception:
         pass
 
     # 2c. Back in Stock app: the shopper's waiting rows go entirely.
     try:
-        await bis_repo.delete_for(
-            customer_repo.session, current_customer.store_id, bis_contacts
-        )
+        async with customer_repo.session.begin_nested():
+            await bis_repo.delete_for(
+                customer_repo.session, current_customer.store_id, bis_contacts
+            )
     except Exception:
         pass
 
     # 2d. Order Tracking app: its rows for the shopper's orders go entirely
     #     (the orders themselves stay, as above).
     try:
-        from src.infrastructure.repositories import order_tracking_repository as trk
+        async with customer_repo.session.begin_nested():
+            from src.infrastructure.repositories import order_tracking_repository as trk
 
-        db = customer_repo.session
-        await trk.delete_for(
-            db,
-            current_customer.store_id,
-            await trk.customer_order_ids(db, current_customer.store_id, deleted_id),
-        )
+            db = customer_repo.session
+            await trk.delete_for(
+                db,
+                current_customer.store_id,
+                await trk.customer_order_ids(db, current_customer.store_id, deleted_id),
+            )
+    except Exception:
+        pass
+
+    # 2e. Reviews app: its request records for the shopper's orders go.
+    try:
+        async with customer_repo.session.begin_nested():
+            from src.infrastructure.repositories import order_tracking_repository as trk
+            from src.infrastructure.repositories import reviews_repository as rev
+
+            db = customer_repo.session
+            await rev.delete_for(
+                db,
+                current_customer.store_id,
+                await trk.customer_order_ids(db, current_customer.store_id, deleted_id),
+            )
+    except Exception:
+        pass
+
+    # 2f. Reviews stay visible, under a neutral name instead of theirs.
+    try:
+        async with customer_repo.session.begin_nested():
+            from sqlalchemy import select
+
+            from src.application.services.review_moderation import public_reviewer_name
+            from src.infrastructure.database.models.tenant.store import StoreModel
+            from src.infrastructure.repositories.product_review_repository import (
+                ProductReviewRepository,
+            )
+
+            db = customer_repo.session
+            language = await db.scalar(
+                select(StoreModel.default_language).where(
+                    StoreModel.id == current_customer.store_id
+                )
+            )
+            await ProductReviewRepository(db).anonymize_customer(
+                deleted_id, public_reviewer_name(None, language)
+            )
     except Exception:
         pass
 

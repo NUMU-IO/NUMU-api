@@ -49,6 +49,8 @@ class MessageType(StrEnum):
     # Back in Stock app: one variant a shopper asked about is buyable again.
     # Shopper-requested, one message per request.
     BACK_IN_STOCK_ALERT = "back_in_stock_alert"
+    # Reviews app: a few days after delivery, ask the buyer for a review.
+    REVIEW_REQUEST = "review_request"
 
 
 class MessageStatus(StrEnum):
@@ -678,6 +680,29 @@ EGYPTIAN_TEMPLATES = {
                 },
             ],
         ),
+    },
+    # Reviews app (docs/Plans/APPS/03-reviews): body {{1}} first name, {{2}}
+    # order number, {{3}} store; the button's suffix on
+    # https://numueg.app/a/{{1}} is "reviews/<subdomain>/<token>".
+    MessageType.REVIEW_REQUEST: {
+        lang: MessageTemplate(
+            type=MessageType.REVIEW_REQUEST,
+            name="app_reviews_request_v1",
+            language=lang,
+            components=[
+                {
+                    "type": "body",
+                    "parameters": ["customer_name", "order_number", "store_name"],
+                },
+                {
+                    "type": "button",
+                    "sub_type": "url",
+                    "index": "0",
+                    "parameters": ["review_link"],
+                },
+            ],
+        )
+        for lang in ("en", "ar")
     },
 }
 

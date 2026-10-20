@@ -160,6 +160,8 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.back_in_stock_app_tasks",
         # Order Tracking app: reconcile, message sweep, sends.
         "src.infrastructure.messaging.tasks.order_tracking_tasks",
+        # Reviews app: the request sweep and sends.
+        "src.infrastructure.messaging.tasks.reviews_tasks",
         # Phase 4.4 — smart-collection membership sweep.
         "src.infrastructure.messaging.tasks.smart_collection_tasks",
         # Phase 5.8 — beat scheduler heartbeat for /health/detailed.
@@ -353,6 +355,13 @@ celery_app.conf.beat_schedule = {
     "apps-order-tracking-reconcile": {
         "task": "apps.order_tracking.reconcile",
         "schedule": crontab(minute=50, hour=3),
+    },
+    # Reviews app (docs/Plans/APPS/03-reviews): the only way a review request
+    # goes out, since requests wait days. Finds nothing until a store installs
+    # the app.
+    "apps-reviews-sweep": {
+        "task": "apps.reviews.sweep",
+        "schedule": crontab(minute="8-59/10"),
     },
     # Phase 5.8 — beat heartbeat. Every minute, write the current
     # unix timestamp to Redis so /health/detailed can flag stale beat

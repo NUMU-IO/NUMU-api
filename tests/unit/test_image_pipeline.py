@@ -5,6 +5,8 @@ validation, color mode normalization, and full pipeline processing.
 """
 
 import io
+import struct
+import zlib
 
 import pytest
 from PIL import Image
@@ -102,6 +104,16 @@ class TestImageProcessorValidation:
         data = _create_test_image(width=9000, height=100, format="PNG")
         with pytest.raises(ImageProcessingError, match="exceed maximum"):
             self.processor.validate(data)
+
+    def test_validate_decompression_bomb_header_raises(self):
+        """A header claiming over twice Pillow's pixel limit is refused, not
+        raised as DecompressionBombError."""
+        png = bytearray(_create_test_image(width=1, height=1, format="PNG"))
+        # IHDR: 8-byte signature, 4-byte length, b"IHDR", width, height, ...
+        png[16:24] = struct.pack(">II", 20_000, 20_000)
+        png[29:33] = struct.pack(">I", zlib.crc32(bytes(png[12:29])))
+        with pytest.raises(ImageProcessingError, match="Failed to open"):
+            self.processor.validate(bytes(png))
 
 
 class TestImageProcessorExifStripping:

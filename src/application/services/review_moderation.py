@@ -19,6 +19,10 @@ Why this lives in `application/services` rather than the route:
     auto-approved while the admin route held — opposite of what a
     typical merchant expects).
 
+Nothing in core ever approves a held review afterwards. The Reviews app
+(``routes/apps/reviews.py``) is the moderation UI: it lists held
+reviews and publishes, rejects or deletes them (Bug 12).
+
 The profanity word list is intentionally minimal — Phase 3 ships a
 bare-minimum filter that catches obvious slurs and lewd terms in
 English + Arabic. Merchants who need stronger filtering should layer a
@@ -138,3 +142,11 @@ def decide_review_visibility(
     # behavior; a typo in the merchant config shouldn't drop reviews on
     # the floor).
     return ModerationDecision(is_approved=True)
+
+
+def public_reviewer_name(name: str | None, language: str | None) -> str:
+    """The name printed under a public review: never an email, a phone or a blank."""
+    name = (name or "").strip()
+    if not name or "@" in name or name.lstrip("+").replace(" ", "").isdigit():
+        return "Customer" if language == "en" else "عميل"
+    return name[:120]

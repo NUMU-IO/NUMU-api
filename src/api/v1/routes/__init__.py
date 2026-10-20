@@ -220,6 +220,9 @@ from src.api.v1.routes.storefront.apps_back_in_stock import (
 from src.api.v1.routes.storefront.apps_order_tracking import (
     router as storefront_order_tracking_app_router,
 )
+from src.api.v1.routes.storefront.apps_reviews import (
+    router as storefront_reviews_app_router,
+)
 from src.api.v1.routes.storefront.cart_sdk_aliases import (
     router as storefront_cart_sdk_router,
 )
@@ -406,6 +409,13 @@ api_router.include_router(
 # Storefront - Order Tracking app (the host /track page's view and "Try again").
 api_router.include_router(
     storefront_order_tracking_app_router,
+    prefix="/storefront/store/{store_id}",
+)
+
+# Storefront - Reviews app (the host /reviews/write page and the review
+# section); also registers its numueg.app/a/reviews/... link resolver.
+api_router.include_router(
+    storefront_reviews_app_router,
     prefix="/storefront/store/{store_id}",
 )
 

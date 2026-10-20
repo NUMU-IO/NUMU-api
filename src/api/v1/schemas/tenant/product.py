@@ -641,6 +641,13 @@ class ProductResponse(BaseModel):
         default_factory=list,
         description="Ordered series memberships with neighboring books",
     )
+    apps: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Storefront detail only: data installed apps add, by app slug "
+            "(Reviews: {average, count})"
+        ),
+    )
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
 
