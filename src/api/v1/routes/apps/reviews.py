@@ -27,6 +27,7 @@ from src.api.dependencies.database import get_db
 from src.application.services import reviews_service as svc
 from src.application.services.back_in_stock_whatsapp import can_send, whatsapp_state
 from src.infrastructure.cache.product_cache import get_product_cache
+from src.infrastructure.database.connection import commit_and_restore_rls
 from src.infrastructure.database.models.tenant.product_review import (
     ProductReviewModel as Review,
 )
@@ -73,8 +74,12 @@ def _review_out(r: Review, name: str, images: list | None, number: str | None) -
     }
 
 
-async def _bust(store_id: UUID) -> None:
-    """Shoppers see the change: once per request, never once per review."""
+async def _bust(db: AsyncSession, store_id: UUID) -> None:
+    """Shoppers see the change: once per request, never once per review.
+
+    Commits first: the session would commit only after the route returns, and
+    a product page read in between would cache the old rating again."""
+    await commit_and_restore_rls(db)
     try:
         await get_product_cache().invalidate_store_products(store_id)
     except Exception:  # noqa: BLE001 — the change is saved; the cache expires anyway
@@ -164,7 +169,7 @@ async def act(session: Session, db: Db, review_id: UUID, body: ActionIn) -> dict
     r = await _own(db, session, review_id)
     _apply(r, body)
     await db.flush()
-    await _bust(session.store_id)
+    await _bust(db, session.store_id)
     return {"id": str(r.id), "tab": svc.tab_of(r.is_approved, r.rejected_reason)}
 
 
@@ -181,7 +186,7 @@ async def bulk(session: Session, db: Db, body: BulkIn) -> dict:
             _apply(r, body)
             done += 1
     await db.flush()
-    await _bust(session.store_id)
+    await _bust(db, session.store_id)
     return {"updated": done}
 
 
@@ -191,7 +196,7 @@ async def remove(session: Session, db: Db, review_id: UUID) -> None:
     keys = [k for m in r.media or [] for k in (m.get("key"), m.get("thumb_key")) if k]
     await db.execute(delete(Review).where(Review.id == r.id))
     await db.flush()
-    await _bust(session.store_id)
+    await _bust(db, session.store_id)
     try:
         from src.api.dependencies.services import get_storage_service
 
@@ -217,7 +222,7 @@ async def reply(session: Session, db: Db, review_id: UUID, body: ReplyIn) -> dic
     r.updated_at = datetime.now(UTC)
     await db.flush()
     if r.is_approved:
-        await _bust(session.store_id)
+        await _bust(db, session.store_id)
     return {"reply": {"body": r.reply_body, "at": _iso(r.replied_at)} if text else None}
 
 

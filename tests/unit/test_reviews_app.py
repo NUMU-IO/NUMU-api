@@ -70,8 +70,13 @@ def world(monkeypatch, test_session):
     sends = MagicMock()
     monkeypatch.setattr(tasks.send_task, "apply_async", sends)
     cache = SimpleNamespace(invalidate_store_products=AsyncMock())
+
+    async def commit(db):  # SQLite has no set_config; the test session flushes
+        await db.flush()
+
     for module in (merchant, shop):
         monkeypatch.setattr(module, "get_product_cache", lambda: cache)
+        monkeypatch.setattr(module, "commit_and_restore_rls", commit)
     the_app: list = []
 
     async def build(*, live: bool = True) -> SimpleNamespace:
@@ -296,7 +301,7 @@ async def test_the_handler_does_nothing_without_the_app_or_with_requests_off(wor
 async def _due_request(world, x, o) -> Request:
     await handler.on_order_status_changed(_event(o, "delivered"))
     [r] = await _requests(world.db, x.store.id)
-    r.due_at = datetime.now(UTC) - timedelta(days=1)
+    r.due_at = r.updated_at = datetime.now(UTC) - timedelta(days=1)
     await world.db.flush()
     return r
 
@@ -308,6 +313,10 @@ async def test_the_sweep_queues_due_requests_only_inside_the_window_and_the_cap(
     assert await tasks.sweep(_at_cairo(23)) == {"queued": 0}
     assert await tasks.sweep(_at_cairo(12)) == {"queued": 1}
     world.sends.assert_called_once_with(args=[str(r.id)])
+    # Queued and not sent yet: the next sweeps leave it to its task...
+    assert await tasks.sweep(_at_cairo(12, 10)) == {"queued": 0}
+    # ...until the lease runs out (a lost task).
+    assert await tasks.sweep(_at_cairo(13, 30)) == {"queued": 1}
 
     world.db.add(
         Settings(
@@ -503,6 +512,40 @@ async def test_a_buyer_reviews_with_photos_and_the_store_rule_decides(world, sto
         Response(),
     )
     assert out["created"] == 1
+    # "No photos" is SQL NULL, not JSON null, so the photo filter counts right.
+    assert (
+        await world.db.scalar(
+            select(func.count()).select_from(Review).where(Review.media.is_(None))
+        )
+        == 1
+    )
+    _rows, with_photos = await repo.inbox(
+        world.db, x.store.id, tab="pending", photos=True
+    )
+    _rows, without = await repo.inbox(world.db, x.store.id, tab="pending", photos=False)
+    assert (with_photos, without) == (1, 1)
+
+
+async def test_a_change_shoppers_see_is_committed_before_the_cache_is_busted(
+    world, monkeypatch
+):
+    x = await world.build()
+    held = _review(x)
+    world.db.add(held)
+    await world.db.flush()
+    order: list[str] = []
+    monkeypatch.setattr(
+        merchant,
+        "commit_and_restore_rls",
+        AsyncMock(side_effect=lambda db: order.append("commit")),
+    )
+    world.cache.invalidate_store_products.side_effect = lambda store_id: order.append(
+        "bust"
+    )
+    await merchant.act(
+        x.session, world.db, held.id, merchant.ActionIn(action="publish")
+    )
+    assert order == ["commit", "bust"]
 
 
 @pytest.mark.parametrize(
@@ -671,6 +714,12 @@ async def test_the_purge_drops_the_apps_data_and_keeps_the_text(world, storage):
 
     await repo.purge_store(world.db, x.store.id)
     assert await _requests(world.db, x.store.id) == []
+    assert (
+        await world.db.scalar(
+            select(func.count()).select_from(Review).where(Review.media.is_(None))
+        )
+        == 1
+    )
     assert await world.db.get(Settings, x.store.id) is None
     await world.db.refresh(kept)
     assert (kept.reply_body, kept.media, kept.body) == (None, None, "حلو")

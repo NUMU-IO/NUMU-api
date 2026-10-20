@@ -93,4 +93,6 @@ class ProductReviewModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
         DateTime(timezone=True), nullable=True
     )
     #: The buyer's photos: ``[{"url", "thumb_url", "key", "thumb_key"}]``.
-    media: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # none_as_null: "no photos" is SQL NULL, which the photo filter and KPI
+    # count on; JSON's own null would read as having photos.
+    media: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)

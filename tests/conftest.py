@@ -215,7 +215,8 @@ def _patch_metadata_for_sqlite(metadata):
                 column.type.schema = None
             # Replace JSONB with JSON (SQLite doesn't support JSONB)
             if isinstance(column.type, JSONB):
-                column.type = JSON()
+                # Keep none_as_null: it decides whether None is SQL NULL.
+                column.type = JSON(none_as_null=column.type.none_as_null)
             # Replace ARRAY with JSON (SQLite doesn't support ARRAY)
             if isinstance(column.type, ARRAY):
                 column.type = JSON()

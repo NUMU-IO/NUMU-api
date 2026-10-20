@@ -126,6 +126,7 @@ async def due(db: AsyncSession, store_id: UUID, now: datetime, limit: int) -> li
                     Request.store_id == store_id,
                     Request.status == svc.SCHEDULED,
                     Request.due_at <= now,
+                    Request.updated_at <= now - svc.LEASE,
                 )
                 .order_by(Request.due_at)
                 .limit(limit)
@@ -134,6 +135,14 @@ async def due(db: AsyncSession, store_id: UUID, now: datetime, limit: int) -> li
         .scalars()
         .all()
     )
+
+
+async def lease(db: AsyncSession, ids: list, now: datetime) -> None:
+    """Queued now: no sweep queues these again until the lease runs out."""
+    if ids:
+        await db.execute(
+            update(Request).where(Request.id.in_(ids)).values(updated_at=now)
+        )
 
 
 async def sent_today(db: AsyncSession, store: Any, now: datetime) -> int:

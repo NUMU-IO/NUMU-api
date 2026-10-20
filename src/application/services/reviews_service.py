@@ -31,6 +31,9 @@ SEND_FROM, SEND_UNTIL = 10, 21
 SPREAD_SECONDS = 1800
 #: A request the sweep could not send for this long is dropped, not sent late.
 SEND_LATE = timedelta(days=14)
+#: A queued request is not queued again for this long. Its send task renews
+#: the lease on each retry, so a lost task is retried and a live one is not.
+LEASE = timedelta(hours=1)
 #: The review link works this long after the message went out.
 LINK_DAYS = 60
 

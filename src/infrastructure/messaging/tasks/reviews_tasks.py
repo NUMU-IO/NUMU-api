@@ -64,9 +64,10 @@ async def sweep(now: datetime | None = None) -> dict:
                 await repo.sent_today(db, store, now)
             )
             if room > 0:
-                queued += [
-                    str(i) for i in await repo.due(db, store_id, now, min(room, BATCH))
-                ]
+                ids = await repo.due(db, store_id, now, min(room, BATCH))
+                await repo.lease(db, ids, now)
+                queued += [str(i) for i in ids]
+        await db.commit()
     for request_id in queued:
         send_task.apply_async(args=[request_id])
     return {"queued": len(queued)}
@@ -228,6 +229,10 @@ async def _send(request_id: UUID, *, final_try: bool) -> dict:
             provider_id, reason = await send_whatsapp(db, store, order, token)
             if reason and reason not in _STOP and not final_try:
                 countdown = _LATER.get(reason, _RETRY_SECONDS)
+                # The retry keeps the lease, so no sweep queues it a second time.
+                await enable_rls_bypass(db)
+                request.updated_at = datetime.now(UTC)
+                await db.commit()
                 raise SendLater(reason, countdown + random.randint(0, 30))
         # The bypass is transaction-local, and core's message log commits.
         await enable_rls_bypass(db)

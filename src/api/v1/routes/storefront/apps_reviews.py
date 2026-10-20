@@ -42,6 +42,7 @@ from src.application.services.review_moderation import (
 )
 from src.core.interfaces.services.storage_service import StorageBucket
 from src.infrastructure.cache.product_cache import get_product_cache
+from src.infrastructure.database.connection import commit_and_restore_rls
 from src.infrastructure.database.models.tenant.order import OrderModel
 from src.infrastructure.database.models.tenant.product_review import (
     ProductReviewModel as Review,
@@ -261,7 +262,9 @@ async def write(
     link.status, link.updated_at = svc.COMPLETED, now
     link.completed_at = link.completed_at or now
     try:
-        await db.flush()
+        # Committed before the cache bust below, or a product page read in
+        # between would cache the old rating again.
+        await commit_and_restore_rls(db)
     except IntegrityError:
         # The same form sent twice: the first one saved the reviews.
         await db.rollback()
