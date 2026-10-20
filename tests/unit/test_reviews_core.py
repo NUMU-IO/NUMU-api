@@ -130,3 +130,30 @@ async def test_deleting_the_account_keeps_reviews_under_a_neutral_name(
     )
     reviews = await ProductReviewRepository(test_session).list_for_customer(shopper.id)
     assert [r.reviewer_name for r in reviews] == [neutral, neutral]
+
+
+async def test_each_erasure_step_runs_in_its_own_savepoint(test_session, monkeypatch):
+    """In Postgres a failed statement aborts the transaction; a step that
+    fails must roll back only its savepoint, not the whole deletion."""
+    from src.api.v1.routes.storefront import data_rights
+    from src.infrastructure.repositories import reviews_repository as rev
+
+    shopper = await _store_with_reviews(test_session, "ar")
+    savepoints: list[int] = []
+    real = test_session.begin_nested
+
+    def counting():
+        savepoints.append(1)
+        return real()
+
+    monkeypatch.setattr(test_session, "begin_nested", counting)
+    monkeypatch.setattr(rev, "delete_for", AsyncMock(side_effect=RuntimeError("boom")))
+    await data_rights.delete_account(
+        Response(),
+        shopper,
+        SimpleNamespace(session=test_session, update=AsyncMock()),
+        SimpleNamespace(get_by_customer=AsyncMock(return_value=[]), delete=AsyncMock()),
+    )
+    assert len(savepoints) == 5  # 2b to 2f
+    reviews = await ProductReviewRepository(test_session).list_for_customer(shopper.id)
+    assert [r.reviewer_name for r in reviews] == ["عميل", "عميل"]

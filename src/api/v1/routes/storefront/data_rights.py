@@ -353,6 +353,9 @@ async def delete_account(
     storefront can show "your data has been removed; orders kept
     until <date>".
     """
+    # Each best-effort step below runs in its own savepoint: in Postgres a
+    # failed statement aborts the whole transaction, so swallowing the error
+    # alone would roll the entire deletion back when the request commits.
     deleted_id = current_customer.id
     placeholder_email = f"deleted-{deleted_id}@numu.local"
     # Read before step 1 wipes them: the Back in Stock rows are keyed by them.
@@ -382,7 +385,8 @@ async def delete_account(
     addresses = await address_repo.get_by_customer(deleted_id)
     for addr in addresses:
         try:
-            await address_repo.delete(addr.id)
+            async with customer_repo.session.begin_nested():
+                await address_repo.delete(addr.id)
         except Exception:
             # Best-effort — don't bail on a single delete failure.
             pass
@@ -391,71 +395,76 @@ async def delete_account(
     #     customer's delivery-check rows and cancel pending pings —
     #     erasure path R-13.3. Best-effort like the address sweep.
     try:
-        from src.infrastructure.repositories.whatsapp_delivery_check_repository import (
-            WhatsAppDeliveryCheckRepository,
-        )
+        async with customer_repo.session.begin_nested():
+            from src.infrastructure.repositories.whatsapp_delivery_check_repository import (
+                WhatsAppDeliveryCheckRepository,
+            )
 
-        await WhatsAppDeliveryCheckRepository(
-            customer_repo.session
-        ).anonymize_for_customer(deleted_id)
+            await WhatsAppDeliveryCheckRepository(
+                customer_repo.session
+            ).anonymize_for_customer(deleted_id)
     except Exception:
         pass
 
     # 2c. Back in Stock app: the shopper's waiting rows go entirely.
     try:
-        await bis_repo.delete_for(
-            customer_repo.session, current_customer.store_id, bis_contacts
-        )
+        async with customer_repo.session.begin_nested():
+            await bis_repo.delete_for(
+                customer_repo.session, current_customer.store_id, bis_contacts
+            )
     except Exception:
         pass
 
     # 2d. Order Tracking app: its rows for the shopper's orders go entirely
     #     (the orders themselves stay, as above).
     try:
-        from src.infrastructure.repositories import order_tracking_repository as trk
+        async with customer_repo.session.begin_nested():
+            from src.infrastructure.repositories import order_tracking_repository as trk
 
-        db = customer_repo.session
-        await trk.delete_for(
-            db,
-            current_customer.store_id,
-            await trk.customer_order_ids(db, current_customer.store_id, deleted_id),
-        )
+            db = customer_repo.session
+            await trk.delete_for(
+                db,
+                current_customer.store_id,
+                await trk.customer_order_ids(db, current_customer.store_id, deleted_id),
+            )
     except Exception:
         pass
 
     # 2e. Reviews app: its request records for the shopper's orders go.
     try:
-        from src.infrastructure.repositories import order_tracking_repository as trk
-        from src.infrastructure.repositories import reviews_repository as rev
+        async with customer_repo.session.begin_nested():
+            from src.infrastructure.repositories import order_tracking_repository as trk
+            from src.infrastructure.repositories import reviews_repository as rev
 
-        db = customer_repo.session
-        await rev.delete_for(
-            db,
-            current_customer.store_id,
-            await trk.customer_order_ids(db, current_customer.store_id, deleted_id),
-        )
+            db = customer_repo.session
+            await rev.delete_for(
+                db,
+                current_customer.store_id,
+                await trk.customer_order_ids(db, current_customer.store_id, deleted_id),
+            )
     except Exception:
         pass
 
     # 2f. Reviews stay visible, under a neutral name instead of theirs.
     try:
-        from sqlalchemy import select
+        async with customer_repo.session.begin_nested():
+            from sqlalchemy import select
 
-        from src.application.services.review_moderation import public_reviewer_name
-        from src.infrastructure.database.models.tenant.store import StoreModel
-        from src.infrastructure.repositories.product_review_repository import (
-            ProductReviewRepository,
-        )
-
-        db = customer_repo.session
-        language = await db.scalar(
-            select(StoreModel.default_language).where(
-                StoreModel.id == current_customer.store_id
+            from src.application.services.review_moderation import public_reviewer_name
+            from src.infrastructure.database.models.tenant.store import StoreModel
+            from src.infrastructure.repositories.product_review_repository import (
+                ProductReviewRepository,
             )
-        )
-        await ProductReviewRepository(db).anonymize_customer(
-            deleted_id, public_reviewer_name(None, language)
-        )
+
+            db = customer_repo.session
+            language = await db.scalar(
+                select(StoreModel.default_language).where(
+                    StoreModel.id == current_customer.store_id
+                )
+            )
+            await ProductReviewRepository(db).anonymize_customer(
+                deleted_id, public_reviewer_name(None, language)
+            )
     except Exception:
         pass
 

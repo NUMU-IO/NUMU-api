@@ -174,6 +174,21 @@ async def _store_photo(store_id: UUID, data: bytes) -> dict[str, str] | None:
     return out
 
 
+async def _drop_photos(media_of: list[list[dict[str, str]]]) -> None:
+    """Best effort: a stray file is never shown, only stored."""
+    from src.api.dependencies.services import get_storage_service
+
+    storage = get_storage_service()
+    for media in media_of:
+        for item in media:
+            for key in (item.get("key"), item.get("thumb_key")):
+                try:
+                    if key:
+                        await storage.delete_file(key)
+                except Exception:  # noqa: BLE001
+                    pass
+
+
 @router.post("/write")
 async def write(
     store_id: StoreId, db: Db, request: Request, response: Response
@@ -277,8 +292,10 @@ async def write(
         # between would cache the old rating again.
         await commit_and_restore_rls(db)
     except IntegrityError:
-        # The same form sent twice: the first one saved the reviews.
+        # The same form sent twice: the first one saved the reviews. This
+        # one's photos belong to nothing, so they go too.
         await db.rollback()
+        await _drop_photos(media_of)
         raise HTTPException(status_code=409, detail="done", headers=NO_STORE) from None
     if published:
         try:

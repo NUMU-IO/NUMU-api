@@ -646,6 +646,37 @@ async def test_photos_are_handled_with_no_transaction_open(world, storage, monke
     assert out["created"] == 1 and seen == [False]
 
 
+async def test_a_duplicate_post_leaves_no_photos_behind(world, storage, monkeypatch):
+    """The same form sent twice: the second insert conflicts, and its photos go."""
+    from sqlalchemy.exc import IntegrityError
+
+    x = await world.build()
+    o = await world.order(x)
+    token = await _sent(world, x, o)
+    calls: list[int] = []
+
+    async def commit(db):
+        calls.append(1)
+        if len(calls) == 2:  # the insert's commit: the other post won
+            raise IntegrityError("INSERT", {}, Exception("duplicate"))
+        await db.flush()
+
+    monkeypatch.setattr(shop, "commit_and_restore_rls", commit)
+    pid = str(x.products[0].id)
+    with pytest.raises(HTTPException) as exc:
+        await shop.write(
+            x.store.id,
+            world.db,
+            _form(
+                token, {f"rating.{pid}": "5"}, {f"photos.{pid}": [_photo(exif=False)]}
+            ),
+            Response(),
+        )
+    assert exc.value.status_code == 409
+    deleted = {c.args[0] for c in storage.fake.delete_file.await_args_list}
+    assert deleted == set(storage.stored) and len(deleted) == 2
+
+
 @pytest.mark.parametrize(
     "fields",
     [{"rating.X": "6"}, {"rating.X": "4", "body.X": "x" * 4001}, {}],
