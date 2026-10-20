@@ -226,11 +226,24 @@ async def _send(request_id: UUID, *, final_try: bool) -> dict:
         token = svc.new_token()
         if reason is None:
             store = await db.get(StoreModel, request.store_id)
+            # Marked sent before WhatsApp is asked: if anything fails after it
+            # accepted the message, no sweep finds the request to send again.
+            # At most once: a crash in between loses this one message.
+            request.status, request.sent_at = svc.SENT, now
+            request.token_hash, request.updated_at = svc.token_hash(token), now
+            await db.commit()
+            await enable_rls_bypass(db)
             provider_id, reason = await send_whatsapp(db, store, order, token)
             if reason and reason not in _STOP and not final_try:
                 countdown = _LATER.get(reason, _RETRY_SECONDS)
-                # The retry keeps the lease, so no sweep queues it a second time.
+                # Back to scheduled; the retry keeps the lease, so no sweep
+                # queues it a second time meanwhile.
                 await enable_rls_bypass(db)
+                request.status, request.sent_at, request.token_hash = (
+                    svc.SCHEDULED,
+                    None,
+                    None,
+                )
                 request.updated_at = datetime.now(UTC)
                 await db.commit()
                 raise SendLater(reason, countdown + random.randint(0, 30))
@@ -238,11 +251,11 @@ async def _send(request_id: UUID, *, final_try: bool) -> dict:
         await enable_rls_bypass(db)
         request.updated_at = datetime.now(UTC)
         if provider_id:
-            request.status, request.provider_message_id = svc.SENT, provider_id
-            request.token_hash, request.sent_at = svc.token_hash(token), now
+            request.provider_message_id = provider_id
         else:
             request.status = svc.SKIPPED if reason in _SKIPPED else svc.FAILED
             request.skip_reason = (reason or "send_failed")[:64]
+            request.sent_at = request.token_hash = None
         await db.commit()
         logger.info(
             "reviews_request",

@@ -222,8 +222,12 @@ async def write(
         name or (order.shipping_address or {}).get("first_name"),
         store.default_language,
     )
-    created = published = rejected_photos = 0
-    for product_id, rating, title, body, photos in todo:
+    # Decoding, re-encoding and uploading photos takes a while: end the
+    # transaction first, or Postgres closes it once it sits idle for 60 s.
+    await db.commit()
+    media_of: list[list[dict[str, str]]] = []
+    rejected_photos = 0
+    for *_text_fields, photos in todo:
         media = []
         for photo in photos:
             data = await photo.read(svc.PHOTO_BYTES + 1)
@@ -236,6 +240,13 @@ async def write(
                 rejected_photos += 1
             else:
                 media.append(stored)
+        media_of.append(media)
+    await commit_and_restore_rls(db)  # a fresh transaction, RLS context back
+
+    created = published = 0
+    for (product_id, rating, title, body, _photos), media in zip(
+        todo, media_of, strict=True
+    ):
         decision = decide_review_visibility(
             store_settings=store.settings, title=title, body=body
         )

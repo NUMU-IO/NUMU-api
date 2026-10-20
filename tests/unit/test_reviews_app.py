@@ -356,6 +356,28 @@ async def test_a_due_request_goes_out_once_with_a_working_link(world, monkeypatc
     assert await shop.resolve_link(world.db, f"no-such-store/{token}") is None
 
 
+async def test_a_request_whatsapp_took_is_never_sent_twice(world, monkeypatch):
+    """If the database fails after the provider accepted the message, the
+    request is already marked sent: no sweep sends it again."""
+    import src.infrastructure.events.handlers.whatsapp_notification_handler as notif
+
+    service = _whatsapp(monkeypatch)
+    monkeypatch.setattr(
+        notif, "_persist_message_log", AsyncMock(side_effect=RuntimeError("db gone"))
+    )
+    x = await world.build()
+    r = await _due_request(world, x, await world.order(x))
+    with pytest.raises(RuntimeError):
+        await tasks.send(r.id)
+    service.send_message.assert_awaited_once()
+    await world.db.refresh(r)
+    assert r.status == svc.SENT
+    assert (
+        await repo.due(world.db, x.store.id, datetime.now(UTC) + timedelta(days=1), 10)
+        == []
+    )
+
+
 @pytest.mark.parametrize(
     ("setup", "reason"),
     [("opt_out", "opt_out"), ("returned", "order_closed"), ("reviewed", "reviewed")],
@@ -546,6 +568,29 @@ async def test_a_change_shoppers_see_is_committed_before_the_cache_is_busted(
         x.session, world.db, held.id, merchant.ActionIn(action="publish")
     )
     assert order == ["commit", "bust"]
+
+
+async def test_photos_are_handled_with_no_transaction_open(world, storage, monkeypatch):
+    """Postgres ends a transaction idle for 60 s; photos take a while."""
+    x = await world.build()
+    o = await world.order(x)
+    token = await _sent(world, x, o)
+    seen: list[bool] = []
+    real = shop._store_photo
+
+    async def spy(store_id, data):
+        seen.append(world.db.in_transaction())
+        return await real(store_id, data)
+
+    monkeypatch.setattr(shop, "_store_photo", spy)
+    pid = str(x.products[0].id)
+    out = await shop.write(
+        x.store.id,
+        world.db,
+        _form(token, {f"rating.{pid}": "5"}, {f"photos.{pid}": [_photo(exif=False)]}),
+        Response(),
+    )
+    assert out["created"] == 1 and seen == [False]
 
 
 @pytest.mark.parametrize(
