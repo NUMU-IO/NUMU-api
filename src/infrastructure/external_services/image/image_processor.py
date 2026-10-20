@@ -122,7 +122,7 @@ class ImageProcessor:
             raise ImageProcessingError(
                 "Cannot identify image format. File may be corrupt or unsupported."
             )
-        except (OSError, SyntaxError) as exc:
+        except (OSError, SyntaxError, Image.DecompressionBombError) as exc:
             raise ImageProcessingError(f"Failed to open image: {exc}")
 
         if img.format not in self.SUPPORTED_FORMATS:
