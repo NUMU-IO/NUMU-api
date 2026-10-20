@@ -300,7 +300,7 @@ async def test_the_handler_does_nothing_without_the_app_or_with_requests_off(wor
 
 async def _due_request(world, x, o) -> Request:
     await handler.on_order_status_changed(_event(o, "delivered"))
-    [r] = await _requests(world.db, x.store.id)
+    [r] = [r for r in await _requests(world.db, x.store.id) if r.order_id == o.id]
     r.due_at = r.updated_at = datetime.now(UTC) - timedelta(days=1)
     await world.db.flush()
     return r
@@ -327,6 +327,23 @@ async def test_the_sweep_queues_due_requests_only_inside_the_window_and_the_cap(
     )
     await world.db.flush()
     assert await tasks.sweep(_at_cairo(12)) == {"queued": 0}
+
+
+async def test_queued_requests_count_against_the_daily_cap(world):
+    """A request queued but not sent yet takes its place in the cap."""
+    x = await world.build()
+    world.db.add(
+        Settings(
+            store_id=x.store.id,
+            tenant_id=x.store.tenant_id,
+            **(svc.DEFAULT_SETTINGS | {"daily_cap": 1}),
+        )
+    )
+    await _due_request(world, x, await world.order(x))
+    assert await tasks.sweep(_at_cairo(12)) == {"queued": 1}
+    # Another order comes due while the first is still in flight.
+    await _due_request(world, x, await world.order(x))
+    assert await tasks.sweep(_at_cairo(12, 10)) == {"queued": 0}
 
 
 async def test_a_due_request_goes_out_once_with_a_working_link(world, monkeypatch):

@@ -60,8 +60,10 @@ async def sweep(now: datetime | None = None) -> dict:
             tz = resolve_store_timezone_name(store.settings)
             if not svc.in_window(now, tz):
                 continue
-            room = (await repo.settings(db, store_id))["daily_cap"] - (
-                await repo.sent_today(db, store, now)
+            room = (
+                (await repo.settings(db, store_id))["daily_cap"]
+                - await repo.sent_today(db, store, now)
+                - await repo.in_flight(db, store_id, now)
             )
             if room > 0:
                 ids = await repo.due(db, store_id, now, min(room, BATCH))

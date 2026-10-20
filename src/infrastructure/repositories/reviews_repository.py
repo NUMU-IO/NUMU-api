@@ -142,6 +142,24 @@ async def due(db: AsyncSession, store_id: UUID, now: datetime, limit: int) -> li
     )
 
 
+async def in_flight(db: AsyncSession, store_id: UUID, now: datetime) -> int:
+    """Requests queued and leased but not sent yet: they count against the
+    daily cap like sent ones, or slow sends would let the next sweeps overshoot."""
+    return (
+        await db.scalar(
+            select(func.count())
+            .select_from(Request)
+            .where(
+                Request.store_id == store_id,
+                Request.status == svc.SCHEDULED,
+                Request.due_at <= now,
+                Request.updated_at > now - svc.LEASE,
+            )
+        )
+        or 0
+    )
+
+
 async def lease(db: AsyncSession, ids: list, now: datetime) -> None:
     """Queued now: no sweep queues these again until the lease runs out."""
     if ids:
