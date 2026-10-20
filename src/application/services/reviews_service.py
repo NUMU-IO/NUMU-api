@@ -25,6 +25,17 @@ SKIPPED, CANCELLED, FAILED = "skipped", "cancelled", "failed"
 #: Order statuses that call a waiting request off.
 CALL_OFF = frozenset({"returned", "refunded", "cancelled"})
 
+
+def reviewable(order: Any) -> bool:
+    """Delivered and kept. Some refund flows set only the payment status and
+    leave the order delivered; a full refund closes the order for reviews like
+    a refunded status does. A partial refund does not: the buyer kept the rest."""
+    return (
+        str(order.status) == "delivered"
+        and str(getattr(order, "payment_status", "") or "") != "refunded"
+    )
+
+
 #: Requests go out between 10:00 and 21:00 store time (R-3), spread over the
 #: first half hour of the window so a morning's batch does not leave at once.
 SEND_FROM, SEND_UNTIL = 10, 21

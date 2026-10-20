@@ -677,6 +677,63 @@ async def test_a_duplicate_post_leaves_no_photos_behind(world, storage, monkeypa
     assert deleted == set(storage.stored) and len(deleted) == 2
 
 
+async def test_a_failed_upload_removes_the_photos_already_stored(
+    world, storage, monkeypatch
+):
+    x = await world.build()
+    o = await world.order(x)
+    token = await _sent(world, x, o)
+    uploads: list[str] = []
+    real = storage.fake.upload_file
+
+    async def flaky(**kw):
+        uploads.append(kw["key"])
+        if len(uploads) == 3:  # the second photo's full size
+            raise RuntimeError("R2 timed out")
+        return await real(**kw)
+
+    storage.fake.upload_file = flaky
+    pid = str(x.products[0].id)
+    with pytest.raises(RuntimeError):
+        await shop.write(
+            x.store.id,
+            world.db,
+            _form(
+                token,
+                {f"rating.{pid}": "5"},
+                {f"photos.{pid}": [_photo(exif=False), _photo(exif=False)]},
+            ),
+            Response(),
+        )
+    deleted = {c.args[0] for c in storage.fake.delete_file.await_args_list}
+    assert deleted == set(storage.stored) and len(deleted) == 2
+
+
+async def test_a_fully_refunded_order_takes_no_review(world, monkeypatch):
+    """Some refund flows leave the order delivered and set only the payment."""
+    from src.core.entities.order import PaymentStatus
+
+    service = _whatsapp(monkeypatch)
+    x = await world.build()
+    o = await world.order(x)
+    token = await _sent(world, x, o)
+    o.payment_status = PaymentStatus.REFUNDED
+    await world.db.flush()
+    page = await shop.write_page(x.store.id, world.db, Response(), t=token)
+    assert page["state"] == "not_found"
+
+    y = await world.build()
+    p = await world.order(y)
+    r = await _due_request(world, y, p)
+    p.payment_status = PaymentStatus.REFUNDED
+    await world.db.flush()
+    assert await tasks.send(r.id) == {"status": svc.SKIPPED, "reason": "order_closed"}
+    service.send_message.assert_not_awaited()
+
+    p.payment_status = PaymentStatus.PARTIALLY_REFUNDED
+    assert svc.reviewable(p)
+
+
 @pytest.mark.parametrize(
     "fields",
     [{"rating.X": "6"}, {"rating.X": "4", "body.X": "x" * 4001}, {}],

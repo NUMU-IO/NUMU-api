@@ -86,7 +86,7 @@ async def _link(
     if not svc.link_open(request.sent_at, datetime.now(UTC)):
         return "expired", request, None
     order = await db.get(OrderModel, request.order_id)
-    if order is None or str(order.status) != "delivered":
+    if order is None or not svc.reviewable(order):
         return "not_found", None, None
     return "open", request, order
 
@@ -241,53 +241,52 @@ async def write(
     # transaction first, or Postgres closes it once it sits idle for 60 s.
     await db.commit()
     media_of: list[list[dict[str, str]]] = []
-    rejected_photos = 0
-    for *_text_fields, photos in todo:
-        media = []
-        for photo in photos:
-            data = await photo.read(svc.PHOTO_BYTES + 1)
-            stored = (
-                await _store_photo(store.id, data)
-                if len(data) <= svc.PHOTO_BYTES
-                else None
-            )
-            if stored is None:
-                rejected_photos += 1
-            else:
-                media.append(stored)
-        media_of.append(media)
-    await commit_and_restore_rls(db)  # a fresh transaction, RLS context back
-
-    created = published = 0
-    for (product_id, rating, title, body, _photos), media in zip(
-        todo, media_of, strict=True
-    ):
-        decision = decide_review_visibility(
-            store_settings=store.settings, title=title, body=body
-        )
-        db.add(
-            Review(
-                id=uuid4(),
-                tenant_id=store.tenant_id,
-                store_id=store.id,
-                product_id=product_id,
-                customer_id=order.customer_id,
-                order_id=order.id,
-                verified=True,
-                reviewer_name=shown,
-                rating=rating,
-                title=title,
-                body=body,
-                is_approved=decision.is_approved,
-                media=media or None,
-            )
-        )
-        created += 1
-        published += decision.is_approved
-    now = datetime.now(UTC)
-    link.status, link.updated_at = svc.COMPLETED, now
-    link.completed_at = link.completed_at or now
+    rejected_photos = created = published = 0
     try:
+        for *_text_fields, photos in todo:
+            media: list[dict[str, str]] = []
+            media_of.append(media)  # first, so a failure midway knows its files
+            for photo in photos:
+                data = await photo.read(svc.PHOTO_BYTES + 1)
+                stored = (
+                    await _store_photo(store.id, data)
+                    if len(data) <= svc.PHOTO_BYTES
+                    else None
+                )
+                if stored is None:
+                    rejected_photos += 1
+                else:
+                    media.append(stored)
+        await commit_and_restore_rls(db)  # a fresh transaction, RLS context back
+
+        for (product_id, rating, title, body, _photos), media in zip(
+            todo, media_of, strict=True
+        ):
+            decision = decide_review_visibility(
+                store_settings=store.settings, title=title, body=body
+            )
+            db.add(
+                Review(
+                    id=uuid4(),
+                    tenant_id=store.tenant_id,
+                    store_id=store.id,
+                    product_id=product_id,
+                    customer_id=order.customer_id,
+                    order_id=order.id,
+                    verified=True,
+                    reviewer_name=shown,
+                    rating=rating,
+                    title=title,
+                    body=body,
+                    is_approved=decision.is_approved,
+                    media=media or None,
+                )
+            )
+            created += 1
+            published += decision.is_approved
+        now = datetime.now(UTC)
+        link.status, link.updated_at = svc.COMPLETED, now
+        link.completed_at = link.completed_at or now
         # Committed before the cache bust below, or a product page read in
         # between would cache the old rating again.
         await commit_and_restore_rls(db)
@@ -297,6 +296,10 @@ async def write(
         await db.rollback()
         await _drop_photos(media_of)
         raise HTTPException(status_code=409, detail="done", headers=NO_STORE) from None
+    except Exception:
+        # Nothing was saved, so the photos stored so far belong to nothing.
+        await _drop_photos(media_of)
+        raise
     if published:
         try:
             await get_product_cache().invalidate_store_products(store.id)

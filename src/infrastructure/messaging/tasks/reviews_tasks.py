@@ -96,7 +96,7 @@ async def _skip_reason(
         return "switch_off"
     if now - svc.aware(request.due_at) > svc.SEND_LATE:
         return "late"
-    if order is None or str(order.status) != "delivered":
+    if order is None or not svc.reviewable(order):
         return "order_closed"
     items = await repo.order_items(db, order)
     if not items or all(i["reviewed"] for i in items):
