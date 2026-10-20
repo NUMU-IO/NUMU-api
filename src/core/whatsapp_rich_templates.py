@@ -605,4 +605,53 @@ RICH_TEMPLATES: list[dict] = [
         ],
         "body_examples": ["منى", "1042", "متجر القاهرة"],
     },
+    # Reviews app «آراء العملاء» (docs/Plans/APPS/03-reviews): a few days
+    # after delivery, ask the buyer to rate what they bought. The button goes
+    # through the app link (/a/reviews/<subdomain>/<token>) to the store's own
+    # /reviews/write page. UTILITY: no reward is mentioned. Opt-out words match
+    # whatsapp_stop_keyword_detector.
+    {
+        "name": "app_reviews_request_v1",
+        "language": "en",
+        "category": "UTILITY",
+        "body": (
+            "Hi {{1}} 👋\nYour order {{2}} from *{{3}}* arrived a few days ago. "
+            "How do you like it?\n\nRate what you bought in under a minute; "
+            "your review helps other shoppers choose."
+        ),
+        "footer": "Reply STOP to opt out",
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "Rate your order",
+                "url": _APP_URL,
+                "example": [
+                    "https://numueg.app/a/reviews/cairo-style/AbCdEfGhIjKlMnOpQrStUv"
+                ],
+            }
+        ],
+        "body_examples": ["Mona", "1042", "Cairo Style"],
+    },
+    {
+        "name": "app_reviews_request_v1",
+        "language": "ar",
+        "category": "UTILITY",
+        "body": (
+            "أهلاً يا {{1}} 👋\nطلبك رقم {{2}} من *{{3}}* وصلك من كام يوم. "
+            "عجبك؟\n\nقيّم اللي اشتريته في أقل من دقيقة، ورأيك هيساعد ناس "
+            "كتير تختار صح."
+        ),
+        "footer": "لو مش عايز رسايل تاني ابعت «إلغاء»",
+        "buttons": [
+            {
+                "type": "URL",
+                "text": "قيّم طلبك",
+                "url": _APP_URL,
+                "example": [
+                    "https://numueg.app/a/reviews/cairo-style/AbCdEfGhIjKlMnOpQrStUv"
+                ],
+            }
+        ],
+        "body_examples": ["منى", "1042", "متجر القاهرة"],
+    },
 ]

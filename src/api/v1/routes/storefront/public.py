@@ -1656,6 +1656,7 @@ async def get_product_by_slug(
             session, store_id, "product", product.id
         ),
         series=await _resolve_product_series(session, product.id),
+        apps=await _app_sections(session, store_id, product.id),
         created_at=str(product.created_at),
         updated_at=str(product.updated_at),
     )
@@ -1914,6 +1915,17 @@ async def _resolve_variants_for_product(
         }
         for v in variants
     ]
+
+
+async def _app_sections(
+    session: AsyncSession, store_id: UUID, product_id: UUID
+) -> dict | None:
+    """What installed apps add to the product page. The Reviews app's
+    summary feeds the theme's section and the page's ``aggregateRating``."""
+    from src.infrastructure.repositories.reviews_repository import payload_section
+
+    reviews = await payload_section(session, store_id, product_id)
+    return {"reviews": reviews} if reviews else None
 
 
 async def _resolve_product_series(

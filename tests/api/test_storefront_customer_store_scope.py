@@ -71,7 +71,9 @@ class _Products:
 class _Stores:
     async def get_by_id(self, store_id):
         if store_id in (STORE_A, STORE_B):
-            return SimpleNamespace(id=store_id, tenant_id=uuid4(), settings={})
+            return SimpleNamespace(
+                id=store_id, tenant_id=uuid4(), settings={}, default_language="ar"
+            )
         return None
 
     async def get_by_subdomain(self, sub):

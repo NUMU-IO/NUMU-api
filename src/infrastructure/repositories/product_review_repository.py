@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.entities.product_review import ProductReview
@@ -108,6 +108,25 @@ class ProductReviewRepository(IProductReviewRepository):
                 dist[int(rating)] = int(c)
 
         return ReviewStats(average=avg_value, count=count, distribution=dist)
+
+    async def list_for_customer(self, customer_id: UUID) -> list[ProductReview]:
+        """Every review the customer wrote, approved or not (data-rights export)."""
+        stmt = (
+            select(ProductReviewModel)
+            .where(ProductReviewModel.customer_id == customer_id)
+            .order_by(desc(ProductReviewModel.created_at))
+        )
+        result = await self.session.execute(stmt)
+        return [self._to_entity(m) for m in result.scalars().all()]
+
+    async def anonymize_customer(self, customer_id: UUID, name: str) -> int:
+        """Keep the customer's reviews but replace their name (account deletion)."""
+        result = await self.session.execute(
+            update(ProductReviewModel)
+            .where(ProductReviewModel.customer_id == customer_id)
+            .values(reviewer_name=name)
+        )
+        return result.rowcount or 0
 
     async def customer_has_reviewed(
         self,

@@ -153,6 +153,9 @@ from src.infrastructure.events.handlers.recovery_event_handler import (
     handle_recovery_succeeded_outbox,
     handle_risk_finalised_for_recovery,
 )
+from src.infrastructure.events.handlers.reviews_handler import (
+    on_order_status_changed as reviews_on_order_status_changed,
+)
 from src.infrastructure.events.handlers.shipment_handler import (
     handle_order_created_for_shipment,
     handle_order_status_for_shipment,
@@ -351,6 +354,8 @@ def create_event_bus() -> EventBus:
     bus.subscribe(ShipmentCreatedEvent, order_tracking_on_shipment_created)
     bus.subscribe(ShipmentStatusChangedEvent, order_tracking_on_shipment_status_changed)
     bus.subscribe(OrderStatusChangedEvent, order_tracking_on_order_status_changed)
+    # Reviews app: gated per store on the handler's first query.
+    bus.subscribe(OrderStatusChangedEvent, reviews_on_order_status_changed)
     install_commit_watch(bus)
 
     # Recovery flow (backend-021): risk-finalised → spawn flow; flow-started →
