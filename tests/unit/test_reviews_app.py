@@ -646,22 +646,26 @@ async def test_photos_are_handled_with_no_transaction_open(world, storage, monke
     assert out["created"] == 1 and seen == [False]
 
 
-async def test_a_duplicate_post_leaves_no_photos_behind(world, storage, monkeypatch):
-    """The same form sent twice: the second insert conflicts, and its photos go."""
-    from sqlalchemy.exc import IntegrityError
+async def _other_post_won(world, x, o, monkeypatch, product):
+    """Another post of the same link saved ``product`` after this one read
+    the order (both saw it unreviewed)."""
+    real = repo.order_items
 
+    async def stale(db, order):
+        return [i | {"reviewed": False} for i in await real(db, order)]
+
+    monkeypatch.setattr(repo, "order_items", stale)
+    world.db.add(_review(x, product=product, order=o, approved=True))
+    await world.db.flush()
+
+
+async def test_a_duplicate_post_leaves_no_photos_behind(world, storage, monkeypatch):
+    """The same form sent twice at once: the second saves nothing, answers
+    "done", and its photos go."""
     x = await world.build()
     o = await world.order(x)
     token = await _sent(world, x, o)
-    calls: list[int] = []
-
-    async def commit(db):
-        calls.append(1)
-        if len(calls) == 2:  # the insert's commit: the other post won
-            raise IntegrityError("INSERT", {}, Exception("duplicate"))
-        await db.flush()
-
-    monkeypatch.setattr(shop, "commit_and_restore_rls", commit)
+    await _other_post_won(world, x, o, monkeypatch, x.products[0])
     pid = str(x.products[0].id)
     with pytest.raises(HTTPException) as exc:
         await shop.write(
@@ -672,9 +676,42 @@ async def test_a_duplicate_post_leaves_no_photos_behind(world, storage, monkeypa
             ),
             Response(),
         )
-    assert exc.value.status_code == 409
+    assert (exc.value.status_code, exc.value.detail) == (409, "done")
     deleted = {c.args[0] for c in storage.fake.delete_file.await_args_list}
     assert deleted == set(storage.stored) and len(deleted) == 2
+
+
+async def test_two_posts_at_once_keep_every_product_reviewed_once(
+    world, storage, monkeypatch
+):
+    """Partial overlap: the product the other post had is skipped, the rest
+    is saved."""
+    x = await world.build()
+    o = await world.order(x)
+    token = await _sent(world, x, o)
+    dress, scarf = x.products
+    await _other_post_won(world, x, o, monkeypatch, dress)
+    out = await shop.write(
+        x.store.id,
+        world.db,
+        _form(
+            token,
+            {f"rating.{dress.id}": "1", f"rating.{scarf.id}": "5"},
+            {f"photos.{dress.id}": [_photo(exif=False)]},
+        ),
+        Response(),
+    )
+    assert out["created"] == 1
+    rows = (
+        (await world.db.execute(select(Review).where(Review.order_id == o.id)))
+        .scalars()
+        .all()
+    )
+    assert sorted((r.product_id == scarf.id, r.rating) for r in rows) == [
+        (False, 4),
+        (True, 5),
+    ]
+    assert len(storage.fake.delete_file.await_args_list) == 2  # the dress photo
 
 
 async def test_a_failed_upload_removes_the_photos_already_stored(

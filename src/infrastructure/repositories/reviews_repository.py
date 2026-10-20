@@ -198,6 +198,20 @@ async def cap_lock(db: AsyncSession, store_id: UUID) -> None:
     await lock(db, f"reviews-cap:{store_id}")
 
 
+async def add_review(db: AsyncSession, **values: Any) -> UUID | None:
+    """One buyer review, unless this order already reviewed this product
+    (another post of the same link won): then None."""
+    return await db.scalar(
+        _insert(db, Review)
+        .values(id=uuid4(), **values)
+        .on_conflict_do_nothing(
+            index_elements=["store_id", "order_id", "product_id"],
+            index_where=Review.order_id.is_not(None),
+        )
+        .returning(Review.id)
+    )
+
+
 # ─── The order's products ──────────────────────────────────────────────
 
 
