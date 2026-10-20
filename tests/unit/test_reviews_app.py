@@ -378,6 +378,42 @@ async def test_a_request_whatsapp_took_is_never_sent_twice(world, monkeypatch):
     )
 
 
+async def test_a_failure_before_whatsapp_is_asked_leaves_the_request_for_later(
+    world, monkeypatch
+):
+    _whatsapp(monkeypatch)
+    monkeypatch.setattr(
+        bisw, "whatsapp_state", AsyncMock(side_effect=RuntimeError("down"))
+    )
+    x = await world.build()
+    r = await _due_request(world, x, await world.order(x))
+    with pytest.raises(RuntimeError):
+        await tasks.send(r.id)
+    await world.db.refresh(r)
+    assert (r.status, r.sent_at, r.token_hash) == (svc.SCHEDULED, None, None)
+
+
+async def test_two_first_calls_share_one_settings_row(world, monkeypatch):
+    """The front's first screens can ask at once; the second insert is a no-op."""
+    x = await world.build()
+    world.db.add(
+        Settings(
+            store_id=x.store.id, tenant_id=x.store.tenant_id, **svc.DEFAULT_SETTINGS
+        )
+    )
+    await world.db.flush()
+    real = repo.settings_row
+    calls: list[int] = []
+
+    async def first_misses(db, store_id):
+        calls.append(1)
+        return None if len(calls) == 1 else await real(db, store_id)
+
+    monkeypatch.setattr(repo, "settings_row", first_misses)
+    row = await repo.ensure_settings(world.db, x.store)
+    assert row is not None and row.store_id == x.store.id
+
+
 @pytest.mark.parametrize(
     ("setup", "reason"),
     [("opt_out", "opt_out"), ("returned", "order_closed"), ("reviewed", "reviewed")],

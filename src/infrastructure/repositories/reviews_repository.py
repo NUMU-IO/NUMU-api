@@ -49,13 +49,18 @@ async def settings(db: AsyncSession, store_id: UUID) -> dict[str, Any]:
 
 
 async def ensure_settings(db: AsyncSession, store: Any) -> Settings:
+    """The store's row, made with the defaults the first time. Two screens
+    can ask at once, so the insert does nothing if the other one won."""
     row = await settings_row(db, store.id)
     if row is None:
-        row = Settings(
-            store_id=store.id, tenant_id=store.tenant_id, **svc.DEFAULT_SETTINGS
+        await db.execute(
+            _insert(db, Settings)
+            .values(
+                store_id=store.id, tenant_id=store.tenant_id, **svc.DEFAULT_SETTINGS
+            )
+            .on_conflict_do_nothing(index_elements=["store_id"])
         )
-        db.add(row)
-        await db.flush()
+        row = await settings_row(db, store.id)
     return row
 
 

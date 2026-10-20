@@ -103,9 +103,10 @@ async def _skip_reason(
 
 
 async def send_whatsapp(
-    db: Any, store: Any, order: Any, token: str
+    db: Any, store: Any, order: Any, token: str, claim: Any
 ) -> tuple[str | None, str | None]:
-    """``(provider message id, None)`` or ``(None, reason)``. Through core:
+    """``(provider message id, None)`` or ``(None, reason)``. ``claim`` is
+    awaited right before the provider is asked, and only then. Through core:
     the store's transport and paid access, the send guard and the
     ``message_logs`` row that counts it against the store's allowance."""
     # ponytail: the same steps as order_tracking_tasks.send_whatsapp with
@@ -176,6 +177,7 @@ async def send_whatsapp(
         return None, str(getattr(decision.reason, "value", decision.reason))
 
     service = await get_whatsapp_service(store.id, db, store.tenant_id)
+    await claim()
     result = await service.send_message(
         MessageContent(
             type=MessageType.REVIEW_REQUEST,
@@ -226,14 +228,19 @@ async def _send(request_id: UUID, *, final_try: bool) -> dict:
         token = svc.new_token()
         if reason is None:
             store = await db.get(StoreModel, request.store_id)
-            # Marked sent before WhatsApp is asked: if anything fails after it
-            # accepted the message, no sweep finds the request to send again.
-            # At most once: a crash in between loses this one message.
-            request.status, request.sent_at = svc.SENT, now
-            request.token_hash, request.updated_at = svc.token_hash(token), now
-            await db.commit()
-            await enable_rls_bypass(db)
-            provider_id, reason = await send_whatsapp(db, store, order, token)
+
+            async def claim() -> None:
+                # Marked sent right before WhatsApp is asked: if anything
+                # fails after it accepted the message, no sweep finds the
+                # request to send again. A failure before this point leaves it
+                # scheduled for the next sweep. At most once: a crash between
+                # the claim and the provider loses this one message.
+                request.status, request.sent_at = svc.SENT, now
+                request.token_hash, request.updated_at = svc.token_hash(token), now
+                await db.commit()
+                await enable_rls_bypass(db)
+
+            provider_id, reason = await send_whatsapp(db, store, order, token, claim)
             if reason and reason not in _STOP and not final_try:
                 countdown = _LATER.get(reason, _RETRY_SECONDS)
                 # Back to scheduled; the retry keeps the lease, so no sweep
