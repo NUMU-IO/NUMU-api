@@ -434,5 +434,9 @@ async def purge_store(db: AsyncSession, store_id: UUID) -> None:
 
 async def cleanup(db: AsyncSession, *, now: datetime | None = None) -> int:
     cutoff = (now or datetime.now(UTC)) - KEEP
-    result = await db.execute(delete(Suggestion).where(Suggestion.created_at < cutoff))
+    result = await db.execute(
+        delete(Suggestion)
+        .where(or_(Suggestion.created_at < cutoff, Suggestion.product_id.is_(None)))
+        .execution_options(synchronize_session=False)
+    )
     return int(result.rowcount or 0)

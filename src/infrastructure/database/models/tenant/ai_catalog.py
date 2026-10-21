@@ -79,10 +79,11 @@ class AiCatalogSuggestionModel(Base, UUIDMixin, TimestampMixin, TenantMixin):
     )
 
     store_id: Mapped[PyUUID] = _store_fk(nullable=False)
-    product_id: Mapped[PyUUID] = mapped_column(
+    # SET NULL, not CASCADE: a product deleted mid-run keeps its bulk item,
+    # which then fails and refunds its run; the daily cleanup removes it.
+    product_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("public.products.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("public.products.id", ondelete="SET NULL"),
     )
     bulk_run_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True),

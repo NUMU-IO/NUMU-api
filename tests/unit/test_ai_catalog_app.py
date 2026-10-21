@@ -1189,3 +1189,44 @@ async def test_a_run_purged_during_its_apply_ends_quietly(world, monkeypatch):
         "done": 0,
         "failed": 1,
     }
+
+
+async def test_a_product_deleted_mid_run_refunds_its_item(world):
+    fk = next(iter(Suggestion.__table__.c.product_id.foreign_keys))
+    assert fk.ondelete == "SET NULL" and Suggestion.__table__.c.product_id.nullable
+    x = await world.build()
+    out = await routes.start_bulk(
+        body=routes.BulkBody(groups=["name"], product_ids=[x.products[1].id]),
+        session=x.session,
+        db=world.db,
+    )
+    run_id, store_id = UUID(out["id"]), x.store.id
+    item = (await world.db.execute(select(Suggestion))).scalars().one()
+    item.product_id = None  # what Postgres does when the product is deleted
+    await world.db.flush()
+    assert await tasks.work(run_id, store_id) is True
+    assert await repo.run_counts(world.db, run_id) == {"failed": 1}
+    assert (await repo.usage(world.db, store_id))[0] == 0
+    assert await repo.cleanup(world.db) == 1  # rows of deleted products go
+
+
+async def test_a_malformed_alt_edit_is_ignored_not_a_crash(world):
+    x = await world.build()
+    s = await _ready(
+        world,
+        x,
+        x.products[1],
+        ["alts", "name"],
+        {
+            "alts": [{"image": 1, "alt": "A scarf"}],
+            "name": "Silk scarf",
+            "name_ar": "طرحة",
+        },
+    )
+    out = await routes.apply(
+        suggestion_id=UUID(s["id"]),
+        body=routes.ApplyBody(fields=["alts", "name"], edits={"alts": "oops"}),
+        session=x.session,
+        db=world.db,
+    )
+    assert set(out["applied"]) - {"score_before", "score_after"} == {"name"}

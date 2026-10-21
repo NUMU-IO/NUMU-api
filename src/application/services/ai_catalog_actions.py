@@ -76,6 +76,8 @@ async def read(
     db: AsyncSession, store_id: UUID, product_id: UUID
 ) -> tuple[Any, dict[str, Any]] | None:
     """The product entity and NUMU's current values of every field."""
+    if product_id is None:  # the product was deleted (SET NULL)
+        return None
     entity = await ProductRepository(db).get_by_id(product_id)
     if entity is None or entity.store_id != store_id:
         return None
@@ -202,6 +204,8 @@ def _edited(key: str, value: Any, snap: dict[str, Any]) -> Any:
     if key == "slug":
         return str(value or "").strip().lower()
     if key == "alts":
+        if not isinstance(value, dict):
+            return {}  # not url → text: nothing to write
         urls = set(snap["alts"])
         return {
             u: rules.clip(str(a or "").strip(), rules.LIMITS["alt"])

@@ -107,8 +107,8 @@ def upgrade() -> None:
         sa.Column(
             "product_id",
             UUID,
-            sa.ForeignKey("public.products.id", ondelete="CASCADE"),
-            nullable=False,
+            sa.ForeignKey("public.products.id", ondelete="SET NULL"),
+            nullable=True,
         ),
         sa.Column(
             "bulk_run_id",
