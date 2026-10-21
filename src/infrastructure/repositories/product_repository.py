@@ -300,6 +300,24 @@ class ProductRepository(IProductRepository):
         model = result.scalar_one_or_none()
         return self._to_entity(model) if model else None
 
+    async def slug_taken(self, store_id: UUID, slug: str, exclude_id: UUID) -> bool:
+        """Whether another product in the store already uses ``slug``.
+
+        Nothing in the database stops two products sharing a slug (the only
+        ``(store_id, slug)`` index is partial and not unique), and two make
+        ``get_by_slug`` raise, so the update use case asks this first.
+        """
+        found = await self.session.scalar(
+            select(ProductModel.id)
+            .where(
+                ProductModel.store_id == store_id,
+                ProductModel.slug == slug,
+                ProductModel.id != exclude_id,
+            )
+            .limit(1)
+        )
+        return found is not None
+
     async def find_by_previous_slug(self, store_id: UUID, slug: str) -> Product | None:
         """Get the product that USED to live at ``slug`` (rename history).
 

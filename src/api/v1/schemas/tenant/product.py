@@ -231,7 +231,7 @@ class CreateProductRequest(BaseModel):
         default=False,
         description="Leave this page out of sitemap.xml.",
     )
-    seo_title: str | None = Field(None, max_length=70, description="SEO page title")
+    seo_title: str | None = Field(None, max_length=60, description="SEO page title")
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
@@ -417,7 +417,7 @@ class UpdateProductRequest(BaseModel):
         default=False,
         description="Leave this page out of sitemap.xml.",
     )
-    seo_title: str | None = Field(None, max_length=70, description="SEO page title")
+    seo_title: str | None = Field(None, max_length=60, description="SEO page title")
     seo_description: str | None = Field(
         None, max_length=160, description="SEO meta description"
     )
@@ -598,7 +598,7 @@ class ProductResponse(BaseModel):
     )
     seo_title: str | None = Field(
         default=None,
-        max_length=70,
+        max_length=60,
         description="Per-product SEO title override (defaults to product name).",
     )
     seo_description: str | None = Field(

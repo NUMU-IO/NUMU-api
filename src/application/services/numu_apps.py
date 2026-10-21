@@ -176,12 +176,19 @@ async def _purge_reviews(db: AsyncSession, store_id: UUID) -> None:
     await purge_store(db, store_id)
 
 
+async def _purge_ai_catalog(db: AsyncSession, store_id: UUID) -> None:
+    from src.infrastructure.repositories.ai_catalog_repository import purge_store
+
+    await purge_store(db, store_id)
+
+
 PURGERS = {
     "inbox": _purge_inbox,
     "whatsapp": _purge_whatsapp,
     "back-in-stock": _purge_back_in_stock,
     "order-tracking": _purge_order_tracking,
     "reviews": _purge_reviews,
+    "ai-catalog": _purge_ai_catalog,
 }
 
 
