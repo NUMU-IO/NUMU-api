@@ -316,6 +316,18 @@ async def runs(db: AsyncSession, store_id: UUID, *, limit: int = 10) -> list[Run
     )
 
 
+async def cancel_run(db: AsyncSession, run: Run) -> None:
+    """Stop a run: its queued items are dismissed and their reserved runs go
+    back; an item already being written finishes."""
+    run.status = "cancelled"
+    queued = [s for s in await run_items(db, run.id) if s.status == "queued"]
+    for s in queued:
+        s.status = "dismissed"
+    if queued:
+        await refund(db, run.store_id, runs=len(queued))
+    await db.flush()
+
+
 async def run_counts(db: AsyncSession, run_id: UUID) -> dict[str, int]:
     rows = (
         await db.execute(

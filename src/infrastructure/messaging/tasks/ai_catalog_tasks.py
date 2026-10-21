@@ -49,7 +49,7 @@ async def work(run_id: UUID, store_id: UUID) -> bool:
         if run is None or run.status != "running":
             return False
         if not await is_live(db, store_id, rules.SLUG):
-            run.status = "cancelled"
+            await repo.cancel_run(db, run)
             await _commit(db)
             return False
         item = await repo.claim(db, run_id)

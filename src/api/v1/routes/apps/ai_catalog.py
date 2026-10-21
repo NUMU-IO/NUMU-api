@@ -544,13 +544,5 @@ async def cancel_bulk(run_id: UUID, session: Session, db: Db) -> dict:
     if run is None:
         raise HTTPException(status_code=404, detail={"code": "gone", "fields": []})
     if run.status in ("running", "review"):
-        run.status = "cancelled"
-        refund = 0
-        for s in await repo.run_items(db, run.id):
-            if s.status == "queued":
-                s.status = "dismissed"
-                refund += 1
-        if refund:
-            await repo.refund(db, run.store_id, runs=refund)
-        await db.flush()
+        await repo.cancel_run(db, run)
     return _run_out(run, await repo.run_counts(db, run.id))

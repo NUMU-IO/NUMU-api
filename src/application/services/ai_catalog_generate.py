@@ -306,7 +306,9 @@ def social_messages(
         {
             "type": "text",
             "text": "DATA:\n```\n"
-            + rules.scrub(json.dumps(data, ensure_ascii=False))
+            + json.dumps(
+                {k: rules.scrub(v) for k, v in data.items()}, ensure_ascii=False
+            )
             + "\n```",
         }
     ]

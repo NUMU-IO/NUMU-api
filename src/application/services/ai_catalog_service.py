@@ -277,7 +277,10 @@ def build_messages(
         "description_ar": (snap["description_ar"] or "")[:DATA_CHARS],
         "photos": len(images),
     }
-    text = "DATA:\n```\n" + scrub(json.dumps(data, ensure_ascii=False)) + "\n```"
+    # Each value, not the serialized block: a link at the end of a field
+    # would otherwise take the JSON's quote and brace with it.
+    data = {k: scrub(v) if isinstance(v, str) else v for k, v in data.items()}
+    text = "DATA:\n```\n" + json.dumps(data, ensure_ascii=False) + "\n```"
     if store_facts:
         text += "\nSTORE FACTS:\n```\n" + scrub(store_facts) + "\n```"
     content: list[dict[str, Any]] = [{"type": "text", "text": text}]
