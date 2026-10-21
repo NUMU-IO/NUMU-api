@@ -149,13 +149,20 @@ async def generate(
             rules.answer_schema(keys),
             clean=lambda raw: rules.clean_answer(raw, keys, snap=snap),
         )
-    except gen.GenerationError as exc:
+    except Exception as exc:
+        # Any failure, not only the provider's: the row must not stay
+        # "running" and the run reserved for it goes back.
+        if isinstance(exc, gen.GenerationError):
+            code = exc.code
+        else:
+            code = "busy"
+            logger.exception("ai_catalog_generate_crashed")
         await commit(db)  # the tenant scope back before any statement
         row.status = "failed"
-        row.error_code = exc.code
+        row.error_code = code
         await repo.refund(db, store.id)
         await commit(db)
-        raise ActionError(exc.code) from exc
+        raise ActionError(code) from exc
     await commit(db)
     row.status = "ready"
     row.suggested = answer.data
@@ -484,13 +491,20 @@ async def social(
             clean=gen.clean_social,
             max_tokens=gen.SOCIAL_MAX_TOKENS,
         )
-    except gen.GenerationError as exc:
+    except Exception as exc:
+        # Any failure, not only the provider's: the row must not stay
+        # "running" and the run reserved for it goes back.
+        if isinstance(exc, gen.GenerationError):
+            code = exc.code
+        else:
+            code = "busy"
+            logger.exception("ai_catalog_generate_crashed")
         await commit(db)  # the tenant scope back before any statement
         row.status = "failed"
-        row.error_code = exc.code
+        row.error_code = code
         await repo.refund(db, store.id)
         await commit(db)
-        raise ActionError(exc.code) from exc
+        raise ActionError(code) from exc
     await commit(db)
     row.status = "ready"
     row.suggested = answer.data

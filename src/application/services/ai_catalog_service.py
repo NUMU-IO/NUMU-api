@@ -338,9 +338,12 @@ _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _PHONE = re.compile(
     r"(?:\+|00)\d[\d\s-]{7,}\d|(?<!\d)(?:20)?0?1[0125][\s-]?\d{4}[\s-]?\d{4}(?!\d)"
 )
+_CURRENCY = r"(?:EGP|LE|L\.E\.?|USD|SAR|AED|\$|ج\.م\.?|جنيه(?:ا|ات)?|جنيهًا|ريال|درهم)"
+# A Latin code counts only as a whole word: "Bottle 2", "100 lessons" and
+# "Caesar 5" are not prices.
 _PRICE = re.compile(
-    r"(?:(?:EGP|LE|L\.E\.?|USD|SAR|AED|\$|ج\.م\.?|جنيه(?:ا|ات)?|جنيهًا|ريال|درهم)\s*[0-9٠-٩][0-9٠-٩,.]*"
-    r"|[0-9٠-٩][0-9٠-٩,.]*\s*(?:EGP|LE|L\.E\.?|USD|SAR|AED|\$|ج\.م\.?|جنيه(?:ا|ات)?|جنيهًا|ريال|درهم))",
+    rf"(?:(?<![A-Za-z]){_CURRENCY}\s*[0-9٠-٩][0-9٠-٩,.]*"
+    rf"|[0-9٠-٩][0-9٠-٩,.]*\s*{_CURRENCY}(?![A-Za-z]))",
     re.I,
 )
 

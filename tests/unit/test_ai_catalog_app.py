@@ -944,3 +944,33 @@ async def test_undo_takes_the_last_applied_as_history_lists_it(world):
     assert (
         await _product(world.db, scarf.id)
     ).seo_title == "A scarf for every single day"
+
+
+def test_u03_a_currency_inside_a_word_is_not_a_price():
+    text = "Bottle 2 pieces, Apple 3 colours, 100 lessons, Caesar 5 sizes."
+    assert rules.scrub(text) == text
+    for price in (
+        "250 LE",
+        "LE 250",
+        "EGP 99",
+        "99 EGP",
+        "USD 5",
+        "150 ج.م",
+        "200 جنيه",
+    ):
+        assert rules.scrub(f"Only {price} today") == "Only today"
+
+
+async def test_an_unexpected_error_fails_the_item_and_refunds_its_run(world):
+    x = await world.build()
+    world.answers.append(RuntimeError("boom"))
+    with pytest.raises(HTTPException) as caught:
+        await routes.generate(
+            product_id=x.products[1].id,
+            body=routes.GenerateBody(groups=["name"]),
+            session=x.session,
+            db=world.db,
+        )
+    assert caught.value.status_code == 503 and caught.value.detail["code"] == "busy"
+    assert await repo.usage(world.db, x.store.id) == (0, 0)
+    assert (await world.db.execute(select(Suggestion.status))).scalar_one() == "failed"
