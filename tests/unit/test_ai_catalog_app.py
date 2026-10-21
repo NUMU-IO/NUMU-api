@@ -833,6 +833,7 @@ async def test_i13_i15_sweep_resumes_and_an_uninstall_stops_a_run(world):
     world.work.reset_mock()
     item = (await world.db.execute(select(Suggestion))).scalars().one()
     item.status, item.claimed_at = "running", datetime.now(UTC) - timedelta(minutes=20)
+    item.updated_at = datetime.now(UTC) - timedelta(minutes=20)
     await world.db.flush()
     assert await tasks.sweep() == 1
     world.work.assert_called_once()
@@ -1073,3 +1074,71 @@ async def test_an_empty_suggestion_never_wipes_a_field(world):
         )
     assert caught.value.detail["code"] == "nothing"
     assert (await _product(world.db, scarf.id)).name == "Scarf"
+
+
+async def test_a_crashing_worker_fails_its_item_refunds_and_moves_on(
+    world, monkeypatch
+):
+    x = await world.build()
+    out = await routes.start_bulk(
+        body=routes.BulkBody(groups=["name"], product_ids=[x.products[1].id]),
+        session=x.session,
+        db=world.db,
+    )
+    run_id, store_id = UUID(out["id"]), x.store.id
+    monkeypatch.setattr(
+        repo, "ensure_settings", AsyncMock(side_effect=RuntimeError("db hiccup"))
+    )
+    assert await tasks.work(run_id, store_id) is True
+    assert await repo.run_counts(world.db, run_id) == {"failed": 1}
+    assert (await repo.usage(world.db, store_id))[0] == 0
+
+
+async def test_an_uninstall_ends_a_bulk_apply_instead_of_leaving_it_applying(world):
+    from src.infrastructure.database.models.public.app import AppInstallationModel
+
+    x = await world.build()
+    out = await routes.start_bulk(
+        body=routes.BulkBody(groups=["name"], product_ids=[x.products[1].id]),
+        session=x.session,
+        db=world.db,
+    )
+    run_id, store_id = UUID(out["id"]), x.store.id
+    assert [await tasks.work(run_id, store_id) for _ in range(2)] == [True, False]
+    run = await repo.run(world.db, store_id, run_id)
+    run.status = "applying"
+    install = (
+        await world.db.execute(
+            select(AppInstallationModel).where(
+                AppInstallationModel.store_id == store_id
+            )
+        )
+    ).scalar_one()
+    install.status = "uninstalled"
+    await world.db.flush()
+    assert await tasks.apply_run(run_id, store_id, None, None) == {
+        "done": 0,
+        "failed": 0,
+    }
+    assert (await repo.run(world.db, store_id, run_id)).status == "cancelled"
+
+
+async def test_a_run_between_two_claims_is_not_stalled(world):
+    x = await world.build()
+    await routes.start_bulk(
+        body=routes.BulkBody(
+            groups=["name"], product_ids=[p.id for p in x.products[:2]]
+        ),
+        session=x.session,
+        db=world.db,
+    )
+    first = (
+        (await world.db.execute(select(Suggestion).order_by(Suggestion.created_at)))
+        .scalars()
+        .first()
+    )
+    first.status = "ready"  # just written; its worker is about to claim the next
+    await world.db.flush()
+    world.work.reset_mock()
+    assert await tasks.sweep() == 0
+    world.work.assert_not_called()

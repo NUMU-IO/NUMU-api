@@ -60,6 +60,7 @@ async def work(run_id: UUID, store_id: UUID) -> bool:
             await _commit(db)
             return False
         await _commit(db)
+        item_id = item.id
         store = await StoreRepository(db).get_by_id(store_id)
         try:
             await actions.generate(
@@ -71,14 +72,21 @@ async def work(run_id: UUID, store_id: UUID) -> bool:
                 item=item,
                 reserved=True,
             )
-        except actions.ActionError as exc:
-            if item.status != "failed":
-                # Not a provider failure (the product is gone, nothing to
-                # write): generate refunded nothing, so refund here.
-                item.status = "failed"
-                item.error_code = exc.code
+        except Exception as exc:  # noqa: BLE001 — one item never stops the run
+            # A provider failure is already marked failed and refunded;
+            # anything else (the product is gone, a crash) is done here.
+            await db.rollback()
+            await enable_rls_bypass(db)
+            row = await repo.suggestion(db, store_id, item_id)
+            if row is not None and row.status != "failed":
+                row.status = "failed"
+                row.error_code = (
+                    exc.code if isinstance(exc, actions.ActionError) else "busy"
+                )
                 await repo.refund(db, store_id)
                 await _commit(db)
+            if not isinstance(exc, actions.ActionError):
+                logger.exception("ai_catalog_bulk_item_crashed")
         return True
 
 
@@ -100,7 +108,11 @@ async def apply_run(
     async with AsyncSessionLocal() as db:
         await enable_rls_bypass(db)
         run = await repo.run(db, store_id, run_id)
-        if run is None or not await is_live(db, store_id, rules.SLUG):
+        if run is None:
+            return {"done": 0, "failed": 0}
+        if not await is_live(db, store_id, rules.SLUG):
+            run.status = "cancelled"  # never left "applying"
+            await _commit(db)
             return {"done": 0, "failed": 0}
         store = await StoreRepository(db).get_by_id(store_id)
         picked = set(suggestion_ids) if suggestion_ids else None

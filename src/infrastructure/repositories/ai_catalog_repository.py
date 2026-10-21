@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, delete, func, select, update
+from sqlalchemy import Select, and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.services import ai_catalog_service as rules
@@ -35,6 +35,9 @@ from src.infrastructure.repositories.order_tracking_repository import _insert
 TABLES = (Suggestion, Run, Usage, Settings)
 #: Suggestions are history for 90 days (Phase K cleanup).
 KEEP = timedelta(days=90)
+#: A run whose items changed this recently has a live worker between two
+#: claims (it re-enqueues itself after each item).
+ACTIVE_WINDOW = timedelta(minutes=2)
 #: A bulk item claimed this long ago lost its worker (the sweep re-queues it).
 #: Longer than a provider call can take with every retry and the repair
 #: (about 11 minutes: 45 s per try), so a slow item is never handed to a
@@ -356,8 +359,30 @@ async def claim(db: AsyncSession, run_id: UUID) -> Suggestion | None:
 async def stalled_runs(db: AsyncSession) -> list[tuple[UUID, UUID]]:
     """(run, store) of running runs with queued work and no live claim:
     their worker message was lost (prod Redis is allkeys-lru)."""
-    cutoff = datetime.now(UTC) - CLAIM_TIMEOUT
-    # Items a dead worker claimed go back to the queue first.
+    now = datetime.now(UTC)
+    cutoff = now - CLAIM_TIMEOUT
+    # Runs with a worker: an item claimed within the timeout, or any item
+    # written in the last two minutes (a worker between two claims). Read
+    # before the re-queue below, which touches updated_at itself.
+    live = list(
+        (
+            await db.execute(
+                select(Suggestion.bulk_run_id)
+                .where(
+                    Suggestion.bulk_run_id.is_not(None),
+                    or_(
+                        and_(
+                            Suggestion.status == "running",
+                            Suggestion.claimed_at >= cutoff,
+                        ),
+                        Suggestion.updated_at >= now - ACTIVE_WINDOW,
+                    ),
+                )
+                .distinct()
+            )
+        ).scalars()
+    )
+    # Items a dead worker claimed go back to the queue.
     await db.execute(
         update(Suggestion)
         .where(
@@ -366,11 +391,6 @@ async def stalled_runs(db: AsyncSession) -> list[tuple[UUID, UUID]]:
             Suggestion.claimed_at < cutoff,
         )
         .values(status="queued", claimed_at=None)
-    )
-    live = (
-        select(Suggestion.bulk_run_id)
-        .where(Suggestion.status == "running", Suggestion.claimed_at >= cutoff)
-        .scalar_subquery()
     )
     rows = (
         await db.execute(
