@@ -75,13 +75,15 @@ def image_key(url: str, product_images: list[str]) -> str | None:
     return None
 
 
-async def load_images(product_images: list[str]) -> list[str]:
-    """Up to 8 of the product's photos as data URLs. Anything not on NUMU's
-    bucket, not an image or over 5 MB is skipped: that run is text only."""
+async def load_images(product_images: list[str]) -> list[tuple[str, str]]:
+    """Up to 8 of the product's photos as ``(url, data URL)``, in order.
+    Anything not on NUMU's bucket, not an image or over 5 MB is skipped
+    (all skipped: that run is text only); the urls say which photo the
+    model's n-th photo is."""
     from src.api.dependencies.services import get_storage_service
 
     storage = get_storage_service()
-    out: list[str] = []
+    out: list[tuple[str, str]] = []
     for url in product_images[: rules.MAX_IMAGES]:
         key = image_key(url, product_images)
         if key is None:
@@ -98,7 +100,10 @@ async def load_images(product_images: list[str]) -> list[str]:
             continue
         if fmt not in ("JPEG", "PNG", "WEBP", "GIF"):
             continue
-        out.append(f"data:image/{fmt.lower()};base64,{base64.b64encode(data).decode()}")
+        out.append((
+            url,
+            f"data:image/{fmt.lower()};base64,{base64.b64encode(data).decode()}",
+        ))
     return out
 
 

@@ -133,7 +133,8 @@ async def generate(
     await _release(db)
 
     try:
-        images = await gen.load_images(list(entity.images or []))
+        pics = await gen.load_images(list(entity.images or []))
+        images = [data for _, data in pics]
         answer = await gen.ask(
             rules.build_messages(
                 snap=snap,
@@ -147,7 +148,9 @@ async def generate(
                 images=images,
             ),
             rules.answer_schema(keys),
-            clean=lambda raw: rules.clean_answer(raw, keys, snap=snap),
+            clean=lambda raw: rules.clean_answer(
+                raw, keys, snap=snap, photos=[url for url, _ in pics]
+            ),
         )
     except Exception as exc:
         # Any failure, not only the provider's: the row must not stay
@@ -208,6 +211,12 @@ def _edited(key: str, value: Any, snap: dict[str, Any]) -> Any:
     if key == "faq":
         return rules.faq_value(value)
     return None
+
+
+def _filled(key: str, value: Any) -> bool:
+    if key == "faq":
+        return bool(value and (value.get("ar") or value.get("en")))
+    return bool(value.strip() if isinstance(value, str) else value)
 
 
 def _empty(key: str, snap: dict[str, Any]) -> bool:
@@ -365,7 +374,8 @@ async def apply(
             if "alts" in values
             else {}
         )
-        values = {k: v for k, v in values.items() if v}
+    # An empty value never overwrites NUMU's text, in any mode.
+    values = {k: v for k, v in values.items() if _filled(k, v)}
     if not values:
         raise ActionError("nothing")
     stale = rules.stale_fields(list(values), row.current or {}, fresh)
@@ -478,7 +488,8 @@ async def social(
     style, voice = settings_row.arabic_style, settings_row.brand_voice
     await _release(db)
     try:
-        images = await gen.load_images(list(entity.images or []))
+        pics = await gen.load_images(list(entity.images or []))
+        images = [data for _, data in pics]
         answer = await gen.ask(
             gen.social_messages(
                 snap,

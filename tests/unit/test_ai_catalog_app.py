@@ -361,7 +361,14 @@ def world(monkeypatch, test_session):
     monkeypatch.setattr(actions, "_release", flush)
     monkeypatch.setattr(repo, "budget_left", AsyncMock(return_value=True))
     monkeypatch.setattr(gen, "paused", AsyncMock(return_value=False))
-    monkeypatch.setattr(gen, "load_images", AsyncMock(return_value=[]))
+    # Every photo "loads"; a run sees the product's photos in order.
+    monkeypatch.setattr(
+        gen,
+        "load_images",
+        AsyncMock(
+            side_effect=lambda urls: [(u, "data:image/png;base64,") for u in urls]
+        ),
+    )
     after = AsyncMock()
     monkeypatch.setattr(actions, "_after_commit", after)
     monkeypatch.setattr(tasks, "AsyncSessionLocal", lambda: _Session(test_session))
@@ -1028,3 +1035,41 @@ async def test_a_slow_item_is_not_handed_to_a_second_worker(world):
     world.work.reset_mock()
     assert await tasks.sweep() == 0
     assert item.status == "running"
+
+
+def test_alt_text_follows_the_photos_the_model_saw():
+    snap = _snap(alts={"A": "", "B": "", "C": ""})
+    out = rules.clean_answer(
+        {"alts": [{"image": 2, "alt": "the third photo"}]},
+        ["alts"],
+        snap=snap,
+        photos=["A", "C"],
+    )
+    assert out["alts"] == {"C": "the third photo"}
+
+
+async def test_an_empty_suggestion_never_wipes_a_field(world):
+    x = await world.build()
+    scarf = x.products[1]
+    s = await _ready(world, x, scarf, ["name"], {"name": "  ", "name_ar": "طرحة حرير"})
+    assert "name" not in s["suggested"]
+    out = await routes.apply(
+        suggestion_id=UUID(s["id"]),
+        body=routes.ApplyBody(fields=["name", "name_ar"]),
+        session=x.session,
+        db=world.db,
+    )
+    assert set(out["applied"]) - {"score_before", "score_after"} == {"name_ar"}
+    assert (await _product(world.db, scarf.id)).name == "Scarf"
+    s2 = await _ready(
+        world, x, scarf, ["name"], {"name": "Silk scarf", "name_ar": "طرحة"}
+    )
+    with pytest.raises(HTTPException) as caught:
+        await routes.apply(
+            suggestion_id=UUID(s2["id"]),
+            body=routes.ApplyBody(fields=["name"], edits={"name": " "}),
+            session=x.session,
+            db=world.db,
+        )
+    assert caught.value.detail["code"] == "nothing"
+    assert (await _product(world.db, scarf.id)).name == "Scarf"

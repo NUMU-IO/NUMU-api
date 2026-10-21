@@ -376,7 +376,7 @@ def _limit(key: str) -> int:
 
 
 def clean_answer(
-    raw: Any, keys: list[str], *, snap: dict[str, Any]
+    raw: Any, keys: list[str], *, snap: dict[str, Any], photos: list[str] | None = None
 ) -> dict[str, Any] | None:
     """The model's answer as the app's values, cleaned and clipped, or ``None``
     when it is not the asked shape (a missing key or a wrong type)."""
@@ -387,17 +387,23 @@ def clean_answer(
         if key in TEXT_FIELDS:
             if not isinstance(raw.get(key), str):
                 return None
-            out[key] = clip(scrub(raw[key]), _limit(key))
+            text = clip(scrub(raw[key]), _limit(key))
+            if text:  # nothing left is no suggestion, never an empty field
+                out[key] = text
         elif key == "slug":
             if not isinstance(raw.get("slug"), str):
                 return None
             slug = re.sub(r"[^a-z0-9]+", "-", raw["slug"].lower()).strip("-")
-            out["slug"] = clip(slug, LIMITS["slug"]).strip("-")
+            slug = clip(slug, LIMITS["slug"]).strip("-")
+            if slug:
+                out["slug"] = slug
         elif key == "alts":
             items = raw.get("alts")
             if not isinstance(items, list):
                 return None
-            urls = list(snap["alts"])
+            # The n-th photo the model saw, not the product's n-th photo:
+            # photos that could not be read were never sent.
+            urls = list(snap["alts"]) if photos is None else photos
             alts: dict[str, str] = {}
             for item in items:
                 if not isinstance(item, dict) or not isinstance(item.get("image"), int):
@@ -407,13 +413,16 @@ def clean_answer(
                     alt = clip(scrub(item["alt"]), LIMITS["alt"])
                     if alt:
                         alts[urls[n]] = alt
-            out["alts"] = alts
+            if alts:
+                out["alts"] = alts
         elif key == "faq":
             if not isinstance(raw.get("faq_ar"), list) or not isinstance(
                 raw.get("faq_en"), list
             ):
                 return None
-            out["faq"] = faq_value({"ar": raw["faq_ar"], "en": raw["faq_en"]})
+            faq = faq_value({"ar": raw["faq_ar"], "en": raw["faq_en"]})
+            if faq["ar"] or faq["en"]:
+                out["faq"] = faq
     return out
 
 
