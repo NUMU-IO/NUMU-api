@@ -30,7 +30,7 @@ OPT_IN = {"section_library": {"version": 1}}
 
 def test_catalog_holds_the_library_sections():
     sections = library_sections()
-    assert len(sections) == 26
+    assert len(sections) == 27
     for section_type, schema in sections.items():
         assert section_type.startswith("lib-")
         assert schema["type"] == section_type

@@ -1,5 +1,5 @@
 {
-  "sdk_version": "0.17.0",
+  "sdk_version": "0.19.1",
   "sections": {
     "lib-before-after": {
       "type": "lib-before-after",
@@ -3766,6 +3766,50 @@
             },
             "ar": {
               "name": "منتجات"
+            }
+          },
+          "settings": {}
+        }
+      ]
+    },
+    "lib-product-reviews": {
+      "type": "lib-product-reviews",
+      "name": "Product reviews",
+      "name_ar": "تقييمات المنتج",
+      "locales": {
+        "en": {
+          "name": "Product reviews"
+        },
+        "ar": {
+          "name": "تقييمات المنتج"
+        }
+      },
+      "limit": 1,
+      "settings": [
+        {
+          "id": "title",
+          "type": "text",
+          "label": "Heading",
+          "info": "Shows the reviews collected by the Reviews app. Without the app it shows nothing.",
+          "locales": {
+            "ar": {
+              "label": "العنوان",
+              "info": "بيعرض التقييمات اللي جمعها تطبيق آراء العملاء. من غير التطبيق مش بيظهر حاجة."
+            }
+          },
+          "default": ""
+        }
+      ],
+      "presets": [
+        {
+          "name": "Product reviews",
+          "category": "product-detail",
+          "locales": {
+            "en": {
+              "name": "Product reviews"
+            },
+            "ar": {
+              "name": "تقييمات المنتج"
             }
           },
           "settings": {}
