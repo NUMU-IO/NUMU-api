@@ -825,7 +825,7 @@ async def test_i13_i15_sweep_resumes_and_an_uninstall_stops_a_run(world):
     )
     world.work.reset_mock()
     item = (await world.db.execute(select(Suggestion))).scalars().one()
-    item.status, item.claimed_at = "running", datetime.now(UTC) - timedelta(minutes=5)
+    item.status, item.claimed_at = "running", datetime.now(UTC) - timedelta(minutes=20)
     await world.db.flush()
     assert await tasks.sweep() == 1
     world.work.assert_called_once()
@@ -974,3 +974,57 @@ async def test_an_unexpected_error_fails_the_item_and_refunds_its_run(world):
     assert caught.value.status_code == 503 and caught.value.detail["code"] == "busy"
     assert await repo.usage(world.db, x.store.id) == (0, 0)
     assert (await world.db.execute(select(Suggestion.status))).scalar_one() == "failed"
+
+
+async def test_a_running_run_cannot_be_applied_and_cancel_counts_are_fresh(world):
+    x = await world.build()
+    out = await routes.start_bulk(
+        body=routes.BulkBody(
+            groups=["name"], product_ids=[p.id for p in x.products[:2]]
+        ),
+        session=x.session,
+        db=world.db,
+    )
+    run_id = UUID(out["id"])
+    with pytest.raises(HTTPException) as caught:
+        await routes.apply_bulk(
+            run_id=run_id, body=routes.BulkApplyBody(), session=x.session, db=world.db
+        )
+    assert caught.value.detail["code"] == "not_ready"
+    cancelled = await routes.cancel_bulk(run_id=run_id, session=x.session, db=world.db)
+    assert cancelled["counts"] == {"dismissed": 2}
+    assert (await repo.usage(world.db, x.store.id))[0] == 0
+
+
+async def test_a_crash_in_bulk_apply_never_leaves_the_run_applying(world, monkeypatch):
+    x = await world.build()
+    out = await routes.start_bulk(
+        body=routes.BulkBody(groups=["name"], product_ids=[x.products[1].id]),
+        session=x.session,
+        db=world.db,
+    )
+    run_id = UUID(out["id"])
+    assert [await tasks.work(run_id, x.store.id) for _ in range(2)] == [True, False]
+    monkeypatch.setattr(actions, "apply", AsyncMock(side_effect=RuntimeError("boom")))
+    store_id = x.store.id  # the task's rollback expires every loaded row
+    assert await tasks.apply_run(run_id, store_id, None, None) == {
+        "done": 0,
+        "failed": 1,
+    }
+    assert (await repo.run(world.db, store_id, run_id)).status == "done"
+
+
+async def test_a_slow_item_is_not_handed_to_a_second_worker(world):
+    x = await world.build()
+    await routes.start_bulk(
+        body=routes.BulkBody(groups=["name"], product_ids=[x.products[1].id]),
+        session=x.session,
+        db=world.db,
+    )
+    item = (await world.db.execute(select(Suggestion))).scalars().one()
+    # A provider call with every retry and the repair can run about 11 minutes.
+    item.status, item.claimed_at = "running", datetime.now(UTC) - timedelta(minutes=12)
+    await world.db.flush()
+    world.work.reset_mock()
+    assert await tasks.sweep() == 0
+    assert item.status == "running"

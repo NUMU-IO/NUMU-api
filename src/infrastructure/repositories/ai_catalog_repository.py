@@ -36,7 +36,10 @@ TABLES = (Suggestion, Run, Usage, Settings)
 #: Suggestions are history for 90 days (Phase K cleanup).
 KEEP = timedelta(days=90)
 #: A bulk item claimed this long ago lost its worker (the sweep re-queues it).
-CLAIM_TIMEOUT = timedelta(minutes=2)
+#: Longer than a provider call can take with every retry and the repair
+#: (about 11 minutes: 45 s per try), so a slow item is never handed to a
+#: second worker while the first still has it.
+CLAIM_TIMEOUT = timedelta(minutes=15)
 
 
 # ─── Settings ──────────────────────────────────────────────────────────

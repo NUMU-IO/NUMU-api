@@ -111,26 +111,36 @@ async def apply_run(
             for s in await repo.run_items(db, run_id)
             if s.status == "ready" and (picked is None or s.id in picked)
         ]
-        for item_id in ids:
-            try:
-                await actions.apply(
-                    db,
-                    store,
-                    item_id,
-                    [],
-                    user_id=user_id,
-                    commit=_commit,
-                    fill_empty=fill_empty,
-                )
-                done += 1
-            except actions.ActionError as exc:
-                await db.rollback()
-                await enable_rls_bypass(db)
-                failed += 1
-                logger.info("ai_catalog_bulk_item_skipped", code=exc.code)
-        run = await repo.run(db, store_id, run_id)
-        run.status = "done"
-        await _commit(db)
+        try:
+            for item_id in ids:
+                try:
+                    await actions.apply(
+                        db,
+                        store,
+                        item_id,
+                        [],
+                        user_id=user_id,
+                        commit=_commit,
+                        fill_empty=fill_empty,
+                    )
+                    done += 1
+                except Exception as exc:  # noqa: BLE001 — one product never stops the run
+                    await db.rollback()
+                    await enable_rls_bypass(db)
+                    failed += 1
+                    code = (
+                        exc.code
+                        if isinstance(exc, actions.ActionError)
+                        else type(exc).__name__
+                    )
+                    logger.info("ai_catalog_bulk_item_skipped", code=code)
+        finally:
+            # Never left "applying": the run always reaches a final state.
+            await db.rollback()
+            await enable_rls_bypass(db)
+            run = await repo.run(db, store_id, run_id)
+            run.status = "done"
+            await _commit(db)
     return {"done": done, "failed": failed}
 
 

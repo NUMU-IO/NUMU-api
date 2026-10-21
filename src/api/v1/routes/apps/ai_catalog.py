@@ -523,7 +523,9 @@ async def apply_bulk(
     run = await repo.run(db, session.store_id, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail={"code": "gone", "fields": []})
-    if run.status not in ("review", "running"):
+    # Only a finished run: applying a running one would strand its queued
+    # items and the runs reserved for them.
+    if run.status != "review":
         raise HTTPException(status_code=409, detail={"code": "not_ready", "fields": []})
     run.status = "applying"
     await commit_and_restore_rls(db)
@@ -550,4 +552,5 @@ async def cancel_bulk(run_id: UUID, session: Session, db: Db) -> dict:
                 refund += 1
         if refund:
             await repo.refund(db, run.store_id, runs=refund)
+        await db.flush()
     return _run_out(run, await repo.run_counts(db, run.id))
