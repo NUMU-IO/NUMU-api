@@ -1142,3 +1142,50 @@ async def test_a_run_between_two_claims_is_not_stalled(world):
     world.work.reset_mock()
     assert await tasks.sweep() == 0
     world.work.assert_not_called()
+
+
+def test_photos_on_the_configured_public_storage_url_are_read(monkeypatch):
+    from src.config import settings as config
+
+    monkeypatch.setattr(config, "r2_public_url", "https://media.example-cdn.com/")
+    monkeypatch.setattr(config, "s3_public_url", None)
+    url = "https://media.example-cdn.com/products/z.webp"
+    assert gen.image_key(url, [url]) == "products/z.webp"
+
+
+async def test_the_sweep_finishes_a_run_whose_last_message_was_lost(world):
+    x = await world.build()
+    out = await routes.start_bulk(
+        body=routes.BulkBody(groups=["name"], product_ids=[x.products[1].id]),
+        session=x.session,
+        db=world.db,
+    )
+    run_id, store_id = UUID(out["id"]), x.store.id
+    item = (await world.db.execute(select(Suggestion))).scalars().one()
+    item.status = "ready"
+    item.updated_at = datetime.now(UTC) - timedelta(minutes=20)
+    await world.db.flush()
+    await tasks.sweep()
+    assert (await repo.run(world.db, store_id, run_id)).status == "review"
+
+
+async def test_a_run_purged_during_its_apply_ends_quietly(world, monkeypatch):
+    x = await world.build()
+    out = await routes.start_bulk(
+        body=routes.BulkBody(groups=["name"], product_ids=[x.products[1].id]),
+        session=x.session,
+        db=world.db,
+    )
+    run_id, store_id = UUID(out["id"]), x.store.id
+    assert [await tasks.work(run_id, store_id) for _ in range(2)] == [True, False]
+
+    async def purge(db, *a, **k):
+        await repo.purge_store(db, store_id)
+        await db.commit()
+        raise actions.ActionError("gone")
+
+    monkeypatch.setattr(actions, "apply", purge)
+    assert await tasks.apply_run(run_id, store_id, None, None) == {
+        "done": 0,
+        "failed": 1,
+    }

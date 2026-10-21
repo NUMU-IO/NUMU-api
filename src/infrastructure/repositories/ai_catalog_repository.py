@@ -404,6 +404,21 @@ async def stalled_runs(db: AsyncSession) -> list[tuple[UUID, UUID]]:
             .distinct()
         )
     ).all()
+    # A run with nothing left to write whose last worker message was lost
+    # would stay "running" for good: it goes to review here.
+    pending = (
+        select(Suggestion.bulk_run_id)
+        .where(
+            Suggestion.status.in_(("queued", "running")),
+            Suggestion.bulk_run_id.is_not(None),
+        )
+        .scalar_subquery()
+    )
+    await db.execute(
+        update(Run)
+        .where(Run.status == "running", Run.id.not_in(pending), Run.id.not_in(live))
+        .values(status="review")
+    )
     return [(r, s) for r, s in rows]
 
 

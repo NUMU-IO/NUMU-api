@@ -151,8 +151,9 @@ async def apply_run(
             await db.rollback()
             await enable_rls_bypass(db)
             run = await repo.run(db, store_id, run_id)
-            run.status = "done"
-            await _commit(db)
+            if run is not None:  # an uninstall purge may have removed it
+                run.status = "done"
+                await _commit(db)
     return {"done": done, "failed": failed}
 
 

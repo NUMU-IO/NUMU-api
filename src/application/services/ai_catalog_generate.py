@@ -67,7 +67,14 @@ def image_key(url: str, product_images: list[str]) -> str | None:
     """The R2 key of a photo that is on this product and on NUMU's bucket."""
     if url not in product_images:
         return None
-    for prefix in rules.IMAGE_PREFIXES:
+    # The bucket's configured public base too, wherever it points.
+    base = settings.s3_public_url or settings.r2_public_url
+    prefixes = (
+        (*rules.IMAGE_PREFIXES, base.rstrip("/") + "/")
+        if base
+        else rules.IMAGE_PREFIXES
+    )
+    for prefix in prefixes:
         if url.startswith(prefix):
             key = url[len(prefix) :].split("?", 1)[0]
             if key and ".." not in key and not key.startswith("/"):
