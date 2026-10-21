@@ -162,6 +162,7 @@ celery_app.conf.update(
         "src.infrastructure.messaging.tasks.order_tracking_tasks",
         # Reviews app: the request sweep and sends.
         "src.infrastructure.messaging.tasks.reviews_tasks",
+        "src.infrastructure.messaging.tasks.ai_catalog_tasks",
         # Phase 4.4 — smart-collection membership sweep.
         "src.infrastructure.messaging.tasks.smart_collection_tasks",
         # Phase 5.8 — beat scheduler heartbeat for /health/detailed.
@@ -362,6 +363,17 @@ celery_app.conf.beat_schedule = {
     "apps-reviews-sweep": {
         "task": "apps.reviews.sweep",
         "schedule": crontab(minute="8-59/10"),
+    },
+    # Lamaa app (docs/Plans/APPS/04-ai-catalog): resume a bulk run whose
+    # worker message was evicted; drop suggestions older than 90 days. Both
+    # find nothing until a store installs the app.
+    "apps-ai-catalog-sweep": {
+        "task": "apps.ai_catalog.sweep",
+        "schedule": crontab(minute="*"),
+    },
+    "apps-ai-catalog-cleanup": {
+        "task": "apps.ai_catalog.cleanup",
+        "schedule": crontab(minute=20, hour=4),
     },
     # Phase 5.8 — beat heartbeat. Every minute, write the current
     # unix timestamp to Redis so /health/detailed can flag stale beat

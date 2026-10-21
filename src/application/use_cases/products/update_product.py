@@ -6,11 +6,23 @@ from src.application.dto.product import ProductDTO, UpdateProductDTO
 from src.core.entities.product import ProductStatus
 from src.core.events.base import EventBus
 from src.core.events.product_events import ProductUpdatedEvent
-from src.core.exceptions import AuthorizationError, EntityNotFoundError
+from src.core.exceptions import (
+    AuthorizationError,
+    EntityAlreadyExistsError,
+    EntityNotFoundError,
+)
 from src.core.interfaces.repositories.product_repository import IProductRepository
 from src.core.interfaces.repositories.store_repository import IStoreRepository
 from src.core.utils.slug_history import append_slug_history
 from src.core.value_objects.money import Money
+
+
+class SlugTakenError(EntityAlreadyExistsError):
+    """Another product in the store already uses this slug."""
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+        super().__init__("Product", "slug", slug)
 
 
 class UpdateProductUseCase:
@@ -56,6 +68,10 @@ class UpdateProductUseCase:
         if dto.name is not None:
             product.name = dto.name
         if dto.slug is not None and dto.slug != product.slug:
+            if await self.product_repository.slug_taken(
+                product.store_id, dto.slug, exclude_id=product.id
+            ):
+                raise SlugTakenError(dto.slug)
             # Remember the retired slug BEFORE overwriting it: the PDP URL is
             # built from the slug, so without this every indexed URL and every
             # inbound link to the old one 404s and the ranking it accumulated

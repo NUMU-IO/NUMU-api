@@ -32,6 +32,11 @@ class IProductRepository(BaseRepository[Product]):
         ...
 
     @abstractmethod
+    async def slug_taken(self, store_id: UUID, slug: str, exclude_id: UUID) -> bool:
+        """Whether another product in the store already uses ``slug``."""
+        pass
+
+    @abstractmethod
     async def find_by_previous_slug(self, store_id: UUID, slug: str) -> Product | None:
         """Get the product that used to live at `slug` (rename history).
 

@@ -646,6 +646,7 @@ async def list_products(
         ProductResponse(
             id=str(product.id),
             store_id=str(product.store_id),
+            image_alts=product.image_alts,
             name=product.name,
             slug=product.slug,
             description=product.description,
@@ -729,6 +730,7 @@ async def get_product(
         data=ProductResponse(
             id=str(result.id),
             store_id=str(result.store_id),
+            image_alts=result.image_alts,
             name=result.name,
             slug=result.slug,
             description=result.description,
@@ -863,12 +865,21 @@ async def update_product(
         related_product_ids=request.related_product_ids,
     )
 
-    result = await use_case.execute(
-        product_id=product_id,
-        dto=dto,
-        user_id=store.owner_id,
-        store_id=store.id,
-    )
+    from src.application.services.sku_service import duplicate_slug_error_detail
+    from src.application.use_cases.products.update_product import SlugTakenError
+
+    try:
+        result = await use_case.execute(
+            product_id=product_id,
+            dto=dto,
+            user_id=store.owner_id,
+            store_id=store.id,
+        )
+    except SlugTakenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=duplicate_slug_error_detail(exc.slug),
+        ) from exc
 
     # Step 12 — flush ISR cache for the updated product. If the slug
     # was changed in this PATCH, we'd want to also flush the OLD slug
@@ -962,6 +973,7 @@ async def update_product(
         data=ProductResponse(
             id=str(result.id),
             store_id=str(result.store_id),
+            image_alts=result.image_alts,
             name=result.name,
             slug=result.slug,
             description=result.description,

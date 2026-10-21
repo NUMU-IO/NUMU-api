@@ -645,6 +645,15 @@ class Settings(BaseSettings):
     google_ai_api_key: str | None = None
     google_ai_model: str = "gemini-3.1-flash-lite-preview"
     google_ai_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    # Lamaa app (docs/Plans/APPS/04-ai-catalog): its own model, so the core
+    # generators keep theirs. Prices are USD per million tokens, the paid
+    # tier on 2026-10-21. The allowance is runs per store per month; the
+    # budget pauses every store's generation for the rest of the month.
+    ai_catalog_model: str = "gemini-3.5-flash-lite"
+    ai_catalog_price_in_per_m: str = "0.30"
+    ai_catalog_price_out_per_m: str = "2.50"
+    ai_catalog_free_monthly_runs: int = 200
+    ai_catalog_monthly_budget_usd: int = 50
 
     # Resend (Email)
     resend_api_key: str | None = None
