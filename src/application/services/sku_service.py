@@ -79,6 +79,15 @@ async def generate_unique_sku(session: AsyncSession, store_id: UUID) -> str:
     return f"SKU-{_short_code(12)}"
 
 
+def duplicate_slug_error_detail(slug: str) -> dict:
+    """Bilingual 409 payload for a product link another product uses."""
+    return {
+        "code": "slug_taken",
+        "message": f"The link '{slug}' is already used by another product in this store.",
+        "message_ar": f"اللينك '{slug}' مستخدم لمنتج تاني في المتجر ده.",
+    }
+
+
 def duplicate_sku_error_detail(sku: str) -> dict:
     """Bilingual 409 payload for a duplicate SKU (the hub's shared
     resolveApiError renders message/message_ar shapes)."""

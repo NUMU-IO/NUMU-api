@@ -3,7 +3,6 @@
 URL: /stores/{store_id}/ai
 """
 
-import json
 import logging
 import re
 import time
@@ -27,6 +26,11 @@ from src.api.v1.schemas.tenant.ai import (
 from src.config import settings
 from src.core.entities.store import Store
 from src.core.exceptions import ExternalServiceError
+from src.infrastructure.external_services.google_ai_client import (
+    AIServiceNotConfigured,
+    numu_ai_client,
+    parse_json_object,
+)
 from src.infrastructure.external_services.openai import OpenAIService
 
 logger = logging.getLogger(__name__)
@@ -57,15 +61,16 @@ def _check_rate_limit(store_id: str) -> None:
 
 
 def _numu_ai_client() -> AsyncOpenAI:
-    """Build the one shared "NUMU AI" client — Google Gemini via its
-    OpenAI-compatible API.
+    """The shared "NUMU AI" client (``google_ai_client.numu_ai_client``).
 
     Every merchant-facing AI generator (store policies AND promotion content /
     "Design by NUMU AI") runs through this single provider + key + model, so
     they can never drift: if policy generation works, promo generation works.
     Raises 503 when the key isn't configured.
     """
-    if not settings.google_ai_api_key:
+    try:
+        return numu_ai_client()
+    except AIServiceNotConfigured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -73,10 +78,6 @@ def _numu_ai_client() -> AsyncOpenAI:
                 "message": "AI service is not configured.",
             },
         )
-    return AsyncOpenAI(
-        api_key=settings.google_ai_api_key,
-        base_url=settings.google_ai_base_url,
-    )
 
 
 @router.post(
@@ -290,23 +291,6 @@ def _strip_and_sanitize_html(raw: str) -> str:
     return s[:50000]
 
 
-def _parse_json_object(raw: str) -> dict:
-    """Parse a JSON object from an AI response, tolerating markdown fences.
-
-    Gemini's OpenAI-compatible endpoint doesn't always honor
-    ``response_format=json_object`` and may wrap the object in ```json
-    fences, so we unwrap before parsing and degrade to ``{}`` on failure.
-    """
-    s = (raw or "").strip()
-    s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
-    s = re.sub(r"\s*```$", "", s).strip()
-    try:
-        parsed = json.loads(s or "{}")
-    except (json.JSONDecodeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
 @router.post(
     "/generate-promo-content",
     response_model=SuccessResponse[GeneratePromoContentResponse],
@@ -415,7 +399,7 @@ async def generate_promo_content(
             max_tokens=500,
             temperature=0.7,
         )
-        data = _parse_json_object(resp.choices[0].message.content or "")
+        data = parse_json_object(resp.choices[0].message.content or "")
         return {
             "success": True,
             "data": GeneratePromoContentResponse(

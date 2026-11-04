@@ -33,6 +33,7 @@ class TestProductSlugRenameHistory:
         # The repository echoes back whatever the use case saved, so the
         # assertions can read the entity exactly as it was persisted.
         self.mock_product_repo.update = AsyncMock(side_effect=lambda p: p)
+        self.mock_product_repo.slug_taken = AsyncMock(return_value=False)
 
         self.mock_store_repo = MagicMock()
         self.mock_store_repo.get_by_id = AsyncMock()

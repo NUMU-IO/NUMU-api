@@ -27,12 +27,18 @@ from src.api.v1.schemas.tenant.metafield import (
     SetMetafieldValueRequest,
     UpdateMetafieldDefinitionRequest,
 )
+from src.application.services.metafield_values import (
+    invalidate_owner_cache as _invalidate_owner_cache,
+)
+from src.application.services.metafield_values import (
+    revalidate_storefront as _revalidate_storefront,
+)
+from src.application.services.metafield_values import write_value
 from src.core.entities.metafield import (
     MetafieldDefinition,
     MetafieldOwnerType,
     MetafieldValue,
     coerce_metafield_value,
-    serialize_metafield_value,
 )
 from src.core.entities.store import Store
 from src.infrastructure.cache import ProductCacheService
@@ -42,46 +48,6 @@ from src.infrastructure.repositories.metafield_repository import (
 )
 
 router = APIRouter(prefix="/{store_id}/metafields")
-
-
-async def _invalidate_owner_cache(
-    cache: ProductCacheService,
-    store_id: UUID,
-    owner_type: MetafieldOwnerType,
-    owner_id: UUID,
-) -> None:
-    """Bust the storefront cache for the owner whose metafields changed, so a
-    value edit shows up without waiting out the cached-payload TTL. Products
-    carry metafields on their detail payload; collections on the category
-    listing. Best-effort — a cache miss must never fail the write."""
-    try:
-        if owner_type == MetafieldOwnerType.PRODUCT:
-            await cache.invalidate_product(store_id, owner_id)
-        elif owner_type == MetafieldOwnerType.COLLECTION:
-            await cache.invalidate_categories(store_id)
-    except Exception:  # noqa: BLE001 — cache invalidation is best-effort
-        pass
-
-
-async def _revalidate_storefront(store: Store) -> None:
-    """Push the metafield change through to the Next.js storefront's ISR cache.
-
-    Busting the API's Redis cache only makes the *API* correct — the storefront
-    holds its own cached copy of the product payload in a different process, and
-    until it is told otherwise it keeps serving the pre-change metafields to
-    shoppers. For a field flipped public→private that is the difference between
-    "private" and "private in about a minute", which is not what the setting
-    promises. Best-effort: the helper logs and swallows its own failures.
-    """
-    if not store.subdomain:
-        return
-    from src.infrastructure.external_services.nextjs_revalidation import (
-        revalidate_on_metafield_change,
-    )
-
-    await revalidate_on_metafield_change(
-        subdomain=store.subdomain, store_id=str(store.id)
-    )
 
 
 def _definition_response(entity: MetafieldDefinition) -> MetafieldDefinitionResponse:
@@ -344,25 +310,12 @@ async def set_owner_metafield_value(
             ),
         )
     try:
-        serialized = serialize_metafield_value(definition.type, request.value)
+        saved = await write_value(
+            value_repo, store, definition, owner_id, request.value
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
-        )
-
-    existing = await value_repo.get_by_definition_and_owner(definition.id, owner_id)
-    if existing:
-        existing.value = serialized
-        saved = await value_repo.update(existing)
-    else:
-        saved = await value_repo.create(
-            MetafieldValue(
-                store_id=store.id,
-                tenant_id=store.tenant_id,
-                definition_id=definition.id,
-                owner_id=owner_id,
-                value=serialized,
-            )
         )
     await _invalidate_owner_cache(product_cache, store.id, owner_type, owner_id)
     if definition.is_public:
