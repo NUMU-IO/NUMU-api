@@ -1,5 +1,5 @@
 {
-  "sdk_version": "0.19.1",
+  "sdk_version": "0.19.2",
   "sections": {
     "lib-before-after": {
       "type": "lib-before-after",
@@ -925,9 +925,11 @@
           "id": "heading",
           "type": "text",
           "label": "Heading",
+          "info": "On a product page, the product's own questions show first.",
           "locales": {
             "ar": {
-              "label": "العنوان"
+              "label": "العنوان",
+              "info": "في صفحة المنتج، أسئلة المنتج نفسه بتظهر الأول."
             }
           },
           "default": ""
